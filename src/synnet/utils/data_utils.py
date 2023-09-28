@@ -16,6 +16,7 @@ from typing import Any, Optional, Set, Tuple, Union
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
 from tqdm import tqdm
+import pickle
 
 
 # the definition of reaction classes below
@@ -364,6 +365,28 @@ class NodeChemical:
         self.index = index
 
 
+class Node:
+    """Represents a chemical node in a synthetic tree
+    """
+
+    def __init__(
+        self,
+        smiles: Union[str, None] = None,
+        parent = None,
+        rxn_id: Union[int, None] = None,
+        rtype: Union[int, None] = None,        
+        child : Union[list, None] = [],
+        is_leaf: bool = False,
+        is_root: bool = False     
+    ):
+        self.smiles = smiles
+        self.parent = parent
+        self.rxn_id = rxn_id,
+        self.rtype = rtype
+        self.child = child
+        self.is_leaf = is_leaf
+        self.is_root = is_root   
+
 class NodeRxn:
     """Represents a chemical reaction in a synthetic tree.
 
@@ -456,6 +479,21 @@ class SyntheticTree:
             "actions": self.actions,
             "rxn_id2type": self.rxn_id2type,
         }
+
+
+    def build_tree(self):
+        nodes = {}
+        for node in self.chemicals:
+            assert node.smiles not in nodes
+            nodes[node.smiles] = Node(smiles=node.smiles)
+        for rxn in self.reactions:
+            assert isinstance(rxn.parent, str)
+            for reactant in rxn.child: # smiles
+                nodes[reactant].parent = (nodes[rxn.parent], rxn.rxn_id)
+                nodes[rxn.parent].child.append((nodes[reactant], rxn.rxn_id))
+        self.nodes = nodes
+        return nodes[self.root.smiles]
+
 
     def _print(self):
         """
@@ -725,11 +763,19 @@ class SyntheticTreeSet:
 
     def save(self, file: str) -> None:
         """Save a collection of synthetic trees to a `*.json.gz` file."""
+        for st in self.sts:
+            if st:
+                st.build_tree()        
         assert str(file).endswith(".json.gz"), f"Incompatible file extension for file {file}"
+        pkl_file = str(file).replace(".json.gz", ".pkl")        
 
         st_list = {"trees": [st.output_dict() for st in self.sts if st is not None]}
         with gzip.open(file, "wt") as f:
             f.write(json.dumps(st_list))
+
+        pickle.dump(st.nodes, open(pkl_file, 'wb+'))
+
+        breakpoint()            
 
     def _print(self, x=3):
         """Helper function for debugging."""

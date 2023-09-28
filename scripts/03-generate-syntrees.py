@@ -7,6 +7,8 @@ from pathlib import Path
 
 from rdkit import RDLogger
 from tqdm import tqdm
+import pickle
+import os
 
 from synnet.config import MAX_PROCESSES
 from synnet.data_generation.preprocessing import (
@@ -44,6 +46,12 @@ def get_args():
         type=str,
         default="data/pre-precess/synthetic-trees.json.gz",
         help="Output file for the generated synthetic trees (*.json.gz)",
+    )
+    parser.add_argument(
+        "--stgen_cache",
+        type=str,
+        default="",
+        help="location of cached stgen, or location to cache stgen",
     )
     # Parameters
     parser.add_argument(
@@ -104,9 +112,14 @@ if __name__ == "__main__":
 
     # Init SynTree Generator
     logger.info("Start initializing SynTreeGenerator...")
-    stgen = SynTreeGenerator(
-        building_blocks=bblocks, rxn_templates=rxn_templates, verbose=args.verbose
-    )
+    if args.stgen_cache and os.path.exists(args.stgen_cache):
+        stgen = pickle.load(open(args.stgen_cache, 'rb'))
+    else:
+        stgen = SynTreeGenerator(
+            building_blocks=bblocks, rxn_templates=rxn_templates, verbose=args.verbose
+        )
+        if args.stgen_cache:
+            pickle.dump(stgen, open(args.stgen_cache, 'wb+'))
     logger.info("Successfully initialized SynTreeGenerator.")
 
     # Generate synthetic trees
