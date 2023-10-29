@@ -1,9 +1,16 @@
 from pathlib import Path
 from typing import Union
 
-from synnet.utils.data_utils import NodeChemical, NodeRxn, SyntheticTree
+import sys
+from synnet.utils.data_utils import NodeChemical, NodeRxn, SyntheticTree, SyntheticTreeSet
 from synnet.visualize.drawers import MolDrawer
 from synnet.visualize.writers import subgraph
+
+from synnet.visualize.drawers import MolDrawer
+from synnet.visualize.writers import SynTreeWriter
+
+import pickle
+import argparse
 
 
 class SynTreeVisualizer:
@@ -119,6 +126,7 @@ class SynTreeVisualizer:
         text = []
 
         # Add node definitions
+        breakpoint()
         text.extend(self._define_chemicals(self.CHEMICALS))
 
         # Add paragraphs (<=> actions taken)
@@ -154,10 +162,6 @@ def demo():
     st = SyntheticTree()
     st.read(data)
 
-    from synnet.visualize.drawers import MolDrawer
-    from synnet.visualize.visualizer import SynTreeVisualizer
-    from synnet.visualize.writers import SynTreeWriter
-
     outpath = Path("./figures/syntrees/generation/st")
     outpath.mkdir(parents=True, exist_ok=True)
 
@@ -174,4 +178,23 @@ def demo():
 
 
 if __name__ == "__main__":
-    demo()
+    # demo()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--syntree_pkl')
+    parser.add_argument('--syntree_json')
+    parser.add_argument('--out_folder')
+    args = parser.parse_args()
+    syntree_collection = SyntheticTreeSet().load(args.syntree_json)
+    for st in syntree_collection:
+        if st == None:
+            breakpoint()
+            continue
+        breakpoint()
+        stviz = SynTreeVisualizer(syntree=st, outfolder=args.out_folder).with_drawings(drawer=MolDrawer)
+        mermaid_txt = stviz.write()        
+        outfile = stviz.path / f"syntree.md"
+        SynTreeWriter().write(mermaid_txt).to_file(outfile)
+        print(f"Generated markdown file.", outfile)
+        
+    for st in syntree_collection:
+        print(st.root.smiles)

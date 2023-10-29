@@ -17,6 +17,9 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
 from tqdm import tqdm
 import pickle
+from itertools import permutations
+from networkx.algorithms.isomorphism import rooted_tree_isomorphism
+import networkx as nx
 
 
 # the definition of reaction classes below
@@ -387,6 +390,7 @@ class Node:
         self.is_leaf = is_leaf
         self.is_root = is_root   
 
+
 class NodeRxn:
     """Represents a chemical reaction in a synthetic tree.
 
@@ -436,6 +440,7 @@ class SyntheticTree:
     def __init__(self, tree=None):
         self.chemicals: list[NodeChemical] = []
         self.reactions: list[NodeRxn] = []
+        self.edges = []
         self.root = None
         self.depth: float = 0
         self.actions = []
@@ -455,6 +460,8 @@ class SyntheticTree:
         self.depth = data["depth"]
         self.actions = data["actions"]
         self.rxn_id2type = data["rxn_id2type"]
+        if "edges" in data:
+            self.edges = data["edges"]
 
         for r_dict in data["reactions"]:
             r = NodeRxn(**r_dict)
@@ -478,21 +485,40 @@ class SyntheticTree:
             "depth": self.depth,
             "actions": self.actions,
             "rxn_id2type": self.rxn_id2type,
+            "edges": self.edges
         }
 
 
-    def build_tree(self):
-        nodes = {}
-        for node in self.chemicals:
-            assert node.smiles not in nodes
-            nodes[node.smiles] = Node(smiles=node.smiles)
-        for rxn in self.reactions:
-            assert isinstance(rxn.parent, str)
-            for reactant in rxn.child: # smiles
-                nodes[reactant].parent = (nodes[rxn.parent], rxn.rxn_id)
-                nodes[rxn.parent].child.append((nodes[reactant], rxn.rxn_id))
-        self.nodes = nodes
-        return nodes[self.root.smiles]
+    def is_isomorphic(self, other):
+        def get_parent(node):
+            if node.parent: return node.parent[0]
+            return None
+        
+        def try_perm(perm, self_nodes, other_nodes):
+            other_nodes = [other_nodes[perm[i]] for i in range(len(perm))]
+            for i in range(len(self_nodes)):
+                for j in range(len(other_nodes)):
+                    if (get_parent(self_nodes[i]) == self_nodes[j]) ^ (get_parent(other_nodes[i]) == other_nodes[j]):
+                        return False
+                    if (get_parent(self_nodes[j]) == self_nodes[i]) ^ (get_parent(other_nodes[j]) == other_nodes[i]):
+                        return False 
+            return True       
+        
+
+        if len(self.nodes) != len(other.nodes): return False
+
+
+        self_nodes = self.nodes
+        other_nodes = other.nodes    
+        self_tree = nx.DiGraph(self.edges)
+        other_tree = nx.DiGraph(other.edges)
+        return rooted_tree_isomorphism(self_tree, len(self_tree)-1, other_tree, len(other_tree)-1)
+        # for perm in permutations(range(len(other.nodes))):
+
+        #     if try_perm(perm, self_nodes, other_nodes): 
+        #         return True
+                    
+
 
 
     def _print(self):
@@ -581,6 +607,8 @@ class SyntheticTree:
 
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))            
 
         elif action == 1 and mol2 is None:  # Expand with uni-mol rxn
             node_mol1 = self.chemicals[self.get_node_index(mol1)]
@@ -608,6 +636,7 @@ class SyntheticTree:
 
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
 
         elif action == 1 and mol2 is not None:  # Expand with bi-mol rxn
             node_mol1 = self.chemicals[self.get_node_index(mol1)]
@@ -646,6 +675,9 @@ class SyntheticTree:
             self.chemicals.append(node_mol2)
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))            
+            
 
         elif action == 0 and mol2 is None:  # Add with uni-mol rxn
             node_mol1 = NodeChemical(
@@ -675,12 +707,15 @@ class SyntheticTree:
                 index=len(self.chemicals) + 1,
             )
 
+
+
             node_rxn.parent = node_product.smiles
             node_mol1.parent = node_rxn.rxn_id
 
             self.chemicals.append(node_mol1)
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
 
         elif action == 0 and mol2 is not None:  # Add with bi-mol rxn
             node_mol1 = NodeChemical(
@@ -728,10 +763,29 @@ class SyntheticTree:
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
 
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))
+
         else:
             raise ValueError("Check input")
 
         return None
+    
+
+    def build_tree(self):
+        nodes = []
+        for chem in self.chemicals:
+            node = Node(smiles=chem.smiles,
+                 is_leaf=chem.is_leaf, is_root=chem.is_root)
+            nodes.append(node)
+        for edge in self.edges:
+            a, b = edge
+            nodes[a].child.append(nodes[b])
+            nodes[b].parent = (nodes[a], self.chemicals[b].parent)
+        self.nodes = nodes
+        assert nodes[-1].is_root
+        return nodes[-1]
+        
 
 
 class SyntheticTreeSet:
@@ -748,6 +802,7 @@ class SyntheticTreeSet:
             raise IndexError("No Synthetic Trees.")
         return self.sts[index]
 
+
     def load(self, file: str):
         """Load a collection of synthetic trees from a `*.json.gz` file."""
         assert str(file).endswith(".json.gz"), f"Incompatible file extension for file {file}"
@@ -763,19 +818,40 @@ class SyntheticTreeSet:
 
     def save(self, file: str) -> None:
         """Save a collection of synthetic trees to a `*.json.gz` file."""
-        for st in self.sts:
-            if st:
-                st.build_tree()        
         assert str(file).endswith(".json.gz"), f"Incompatible file extension for file {file}"
-        pkl_file = str(file).replace(".json.gz", ".pkl")        
+          
 
         st_list = {"trees": [st.output_dict() for st in self.sts if st is not None]}
         with gzip.open(file, "wt") as f:
             f.write(json.dumps(st_list))
 
-        pickle.dump(st.nodes, open(pkl_file, 'wb+'))
+        
+        pkl_file = str(file).replace(".json.gz", ".pkl")      
+        sts = []
+        for st in self.sts:
+            if st: 
+                try:
+                    st.build_tree()
+                except:
+                    breakpoint()
+                sts.append(st)
 
-        breakpoint()            
+        done = False
+        skeletons = {}
+        
+        for st in sts:
+            for sk in skeletons:
+                if st.is_isomorphic(sk):
+                    done = True
+                    skeletons[sk].append(st)
+            if done: continue
+            skeletons[st] = [st]
+
+        
+        for k, v in skeletons.items():
+            print(f"count: {len(v)}") 
+
+        pickle.dump(skeletons, open(pkl_file, 'wb+'))        
 
     def _print(self, x=3):
         """Helper function for debugging."""

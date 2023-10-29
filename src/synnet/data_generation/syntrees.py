@@ -7,6 +7,7 @@ import numpy as np
 from rdkit import Chem
 from scipy import sparse
 from tqdm import tqdm
+import random
 
 from synnet.config import MAX_PROCESSES
 
@@ -230,7 +231,7 @@ class SynTreeGenerator:
             state = syntree.get_state()
 
             # Sample action
-            p_action = self.rng.random((1, 4))  # (1,4)
+            p_action = self.rng.random((1, 4))  # (1,4)   
             action_mask = self._get_action_mask(syntree)  # (1,4)
             act = np.argmax(p_action * action_mask)  # (1,)
             action = self.ACTIONS[act]
@@ -245,6 +246,7 @@ class SynTreeGenerator:
                     if p is not None:
                         break
                 if p is None:
+                    breakpoint()
                     # TODO: move to rxn.run_reaction?
                     raise NoReactionPossibleError(
                         f"Reaction (ID: {idx_rxn}) not possible with: {r1} + {r2}."
@@ -252,17 +254,23 @@ class SynTreeGenerator:
             elif action == "add":
                 mol = self._sample_molecule()
                 r1, r2, p, idx_rxn = self._expand(mol)
+                if p == None:
+                    breakpoint()
                 # Expand this subtree: reactant, reaction, reactant2
             elif action == "merge":
                 # merge two subtrees: sample reaction, run it.
-
                 # Identify suitable rxn
                 r1, r2 = syntree.get_state()
                 rxn_mask = self._get_rxn_mask(tuple((r1, r2)))
                 # Sample reaction
-                rxn, idx_rxn = self._sample_rxn(mask=rxn_mask)
-                # Run reaction
-                p = rxn.run_reaction((r1, r2))
+                avail_rxns = self.IDX_RXNS[rxn_mask]
+                random.shuffle(avail_rxns)
+                for idx_rxn in avail_rxns:
+                    rxn = self.rxns[idx_rxn]
+                    # Run reaction
+                    p = rxn.run_reaction((r1, r2))
+                    if p:
+                        break
                 if p is None:
                     # TODO: move to rxn.run_reaction?
                     raise NoReactionPossibleError(
