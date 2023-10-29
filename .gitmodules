@@ -1,0 +1,3 @@
+[submodule "retro_star"]
+	path = retro_star
+	url = https://github.com/binghong-ml/retro_star
