@@ -48,14 +48,15 @@ if __name__ == "__main__":
         shuffle=True if dataset == "train" else False,
     )
     logger.info(f"Set up dataloaders.")
-
+    sk_dim = 0
+    if args.skeleton_dir:        
+        sk_dim = 256
     INPUT_DIMS = {
-        "fp": int(3 * args.nbits),
+        "fp": int(3 * args.nbits + sk_dim),
         "gin": int(2 * args.nbits + args.out_dim),
     }  # somewhat constant...
 
     input_dims = INPUT_DIMS[args.featurize]
-
     mlp = MLP(
         input_dim=input_dims,
         output_dim=4,
@@ -68,7 +69,7 @@ if __name__ == "__main__":
         valid_loss="accuracy",
         optimizer="adam",
         learning_rate=3e-4,
-        val_freq=10,
+        val_freq=1,
         ncpu=args.ncpu,
     )
 
@@ -92,11 +93,13 @@ if __name__ == "__main__":
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
     trainer = pl.Trainer(
-        gpus=[0],
+        accelerator='gpu',
+        devices=[0],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],
         fast_dev_run=args.fast_dev_run,
+        use_distributed_sampler=False
     )
 
     logger.info(f"Start training")

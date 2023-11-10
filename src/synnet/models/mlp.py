@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from synnet.MolEmbedder import MolEmbedder
+from sklearn.neighbors import NearestNeighbors
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class MLP(pl.LightningModule):
         val_freq: int = 10,
         ncpu: int = 16,
         molembedder: MolEmbedder = None,
+        X = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore="molembedder")
@@ -42,7 +44,9 @@ class MLP(pl.LightningModule):
         self.ncpu = ncpu
         self.val_freq = val_freq
         self.molembedder = molembedder
-
+        self.X = X if (X is not None) else molembedder.embeddings
+        # self.nn = NearestNeighbors(n_neighbors=1)
+        # self.nn.fit(molembedder.embeddings)
         modules = []
         modules.append(nn.Linear(input_dim, hidden_dim))
         modules.append(nn.BatchNorm1d(hidden_dim))
@@ -73,7 +77,10 @@ class MLP(pl.LightningModule):
         x, y = batch
         y_hat = self.layers(x)
         if self.loss == "cross_entropy":
-            loss = F.cross_entropy(y_hat, y.long())
+            try:
+                loss = F.cross_entropy(y_hat, y.long())
+            except:
+                breakpoint()
         elif self.loss == "mse":
             loss = F.mse_loss(y_hat, y)
         elif self.loss == "l1":
@@ -102,10 +109,8 @@ class MLP(pl.LightningModule):
             # NOTE: Very slow!
             # Performing the knn-search can easily take a couple of minutes,
             # even for small datasets.
-            kdtree = self.molembedder.kdtree
-            y = nn_search_list(y.detach().cpu().numpy(), kdtree)
-            y_hat = nn_search_list(y_hat.detach().cpu().numpy(), kdtree)
-
+            y = nn_search_list(y.detach().cpu().numpy(), self.X)
+            y_hat = nn_search_list(y_hat.detach().cpu().numpy(), self.X)
             accuracy = (y_hat == y).sum() / len(y)
             loss = 1 - accuracy
         elif self.valid_loss == "mse":
@@ -127,10 +132,14 @@ class MLP(pl.LightningModule):
         return optimizer
 
 
-def nn_search_list(y, kdtree):
+def nn_search_list(y, X):
+    def cosine_neighbors(x, y):
+        return ((x @ y.T)/(np.linalg.norm(x, axis=-1)[None].T @ np.linalg.norm(y, axis=-1)[None])).argmax(axis=-1, keepdims=True)
     y = np.atleast_2d(y)  # (n_samples, n_features)
-    ind = kdtree.query(y, k=1, return_distance=False)  # (n_samples, 1)
-    return ind
+    # ind_2 = molembedder.kdtree.query(y, k=1, return_distance=False)  # (n_samples, 1)
+    ind_3 = cosine_neighbors(y, X)
+    # assert (ind_2 == ind_3).all()
+    return ind_3
 
 
 if __name__ == "__main__":

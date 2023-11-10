@@ -13,7 +13,7 @@ from synnet.config import MAX_PROCESSES
 
 logger = logging.getLogger(__name__)
 
-from synnet.utils.data_utils import Reaction, SyntheticTree
+from synnet.utils.data_utils import Reaction, SyntheticTree, SkeletonSet
 
 
 class NoReactantAvailableError(Exception):
@@ -410,8 +410,9 @@ class SynTreeFeaturizer:
     def __repr__(self) -> str:
         return f"{self.__dict__}"
 
-    def featurize(self, syntree: SyntheticTree):
+    def featurize(self, syntree: SyntheticTree, sk_set: SkeletonSet):
         """Featurize a synthetic tree at every state.
+        If a skeleton is a given, concat it to every input state
 
         Note:
           - At each iteration of the syntree growth, an action is chosen
@@ -431,11 +432,14 @@ class SynTreeFeaturizer:
         root_mol_1 = None
         root_mol_2 = None
         for i, action in enumerate(syntree.actions):
-
             # 1. Encode "state"
             z_root_mol_1 = self.mol_embedder.encode(root_mol_1)
             z_root_mol_2 = self.mol_embedder.encode(root_mol_2)
+
             state = np.concatenate((z_root_mol_1, z_root_mol_2, z_target_mol), axis=1)  # (1,3d)
+            if sk_set:
+                index = sk_set.lookup[syntree.root.smiles].index
+                state = np.concatenate((state, sk_set.coords[index:index+1]), axis=1) # (1,3d+|sk|)
 
             # 2. Encode "super"-step
             if action == 3:  # end
@@ -451,7 +455,6 @@ class SynTreeFeaturizer:
                 )
             else:
                 rxn_node = syntree.reactions[i]
-
                 if len(rxn_node.child) == 1:
                     mol1 = rxn_node.child[0]
                     mol2 = None
@@ -463,11 +466,11 @@ class SynTreeFeaturizer:
 
                 step = np.concatenate(
                     (
-                        self.action_embedder.encode(action),
-                        self.reactant_embedder.encode(mol1),
-                        self.rxn_embedder.encode(rxn_node.rxn_id),
-                        self.reactant_embedder.encode(mol2),
-                        self.mol_embedder.encode(mol1),
+                        self.action_embedder.encode(action), # steps[:, 0]
+                        self.reactant_embedder.encode(mol1), # steps[:, 1:out_dim+1]
+                        self.rxn_embedder.encode(rxn_node.rxn_id), # steps[:, out_dim+1]
+                        self.reactant_embedder.encode(mol2), # steps[:, out_dim+2:2*out_dim+2]
+                        self.mol_embedder.encode(mol1), # steps[:, 2*out_dim+2:]
                     ),
                     axis=1,
                 )

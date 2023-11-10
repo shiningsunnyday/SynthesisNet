@@ -14,6 +14,7 @@ from synnet.encoding.distances import cosine_distance
 from synnet.models.common import get_args, xy_to_dataloader
 from synnet.models.mlp import MLP
 from synnet.MolEmbedder import MolEmbedder
+import numpy as np
 
 logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
@@ -60,10 +61,12 @@ if __name__ == "__main__":
     logger.info(f"Set up dataloaders.")
 
     # Fetch Molembedder and init BallTree
-    molembedder = None  # _fetch_molembedder()
-
+    molembedder = _fetch_molembedder()
+    sk_dim = 0
+    if args.skeleton_dir:        
+        sk_dim = 256
     INPUT_DIMS = {
-        "fp": int(3 * args.nbits),
+        "fp": int(3 * args.nbits + sk_dim),
         "gin": int(2 * args.nbits + args.out_dim),
     }  # somewhat constant...
 
@@ -78,12 +81,13 @@ if __name__ == "__main__":
         num_dropout_layers=1,
         task="regression",
         loss="mse",
-        valid_loss="mse",
+        valid_loss="nn_accuracy",
         optimizer="adam",
         learning_rate=3e-4,
         val_freq=10,
         molembedder=molembedder,
         ncpu=args.ncpu,
+        X=np.load(args.mol_embedder_file) if args.mol_embedder_file else None
     )
 
     # Set up Trainer
@@ -106,11 +110,13 @@ if __name__ == "__main__":
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
     trainer = pl.Trainer(
-        gpus=[0],
+        accelerator='gpu',
+        devices=[0],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],
         fast_dev_run=args.fast_dev_run,
+        use_distributed_sampler=False
     )
 
     logger.info(f"Start training")

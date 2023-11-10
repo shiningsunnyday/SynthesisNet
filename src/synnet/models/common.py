@@ -19,6 +19,9 @@ def get_args():
         "--data-dir", type=str, default="data/featurized/Xy", help="Directory with X,y data."
     )
     parser.add_argument(
+        "--skeleton-dir", type=str, help="Directory with X,y data."
+    )    
+    parser.add_argument(
         "-f", "--featurize", type=str, default="fp", help="Choose from ['fp', 'gin']"
     )
     parser.add_argument(
@@ -38,6 +41,11 @@ def get_args():
         default=None,
         help="Checkpoint file. If provided, load and resume training.",
     )
+    parser.add_argument(
+        "--mol-embedder-file",
+        type=str,
+        help="Load mol embedder with this.",
+    )    
     parser.add_argument("-v", "--version", type=int, default=1, help="Version")
     parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--fast-dev-run", default=False, action="store_true")
@@ -78,7 +86,7 @@ def xy_to_dataloader(
 def load_mlp_from_ckpt(ckpt_file: str):
     """Load a model from a checkpoint for inference."""
     try:
-        model = MLP.load_from_checkpoint(ckpt_file)
+        model = MLP.load_from_checkpoint(ckpt_file, map_location='cpu')
     except TypeError:
         model = _load_mlp_from_iclr_ckpt(ckpt_file)
     return model.eval()
