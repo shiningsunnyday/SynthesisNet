@@ -66,11 +66,10 @@ def vis_skeletons(args, skeletons):
     min_count = args.min_count
     max_i = args.num_to_vis
     fig_path = os.path.join(args.visualize_dir, 'skeletons.png')
-    fig = plt.Figure(figsize=(300, 300))
+    fig = plt.Figure(figsize=(30, 30))
+    skeletons = {k:skeletons[k] for k in skeletons if len(skeletons[k]) >= min_count}
     for i in range(max_i):
         for j, sk in enumerate(skeletons):
-            if len(skeletons[sk]) < min_count:
-                continue
             ax = fig.add_subplot(max_i, len(skeletons), i*len(skeletons)+j+1)
             G = skeleton2graph(skeletons[sk][i])
             pos = nx.circular_layout(G)
@@ -78,6 +77,7 @@ def vis_skeletons(args, skeletons):
             node_sizes[list(G.nodes()).index(skeletons[sk][i].root.smiles)] *= 2
             nx.draw_networkx(G, pos=pos, ax=ax, node_size=node_sizes)
     
+    # fig(f"{args.num_to_vis} representing {len(skeletons)} classes")
     fig.savefig(fig_path)    
     print(f"visualized some skeletons at {fig_path}")
 
@@ -111,25 +111,26 @@ if __name__ == "__main__":
                 except:
                     breakpoint()
                 sts.append(st)
+            else:
+                breakpoint()
         
         skeletons = {}
-        
         for i, st in tqdm(enumerate(sts)):
-            print(i)
             done = False
             for sk in skeletons:
-                if st.is_isomorphic(sk):
+                if st.is_isomorphic(sk): 
                     done = True
                     skeletons[sk].append(st)
                     break
+                    
             if not done: 
                 skeletons[st] = [st]
-
                 
         for k, v in skeletons.items():
             print(f"count: {len(v)}") 
 
         pickle.dump(skeletons, open(os.path.join(args.visualize_dir, 'skeletons.pkl'), 'wb+'))
-
-    count_skeletons(args, skeletons)
+    breakpoint()
     vis_skeletons(args, skeletons)
+    count_skeletons(args, skeletons)
+    

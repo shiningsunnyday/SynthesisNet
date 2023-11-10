@@ -3,6 +3,8 @@
 import json
 import logging
 from pathlib import Path
+import pickle
+import os
 
 from scipy import sparse
 from tqdm import tqdm
@@ -12,7 +14,7 @@ from synnet.data_generation.syntrees import (
     MorganFingerprintEncoder,
     SynTreeFeaturizer,
 )
-from synnet.utils.data_utils import SyntheticTreeSet
+from synnet.utils.data_utils import SyntheticTreeSet, SkeletonSet
 
 logger = logging.getLogger(__file__)
 
@@ -34,6 +36,16 @@ def get_args():
         type=str,
         help="Directory for the splitted synthetic trees ({train,valid,test}_{steps,states}.npz",
     )
+    parser.add_argument(
+        "--skeleton-file",
+        type=str,
+        help="File of skeletons",
+    )
+    parser.add_argument(
+        "--skeleton-set-file",
+        type=str,
+        help="File of skeleton set",
+    )       
     # Processing
     parser.add_argument("--ncpu", type=int, default=MAX_PROCESSES, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
@@ -56,6 +68,23 @@ def featurize_data(
     # Load syntree data
     logger.info(f"Start loading {input_dir}")
     syntree_collection = SyntheticTreeSet().load(input_dir)
+    if args.skeleton_file:
+        cache = False
+        load = True
+        if args.skeleton_set_file:
+            if os.path.exists(args.skeleton_set_file):
+                sk_set = pickle.load(open(args.skeleton_set_file, 'rb'))
+                load = False
+            else:
+                cache = True
+        if load:
+            sk_set = SkeletonSet().load_skeletons(pickle.load(open(args.skeleton_file, 'rb')))
+            sk_set.embed_skeletons()
+            if cache:
+                pickle.dump(sk_set, open(args.skeleton_set_file, 'wb'))
+    else:
+        sk_set = None
+
     logger.info(f"Successfully loaded synthetic trees.")
     logger.info(f"  Number of trees: {len(syntree_collection.sts)}")
 
@@ -66,7 +95,7 @@ def featurize_data(
     it = tqdm(syntree_collection) if verbose else syntree_collection
     for i, syntree in enumerate(it):
         try:
-            state, step = syntree_featurizer.featurize(syntree)
+            state, step = syntree_featurizer.featurize(syntree, sk_set)
         except Exception as e:
             logger.exception(e, exc_info=e)
             unsuccessfuls += [i]

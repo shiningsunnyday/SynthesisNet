@@ -23,7 +23,11 @@ FUNCTIONS = {
     "fp_512": partial(mol_fp, _radius=2, _nBits=512),
     "fp_256": partial(mol_fp, _radius=2, _nBits=256),
 }  # TODO: think about refactor/merge with `MorganFingerprintEncoder`
-
+python scripts/03-generate-syntrees.py \
+    --building-blocks-file "data/pre-process/building-blocks-rxns/bblocks-enamine-us.csv.gz" \
+    --rxn-templates-file "data/assets/reaction-templates/hb.txt" \
+    --output-file "data/pre-process/syntrees/synthetic-trees.json.gz" \
+    --number-syntrees "600000"
 
 def get_args():
     import argparse

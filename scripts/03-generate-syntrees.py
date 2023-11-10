@@ -77,7 +77,7 @@ def generate_mp() -> Tuple[dict[int, str], list[Union[SyntheticTree, None]]]:
     func = partial(wrapper, stgen)
 
     with mp.Pool(processes=args.ncpu) as pool:
-        results = pool.map(func, range(args.number_syntrees))
+        results = list(tqdm(pool.imap(func, range(args.number_syntrees)), total=args.number_syntrees//args.ncpu))
 
     outcomes = {
         i: e.__class__.__name__ if e is not None else "success" for i, (_, e) in enumerate(results)

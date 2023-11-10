@@ -8,14 +8,17 @@ from pathlib import Path
 from typing import Tuple
 
 import numpy as np
+np.random.seed(42)
 import pandas as pd
+import pdb
+import pickle
 
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.MolEmbedder import MolEmbedder
-from synnet.utils.data_utils import ReactionSet, SyntheticTree, SyntheticTreeSet
+from synnet.utils.data_utils import ReactionSet, SyntheticTree, SyntheticTreeSet, SkeletonSet
 from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search
 
 logger = logging.getLogger(__name__)
@@ -49,12 +52,13 @@ def _fetch_data(name: str) -> list[str]:
     return smiles
 
 
-def wrapper_decoder(smiles: str) -> Tuple[str, float, SyntheticTree]:
+def wrapper_decoder(smiles: str, sk_coords=None) -> Tuple[str, float, SyntheticTree]:
     """Generate a synthetic tree for the input molecular embedding."""
     emb = mol_fp(smiles)
     try:
         smi, similarity, tree, action = synthetic_tree_decoder_greedy_search(
             z_target=emb,
+            sk_coords=sk_coords,
             building_blocks=bblocks,
             bb_dict=bblocks_dict,
             reaction_templates=rxns,
@@ -70,6 +74,7 @@ def wrapper_decoder(smiles: str) -> Tuple[str, float, SyntheticTree]:
             max_step=15,
         )
     except Exception as e:
+        pdb.post_mortem()
         logger.error(e, exc_info=e)
         action = -1
 
@@ -105,6 +110,11 @@ def get_args():
         "--ckpt-dir", type=str, help="Directory with checkpoints for {act,rt1,rxn,rt2}-model."
     )
     parser.add_argument(
+        "--skeleton-set-file",
+        type=str,
+        help="File of skeleton set",
+    )           
+    parser.add_argument(
         "--output-dir", type=str, default=DATA_RESULT_DIR, help="Directory to save output."
     )
     # Parameters
@@ -127,6 +137,11 @@ if __name__ == "__main__":
     # Parse input args
     args = get_args()
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
+
+    # Load skeleton set
+    sk_set = None
+    if args.skeleton_set_file:
+        sk_set = pickle.load(open(args.skeleton_set_file, 'rb'))
 
     # Load data ...
     logger.info("Start loading data...")
@@ -162,12 +177,23 @@ if __name__ == "__main__":
 
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
+
+    targets = np.random.choice(targets, 1000)
     if args.ncpu == 1:
-        results = [wrapper_decoder(smi) for smi in targets]
+        results = []
+        for smi in targets:
+            index = sk_set.lookup[smi].index
+            sk_coords = sk_set.coords[index:index+1]
+            results.append(wrapper_decoder(smi, sk_coords))
     else:
+        for i in range(len(targets)):
+            smi = targets[i]
+            index = sk_set.lookup[smi].index
+            sk_coords = sk_set.coords[index:index+1]            
+            targets[i] = (targets[i], sk_coords)
         with mp.Pool(processes=args.ncpu) as pool:
             logger.info(f"Starting MP with ncpu={args.ncpu}")
-            results = pool.map(wrapper_decoder, targets)
+            results = pool.starmap(wrapper_decoder, targets)
     logger.info("Finished decoding.")
 
     # Print some results from the prediction
@@ -195,6 +221,7 @@ if __name__ == "__main__":
 
     df = pd.DataFrame({"targets": targets, "decoded": decoded, "similarity": similarities})
     df.to_csv(f"{output_dir}/decoded_results.csv.gz", compression="gzip", index=False)
+    df.to_csv(f"{output_dir}/decoded_results.csv", index=False)
 
     synthetic_tree_set = SyntheticTreeSet(sts=trees)
     synthetic_tree_set.save(f"{output_dir}/decoded_syntrees.json.gz")

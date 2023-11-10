@@ -11,7 +11,9 @@ import functools
 import gzip
 import itertools
 import json
+import numpy as np
 from typing import Any, Optional, Set, Tuple, Union
+from multiprocessing import Pool
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
@@ -20,6 +22,8 @@ import pickle
 from itertools import permutations
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 import networkx as nx
+from sklearn.manifold import MDS
+from zss import Node as ZSSNode, simple_distance
 
 
 # the definition of reaction classes below
@@ -787,6 +791,19 @@ class SyntheticTree:
         return nodes[-1]
         
 
+class Skeleton:
+    def __init__(self, st, index):
+        """
+        st: example of SyntheticTree with the skeleton
+        """
+        self.tree = nx.DiGraph(st.edges)
+        self.tree_root = len(self.tree.nodes)-1
+        nodes = [ZSSNode(n) for n in self.tree.nodes()]
+        for a, b in self.tree.edges:
+            nodes[a].addkid(nodes[b])        
+        self.zss_tree = nodes[-1]
+        self.index = index
+
 
 class SyntheticTreeSet:
     """Represents a collection of synthetic trees, for saving and loading purposes."""
@@ -859,6 +876,57 @@ class SyntheticTreeSet:
             if i >= x:
                 break
             print(r.output_dict())
+
+
+class SkeletonSet:
+    def __init__(self, skeletons=None):
+        self.skeletons = skeletons
+        self.lookup = None
+        self.sks = None
+        self.coords = None
+        self.sim = None
+        
+
+    def load_skeletons(self, skeletons):
+        lookup = {} # should be multi-set?
+        sks = []
+        for sk, sts in skeletons.items():
+            sk = Skeleton(sk, len(sks))
+            for st in sts:
+                lookup[st.root.smiles] = sk
+            sks.append(sk)
+        self.lookup = lookup
+        self.sks = sks   
+        self.skeletons = skeletons
+        return self
+    
+    @staticmethod
+    def compute_dists(i, j, sk1, sk2):
+        # dist = nx.graph_edit_distance(sk1, sk2, roots=(len(sk1)-1, len(sk2)-1), upper_bound=6)
+        return simple_distance(sk1, sk2)
+        return dist
+
+
+
+    def embed_skeletons(self, sks=None, ncpu=0):
+        if not sks:
+            sks = self.sks
+        sim = np.zeros((len(sks), len(sks)))
+        print("begin computing similarity matrix")
+        # args = [(i, j, sks[i].tree,sks[j].tree) for i in range(len(sks)) for j in range(len(sks)) if j > i]
+        args = [(i, j, sks[i].zss_tree,sks[j].zss_tree) for i in range(len(sks)) for j in range(len(sks)) if j > i]
+        with Pool(120) as p:
+            res = p.starmap(self.compute_dists, tqdm(args, total=len(args)))
+        assert len(args) == len(res)
+        for (i, j, _, _), d in zip(args, res):
+            sim[i][j] = d or 6            
+        sim += sim.T
+        self.sim = sim
+        ms = MDS(n_components=256, dissimilarity='precomputed', verbose=1)
+        print("begin mds")
+        coords = ms.fit_transform(-sim)
+        self.coords = coords
+    
 
 
 if __name__ == "__main__":
