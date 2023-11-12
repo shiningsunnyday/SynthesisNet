@@ -81,7 +81,7 @@ if __name__ == "__main__":
         num_dropout_layers=1,
         task="regression",
         loss="mse",
-        valid_loss="nn_accuracy",
+        valid_loss="faiss-knn",
         optimizer="adam",
         learning_rate=3e-4,
         val_freq=10,
@@ -110,8 +110,8 @@ if __name__ == "__main__":
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
     trainer = pl.Trainer(
-        accelerator='gpu',
-        devices=[0],
+        accelerator='cpu',
+        # devices=[0],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],

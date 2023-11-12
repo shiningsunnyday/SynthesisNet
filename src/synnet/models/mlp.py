@@ -96,7 +96,7 @@ class MLP(pl.LightningModule):
         """The complete validation loop."""
         if self.trainer.current_epoch % self.val_freq != 0:
             return None
-
+        breakpoint()
         x, y = batch
         y_hat = self.layers(x)
         if self.valid_loss == "cross_entropy":
@@ -113,6 +113,21 @@ class MLP(pl.LightningModule):
             y_hat = nn_search_list(y_hat.detach().cpu().numpy(), self.X)
             accuracy = (y_hat == y).sum() / len(y)
             loss = 1 - accuracy
+        elif self.valid_loss == "faiss-knn":
+            index = self.molembedder.index
+            device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
+            # import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+
+            # Normalize query vectors
+            y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
+            ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
+            # kNN search
+            k = 1
+            _, ind_y = index.search(y_normalized.to(device), k)
+            _, ind_ypred = index.search(ypred_normalized.to(device), k)
+            accuracy = (ind_y == ind_ypred).sum() / len(y)
+            loss = 1 - accuracy
+            breakpoint()
         elif self.valid_loss == "mse":
             loss = F.mse_loss(y_hat, y)
         elif self.valid_loss == "l1":

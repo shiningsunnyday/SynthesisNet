@@ -795,13 +795,35 @@ class Skeleton:
     def __init__(self, st, index):
         """
         st: example of SyntheticTree with the skeleton
-        """
-        self.tree = nx.DiGraph(st.edges)
-        self.tree_root = len(self.tree.nodes)-1
-        nodes = [ZSSNode(n) for n in self.tree.nodes()]
-        for a, b in self.tree.edges:
+        """   
+        tree = nx.DiGraph(st.edges)
+        n = len(st.chemicals)
+        smile_set = dict() 
+        for c, ind in zip([c.smiles for c in st.chemicals], range(n)):
+            smile_set[c] = smile_set.get(c, []) + [ind]                          
+        
+        nodes = [ZSSNode(node) for node in tree.nodes()]
+        for a, b in tree.edges:
             nodes[a].addkid(nodes[b])        
         self.zss_tree = nodes[-1]
+
+        whole_tree = nx.DiGraph()
+        for i in tree.nodes():
+            whole_tree.add_node(i, smiles=st.chemicals[i].smiles)
+        for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
+            p = smile_set[r.parent][0]         
+            whole_tree.add_node(j, rxn_id=r.rxn_id)
+            whole_tree.add_edge(p, j)
+            inds = []
+            for c in r.child:
+                inds.append(smile_set[c][0])
+                smile_set[c].pop(0)
+            for i in inds:
+                assert tree.has_edge(p, i)
+                whole_tree.add_edge(j, i)
+
+        self.tree = whole_tree
+        self.tree_root = len(st.chemicals)-1
         self.index = index
 
 
@@ -893,7 +915,7 @@ class SkeletonSet:
         for sk, sts in skeletons.items():
             sk = Skeleton(sk, len(sks))
             for st in sts:
-                lookup[st.root.smiles] = sk
+                lookup[st.root.smiles] = lookup.get(st.root.smiles, []) + [sk]
             sks.append(sk)
         self.lookup = lookup
         self.sks = sks   

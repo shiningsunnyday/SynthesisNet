@@ -181,6 +181,7 @@ def set_embedding(
 
 def synthetic_tree_decoder(
     z_target: np.ndarray,
+    sk_coords: np.ndarray,
     building_blocks: list[str],
     bb_dict: dict[str, int],
     reaction_templates: list[Reaction],
@@ -233,6 +234,8 @@ def synthetic_tree_decoder(
         # Encode current state
         state = tree.get_state()  # a list
         z_state = set_embedding(z_target, state, nbits=n_bits, _mol_embedding=mol_fp)
+        if sk_coords is not None:
+            z_state = np.concatenate((z_state, sk_coords), axis=1)
 
         # Predict action type, masked selection
         # Action: (Add: 0, Expand: 1, Merge: 2, End: 3)
