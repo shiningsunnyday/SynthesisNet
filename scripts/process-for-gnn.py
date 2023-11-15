@@ -209,9 +209,9 @@ if __name__ == "__main__":
     sk_set = SkeletonSet().load_skeletons(skeletons)
 
     for index, st in enumerate(skeletons):
+        # figure out "a" minimal resolving set
         if index < 2:
             continue
-        # figure out "a" minimal resolving set
         sk = Skeleton(st, index)
         min_r_set = compute_md(sk.tree, sk.tree_root)  
         edge_index = np.array(sk.tree.edges).T           
@@ -221,22 +221,41 @@ if __name__ == "__main__":
             for i in range(2**(len(sk.tree)-len(min_r_set))):
                 pargs.append([i, sk, min_r_set])
         print(f"mapping {len(pargs)} for index {index}")
-        # batch_size = 32*100
-        # for k in range((len(pargs)+batch_size-1)//batch_size):
-        #     if k < 6:
-        #         continue
-        #     with Pool(32) as p:
-        #         interm_res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
-        #     res += interm_res            
-        with Pool(min(64, len(skeletons[st]))) as p:
-            res = p.starmap(process_syntree_mask, tqdm(pargs))
+        batch_size = 32*2000
+        # res = []
+        for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
+            print(k)       
+            with Pool(20) as p:
+                res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
+            # if k == 2:
+            #     res = []
+            #     for parg in pargs[batch_size*k:batch_size*k+batch_size]:
+            #         try:
+            #             res.append(process_syntree_mask(parg))
+            #         except:
+            #             breakpoint()
+            #     breakpoint()
+            # with Pool(min(20, len(skeletons[st]))) as p:
+            #     res = p.starmap(process_syntree_mask, tqdm(pargs))   
+
+            node_masks = np.concatenate([r[0] for r in res], axis=0)
+            Xs = np.concatenate([r[1] for r in res], axis=0)
+            ys = np.concatenate([r[2] for r in res], axis=0)              
+            np.save(os.path.join(args.output_dir, f"{index}_{k}_Xs.npy"), Xs)
+            np.save(os.path.join(args.output_dir, f"{index}_{k}_ys.npy"), ys)
+            np.save(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy"), node_masks)
+            np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)
+
+            # res += interm_res
+        # with Pool(min(50, len(skeletons[st]))) as p:
+        #     res = p.starmap(process_syntree_mask, tqdm(pargs))
         # res = []
         # for parg in tqdm(pargs):
         #     res.append(process_syntree_mask(*parg))
-        node_masks = np.concatenate([r[0] for r in res], axis=0)
-        Xs = np.concatenate([r[1] for r in res], axis=0)
-        ys = np.concatenate([r[2] for r in res], axis=0)              
-        np.save(os.path.join(args.output_dir, f"{index}_Xs.npy"), Xs)
-        np.save(os.path.join(args.output_dir, f"{index}_ys.npy"), ys)
-        np.save(os.path.join(args.output_dir, f"{index}_node_masks.npy"), node_masks)
-        np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)
+        # node_masks = np.concatenate([r[0] for r in res], axis=0)
+        # Xs = np.concatenate([r[1] for r in res], axis=0)
+        # ys = np.concatenate([r[2] for r in res], axis=0)              
+        # np.save(os.path.join(args.output_dir, f"{index}_Xs.npy"), Xs)
+        # np.save(os.path.join(args.output_dir, f"{index}_ys.npy"), ys)
+        # np.save(os.path.join(args.output_dir, f"{index}_node_masks.npy"), node_masks)
+        # np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)

@@ -4,6 +4,7 @@ from typing import Callable, Union
 
 import numpy as np
 from sklearn.neighbors import BallTree
+import faiss
 
 from synnet.config import MAX_PROCESSES
 
@@ -69,6 +70,10 @@ class MolEmbedder:
         if file.suffixes == [".npy"]:
             self.embeddings = self._load_npy(file)
             self.kdtree = None
+            res = faiss.StandardGpuResources()
+            self.index = faiss.index_cpu_to_gpu(res, 0, faiss.IndexFlatIP(self.embeddings.shape[1]))
+            self.embeddings /= np.linalg.norm(self.embeddings,axis=-1,keepdims=True)
+            self.index.add(self.embeddings)
         else:
             raise NotImplementedError
         return self

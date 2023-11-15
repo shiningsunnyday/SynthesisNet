@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from torch import nn
+import torch_geometric.nn as geom_nn
 
 from synnet.MolEmbedder import MolEmbedder
 from sklearn.neighbors import NearestNeighbors
@@ -44,7 +45,7 @@ class MLP(pl.LightningModule):
         self.ncpu = ncpu
         self.val_freq = val_freq
         self.molembedder = molembedder
-        self.X = X if (X is not None) else molembedder.embeddings
+        self.X = np.load(X) if (X is not None) else molembedder.embeddings
         # self.nn = NearestNeighbors(n_neighbors=1)
         # self.nn.fit(molembedder.embeddings)
         modules = []
@@ -96,7 +97,6 @@ class MLP(pl.LightningModule):
         """The complete validation loop."""
         if self.trainer.current_epoch % self.val_freq != 0:
             return None
-        breakpoint()
         x, y = batch
         y_hat = self.layers(x)
         if self.valid_loss == "cross_entropy":
@@ -116,7 +116,7 @@ class MLP(pl.LightningModule):
         elif self.valid_loss == "faiss-knn":
             index = self.molembedder.index
             device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
-            # import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+            import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
 
             # Normalize query vectors
             y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
@@ -127,7 +127,6 @@ class MLP(pl.LightningModule):
             _, ind_ypred = index.search(ypred_normalized.to(device), k)
             accuracy = (ind_y == ind_ypred).sum() / len(y)
             loss = 1 - accuracy
-            breakpoint()
         elif self.valid_loss == "mse":
             loss = F.mse_loss(y_hat, y)
         elif self.valid_loss == "l1":
@@ -136,6 +135,193 @@ class MLP(pl.LightningModule):
             loss = F.huber_loss(y_hat, y)
         else:
             raise ValueError("Unsupported loss function '%s'" % self.valid_loss)
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+    def configure_optimizers(self):
+        """Define Optimerzers and LR schedulers."""
+        if self.optimizer == "adam":
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        elif self.optimizer == "sgd":
+            optimizer = torch.optim.SGD(self.parameters(), lr=self.learning_rate)
+        return optimizer
+
+
+class GNNModel(nn.Module):
+    def __init__(
+        self,
+        c_in,
+        c_hidden,
+        c_out,
+        num_layers=2,
+        layer_name="GCN",
+        dp_rate=0.1,
+        **kwargs,
+    ):
+        """GNNModel.
+
+        Args:
+            c_in: Dimension of input features
+            c_hidden: Dimension of hidden features
+            c_out: Dimension of the output features. Usually number of classes in classification
+            num_layers: Number of "hidden" graph layers
+            layer_name: String of the graph layer to use
+            dp_rate: Dropout rate to apply throughout the network
+            kwargs: Additional arguments for the graph layer (e.g. number of heads for GAT)
+        """
+        super().__init__()
+        gnn_layer_by_name = {"GCN": geom_nn.GCNConv, "GAT": geom_nn.GATConv, "GraphConv": geom_nn.GraphConv}
+        gnn_layer = gnn_layer_by_name[layer_name]
+
+        layers = []
+        in_channels, out_channels = c_in, c_hidden
+        for l_idx in range(num_layers - 1):
+            layers += [
+                gnn_layer(in_channels=in_channels, out_channels=out_channels, **kwargs),
+                nn.ReLU(inplace=True),
+                nn.Dropout(dp_rate),
+            ]
+            in_channels = c_hidden
+        layers += [gnn_layer(in_channels=in_channels, out_channels=c_out, **kwargs)]
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, data):
+        """Forward.
+
+        Args:
+            x: Input features per node
+            edge_index: List of vertex index pairs representing the edges in the graph (PyTorch geometric notation)
+        """
+        x = data.x
+        edge_index = data.edge_index
+        for layer in self.layers:
+            # For graph layers, we need to add the "edge_index" tensor as additional input
+            # All PyTorch Geometric graph layer inherit the class "MessagePassing", hence
+            # we can simply check the class type.
+            if isinstance(layer, geom_nn.MessagePassing):
+                x = layer(x, edge_index)
+            else:
+                x = layer(x)
+        return x
+
+
+
+
+class GNN(pl.LightningModule):
+    def __init__(
+        self,     
+        task: str = "classification",
+        loss: str = "cross_entropy",
+        valid_loss: str = "accuracy",
+        optimizer: str = "adam",
+        learning_rate: float = 1e-4,
+        val_freq: int = 10,
+        ncpu: int = 16,
+        molembedder: MolEmbedder = None,
+        X = None,
+        **model_kwargs
+    ):
+        super().__init__()
+        self.save_hyperparameters(ignore="molembedder")
+        self.loss = loss
+        self.valid_loss = valid_loss
+        self.optimizer = optimizer
+        self.learning_rate = learning_rate
+        self.ncpu = ncpu
+        self.val_freq = val_freq
+        self.molembedder = molembedder
+        self.X = np.load(X) if (X is not None) else molembedder.embeddings
+        self.model = GNNModel(**model_kwargs)
+
+
+    def forward(self, data, mask):
+        """Forward step for inference only."""
+        x, edge_index = data.x, data.edge_index
+        y_hat = self.model(x, edge_index)
+        if (
+            self.hparams.task == "classification"
+        ):  # during training, `cross_entropy` loss expects raw logits
+            y_hat = F.softmax(y_hat, dim=-1)
+        return y_hat
+
+    def training_step(self, batch, batch_idx):
+        """The complete training loop."""
+        data = batch
+        y_hat = self.model(data)
+        y = data.y
+        y_hat, y = y_hat[:, :256], y[:, :256]
+        if self.loss == "cross_entropy":
+            loss = F.cross_entropy(y_hat, y.long())         
+        elif self.loss == "mse":
+            loss = F.mse_loss(y_hat, y)
+        elif self.loss == "l1":
+            loss = F.l1_loss(y_hat, y)
+        elif self.loss == "huber":
+            loss = F.huber_loss(y_hat, y)
+        else:
+            raise ValueError("Unsupported loss function '%s'" % self.loss)
+        self.log(f"train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        """The complete validation loop."""
+        if self.trainer.current_epoch % self.val_freq != 0:
+            return None
+        data = batch
+        y = data.y
+        y_hat = self.model(data)
+        if self.valid_loss == "faiss-knn":
+            mask = (y[:, :256] == 0).any(axis=-1)
+            y = y[:, :256][mask]
+            y_hat = y_hat[:, :256][mask]
+            index = self.molembedder.index
+            device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
+            # import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+
+            # Normalize query vectors
+            y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
+            ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
+            # kNN search
+            k = 1
+            _, ind_y = index.search(y_normalized.to(device), k)
+            _, ind_ypred = index.search(ypred_normalized.to(device), k)
+            accuracy = (ind_y == ind_ypred).sum() / len(y)
+            loss = 1 - accuracy            
+        # if self.valid_loss == "cross_entropy":
+        #     loss = F.cross_entropy(y_hat, y.long())
+        # elif self.valid_loss == "accuracy":
+        #     y_hat = torch.argmax(y_hat, axis=1)
+        #     accuracy = (y_hat == y).sum() / len(y)
+        #     loss = 1 - accuracy
+        # elif self.valid_loss[:11] == "nn_accuracy":
+        #     # NOTE: Very slow!
+        #     # Performing the knn-search can easily take a couple of minutes,
+        #     # even for small datasets.
+        #     y = nn_search_list(y.detach().cpu().numpy(), self.X)
+        #     y_hat = nn_search_list(y_hat.detach().cpu().numpy(), self.X)
+        #     accuracy = (y_hat == y).sum() / len(y)
+        #     loss = 1 - accuracy
+        # elif self.valid_loss == "faiss-knn":
+        #     index = self.molembedder.index
+        #     device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
+        #     import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+
+        #     # Normalize query vectors
+        #     y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
+        #     ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
+        #     # kNN search
+        #     k = 1
+        #     _, ind_y = index.search(y_normalized.to(device), k)
+        #     _, ind_ypred = index.search(ypred_normalized.to(device), k)
+        #     accuracy = (ind_y == ind_ypred).sum() / len(y)
+        #     loss = 1 - accuracy
+        # elif self.valid_loss == "mse":
+        #     loss = F.mse_loss(y_hat, y)
+        # elif self.valid_loss == "l1":
+        #     loss = F.l1_loss(y_hat, y)
+        # elif self.valid_loss == "huber":
+        #     loss = F.huber_loss(y_hat, y)
+        # else:
+        #     raise ValueError("Unsupported loss function '%s'" % self.valid_loss)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
     def configure_optimizers(self):

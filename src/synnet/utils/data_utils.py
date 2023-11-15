@@ -17,6 +17,8 @@ from multiprocessing import Pool
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
 from tqdm import tqdm
 import pickle
 from itertools import permutations
@@ -855,7 +857,7 @@ class Skeleton:
             node_mask: self.mask (len(self.tree),)
             X: (len(self.tree), in_dim) matrix of node features, with rows at ~node_mask zero'ed out
             y: (len(self.tree), out_dim) 256-dim mol_fp, with rows at node_mask zero'ed out
-        """              
+        """
         X = np.zeros((len(self.tree), 4096+1))
         y = np.zeros((len(self.tree), 256+1))
         for n in self.tree.nodes():

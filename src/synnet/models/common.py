@@ -22,6 +22,11 @@ def get_args():
         "--skeleton-dir", type=str, help="Directory with X,y data."
     )    
     parser.add_argument(
+        "--gnn-input-feats",
+        type=str,
+        help="Where to load featurized data to train GNN",
+    )    
+    parser.add_argument(
         "-f", "--featurize", type=str, default="fp", help="Choose from ['fp', 'gin']"
     )
     parser.add_argument(
@@ -52,7 +57,7 @@ def get_args():
     return parser.parse_args()
 
 
-def xy_to_dataloader(
+def xy_to_dataset(
     X_file: str, y_file: str, task: str = "regression", n: Union[int, float] = 1.0, **kwargs
 ):
     """Loads featurized X,y `*.npz`-data into a `DataLoader`"""
@@ -80,6 +85,13 @@ def xy_to_dataloader(
         torch.Tensor(X),
         torch.Tensor(y),
     )
+    return dataset    
+
+
+def xy_to_dataloader(
+    X_file: str, y_file: str, task: str = "regression", n: Union[int, float] = 1.0, **kwargs
+):
+    dataset = xy_to_dataset(X_file, y_file, task, n, **kwargs)
     return torch.utils.data.DataLoader(dataset, **kwargs)
 
 

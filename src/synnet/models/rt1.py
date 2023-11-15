@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
 
-def _fetch_molembedder():
+def _fetch_molembedder(args):
     file = args.mol_embedder_file
     logger.info(f"Try to load precomputed MolEmbedder from {file}.")
     molembedder = MolEmbedder().load_precomputed(file).init_balltree(metric=cosine_distance)
@@ -84,10 +84,10 @@ if __name__ == "__main__":
         valid_loss="faiss-knn",
         optimizer="adam",
         learning_rate=3e-4,
-        val_freq=10,
+        val_freq=1,
         molembedder=molembedder,
         ncpu=args.ncpu,
-        X=np.load(args.mol_embedder_file) if args.mol_embedder_file else None
+        X=args.mol_embedder_file if args.mol_embedder_file else None
     )
 
     # Set up Trainer
@@ -110,8 +110,8 @@ if __name__ == "__main__":
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
     trainer = pl.Trainer(
-        accelerator='cpu',
-        # devices=[0],
+        accelerator='gpu',
+        devices=[0],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],

@@ -93,7 +93,7 @@ if __name__ == "__main__":
         val_freq=10,
         molembedder=molembedder,
         ncpu=args.ncpu,
-        X=np.load(args.mol_embedder_file) if args.mol_embedder_file else None
+        X=args.mol_embedder_file if args.mol_embedder_file else None
     )
 
     # Set up Trainer
