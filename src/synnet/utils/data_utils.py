@@ -25,6 +25,8 @@ import networkx as nx
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 
+from synnet.encoding.fingerprints import fp_4096, fp_256
+
 
 # the definition of reaction classes below
 class Reaction:
@@ -795,6 +797,7 @@ class Skeleton:
     def __init__(self, st, index):
         """
         st: example of SyntheticTree with the skeleton
+        This is a dual use class. It also remembers st for later use.
         """   
         tree = nx.DiGraph(st.edges)
         n = len(st.chemicals)
@@ -825,6 +828,62 @@ class Skeleton:
         self.tree = whole_tree
         self.tree_root = len(st.chemicals)-1
         self.index = index
+        self.reset()
+
+
+    def reset(self, mask=None):
+        self._mask = np.zeros(len(self.tree), dtype=np.int8)
+        if mask is not None:
+            self.mask = mask
+
+
+    @property
+    def mask(self):
+        return self._mask
+
+
+    @mask.setter
+    def mask(self, mask):
+        self._mask[mask] = 1        
+        
+        
+        
+    def get_state(self):
+        """
+        Return the partial graph with self.mask determining which nodes are available
+        Specifically, return (node_mask, edge_index, X)
+            node_mask: self.mask (len(self.tree),)
+            X: (len(self.tree), in_dim) matrix of node features, with rows at ~node_mask zero'ed out
+            y: (len(self.tree), out_dim) 256-dim mol_fp, with rows at node_mask zero'ed out
+        """              
+        X = np.zeros((len(self.tree), 4096+1))
+        y = np.zeros((len(self.tree), 256+1))
+        for n in self.tree.nodes():
+            if self.mask[n]:
+                if 'smiles' in self.tree.nodes[n]:
+                    try:
+                        X[n][:4096] = fp_4096(self.tree.nodes[n]['smiles'])
+                    except:
+                        pass
+                        # print(self.tree.nodes[n])
+                elif 'rxn_id' in self.tree.nodes[n]:
+                    X[n][4096] = self.tree.nodes[n]['rxn_id']
+                else:
+                    print("bad node")
+            else:
+                if 'smiles' in self.tree.nodes[n]:
+                    try:
+                        y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])
+                    except:
+                        pass
+                        # print(self.tree.nodes[n])
+                elif 'rxn_id' in self.tree.nodes[n]:
+                    y[n][256] = self.tree.nodes[n]['rxn_id']
+                else:
+                    print("bad node")
+        return np.atleast_2d(self.mask), X, y
+    
+
 
 
 class SyntheticTreeSet:
@@ -902,6 +961,10 @@ class SyntheticTreeSet:
 
 class SkeletonSet:
     def __init__(self, skeletons=None):
+        """
+        skeletons is a dictionary from syntree: [syntrees]
+        Each key is a representative for a different skeleton
+        """
         self.skeletons = skeletons
         self.lookup = None
         self.sks = None
@@ -910,10 +973,14 @@ class SkeletonSet:
         
 
     def load_skeletons(self, skeletons):
+        """
+        This converts skeletons into a lookup from smiles to 
+        the skeletons of its synthetic tree(s)
+        """
         lookup = {} # should be multi-set?
         sks = []
-        for sk, sts in skeletons.items():
-            sk = Skeleton(sk, len(sks))
+        for st, sts in skeletons.items():
+            sk = Skeleton(st, len(sks)) # uses representative syntree
             for st in sts:
                 lookup[st.root.smiles] = lookup.get(st.root.smiles, []) + [sk]
             sks.append(sk)
