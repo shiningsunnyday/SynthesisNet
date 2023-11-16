@@ -61,7 +61,6 @@ class MLP(pl.LightningModule):
                 modules.append(nn.Dropout(dropout))
 
         modules.append(nn.Linear(hidden_dim, output_dim))
-
         self.layers = nn.Sequential(*modules)
 
     def forward(self, x):
@@ -135,7 +134,7 @@ class MLP(pl.LightningModule):
             loss = F.huber_loss(y_hat, y)
         else:
             raise ValueError("Unsupported loss function '%s'" % self.valid_loss)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
 
     def configure_optimizers(self):
         """Define Optimerzers and LR schedulers."""
@@ -218,6 +217,7 @@ class GNN(pl.LightningModule):
         ncpu: int = 16,
         molembedder: MolEmbedder = None,
         X = None,
+        datasets = "",
         **model_kwargs
     ):
         super().__init__()
@@ -230,6 +230,8 @@ class GNN(pl.LightningModule):
         self.val_freq = val_freq
         self.molembedder = molembedder
         self.X = np.load(X) if (X is not None) else molembedder.embeddings
+        self.valid_steps_y = []
+        self.valid_steps_y_hat = []
         self.model = GNNModel(**model_kwargs)
 
 
@@ -248,7 +250,9 @@ class GNN(pl.LightningModule):
         data = batch
         y_hat = self.model(data)
         y = data.y
-        y_hat, y = y_hat[:, :256], y[:, :256]
+        mask = (y[:, :256] != 0).any(axis=-1)
+        y = y[:, :256][mask]
+        y_hat = y_hat[:, :256][mask]
         if self.loss == "cross_entropy":
             loss = F.cross_entropy(y_hat, y.long())         
         elif self.loss == "mse":
@@ -270,22 +274,9 @@ class GNN(pl.LightningModule):
         y = data.y
         y_hat = self.model(data)
         if self.valid_loss == "faiss-knn":
-            mask = (y[:, :256] == 0).any(axis=-1)
-            y = y[:, :256][mask]
-            y_hat = y_hat[:, :256][mask]
-            index = self.molembedder.index
-            device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
-            # import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
-
-            # Normalize query vectors
-            y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
-            ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
-            # kNN search
-            k = 1
-            _, ind_y = index.search(y_normalized.to(device), k)
-            _, ind_ypred = index.search(ypred_normalized.to(device), k)
-            accuracy = (ind_y == ind_ypred).sum() / len(y)
-            loss = 1 - accuracy            
+            mask = (y[:, :256] != 0).any(axis=-1)
+            y = y[mask, :256]
+            y_hat = y_hat[mask, :256]           
         # if self.valid_loss == "cross_entropy":
         #     loss = F.cross_entropy(y_hat, y.long())
         # elif self.valid_loss == "accuracy":
@@ -322,7 +313,35 @@ class GNN(pl.LightningModule):
         #     loss = F.huber_loss(y_hat, y)
         # else:
         #     raise ValueError("Unsupported loss function '%s'" % self.valid_loss)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        # self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.valid_steps_y.append(y)
+        self.valid_steps_y_hat.append(y_hat)
+    
+
+    
+    def on_validation_epoch_end(self):
+        # outs is a list of whatever you returned in `validation_step`
+        y = torch.cat(self.valid_steps_y, axis=0)
+        y_hat = torch.cat(self.valid_steps_y_hat, axis=0)
+        self.valid_steps_y = []
+        self.valid_steps_y_hat = []
+        index = self.molembedder.index
+        device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
+        import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+
+        # Normalize query vectors
+        y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
+        ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
+        # kNN search
+        k = 1
+        _, ind_y = index.search(y_normalized.to(device), k)
+        _, ind_ypred = index.search(ypred_normalized.to(device), k)
+        accuracy = (ind_y == ind_ypred).sum() / len(y)
+        loss = 1 - accuracy             
+        if loss.item() > 1:
+            breakpoint()
+        self.log("val_loss", loss)
+
 
     def configure_optimizers(self):
         """Define Optimerzers and LR schedulers."""

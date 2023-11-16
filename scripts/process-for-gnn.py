@@ -150,9 +150,19 @@ def process_syntree_mask(i, sk, min_r_set):
     zero_mask_inds = np.where(sk.mask == 0)[0]    
     bool_mask = get_bool_mask(i)
     sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-    node_mask, X, y = sk.get_state()
-    return (node_mask, X, y)
+    if sk.leaves_up:
+        node_mask, X, y = sk.get_state(leaves_up=True)
+        return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
+    else:
+        return None
 
+
+def test_is_leaves_up(i, sk, min_r_set):
+    sk.reset(min_r_set)
+    zero_mask_inds = np.where(sk.mask == 0)[0]    
+    bool_mask = get_bool_mask(i)
+    sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+    return sk.leaves_up
 
 
 def process_syntree(syntree, min_r_set, index):
@@ -208,25 +218,51 @@ if __name__ == "__main__":
     
     sk_set = SkeletonSet().load_skeletons(skeletons)
 
+    len_inds = np.argsort([len(skeletons[st]) for st in skeletons])
+    kth_largest = np.zeros(len(skeletons))
+    kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in enumerate(skeletons):
-        # figure out "a" minimal resolving set
+        if len(skeletons[st]) < 100:
+            continue
         if index < 2:
             continue
+        # figure out "a" minimal resolving set
+        # if index < 2:
+        #     continue
         sk = Skeleton(st, index)
-        min_r_set = compute_md(sk.tree, sk.tree_root)  
         edge_index = np.array(sk.tree.edges).T           
         pargs = []
+        good_is = []
+        syntree = list(skeletons[st])[0]
+        # with Pool(20) as p:
+        #     res_bool = p.starmap(test_is_leaves_up, [(i, sk, min_r_set) for i in range(2**(len(sk.tree)-len(min_r_set)))])
+        #     good_is = np.where(res_bool)[0]
+        # print(f"{len(good_is)}/{2**(len(sk.tree)-len(min_r_set))} possible sets")
         for syntree in skeletons[st]:
-            sk = Skeleton(syntree, index)
+            sk = Skeleton(syntree, index)  
+            min_r_set = compute_md(sk.tree, sk.tree_root)
             for i in range(2**(len(sk.tree)-len(min_r_set))):
-                pargs.append([i, sk, min_r_set])
-        print(f"mapping {len(pargs)} for index {index}")
+                sk.reset(min_r_set)
+                zero_mask_inds = np.where(sk.mask == 0)[0]    
+                bool_mask = get_bool_mask(i)
+                sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+                if sk.leaves_up:             
+                    pargs.append([i, sk, min_r_set])
+
+        print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))} for class {index} which is {kth_largest[index]+1}th most represented")
         batch_size = 32*2000
-        # res = []
+        # batch_size = 1
+        res = []
         for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
-            print(k)       
-            with Pool(20) as p:
-                res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
+            # print(k)       
+            if batch_size > 1:
+                with Pool(50) as p:
+                    res = p.starmap(process_syntree_mask, tqdm(pargs[batch_size*k:batch_size*k+batch_size]))
+            else:
+                res.append(process_syntree_mask(*pargs[k]))
+            print("before:", len(res))
+            res = [r for r in res if r is not None]
+            print("after:", len(res))
             # if k == 2:
             #     res = []
             #     for parg in pargs[batch_size*k:batch_size*k+batch_size]:
@@ -235,14 +271,15 @@ if __name__ == "__main__":
             #         except:
             #             breakpoint()
             #     breakpoint()
-            # with Pool(min(20, len(skeletons[st]))) as p:
-            #     res = p.starmap(process_syntree_mask, tqdm(pargs))   
-
+        # with Pool(min(100, len(skeletons[st]))) as p:
+        #     res = p.starmap(process_syntree_mask, tqdm(pargs))               
             node_masks = np.concatenate([r[0] for r in res], axis=0)
             Xs = np.concatenate([r[1] for r in res], axis=0)
             ys = np.concatenate([r[2] for r in res], axis=0)              
+            smiles = np.array([r[3] for r in res])
             np.save(os.path.join(args.output_dir, f"{index}_{k}_Xs.npy"), Xs)
             np.save(os.path.join(args.output_dir, f"{index}_{k}_ys.npy"), ys)
+            np.save(os.path.join(args.output_dir, f"{index}_{k}_smiles.npy"), smiles)
             np.save(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy"), node_masks)
             np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)
 

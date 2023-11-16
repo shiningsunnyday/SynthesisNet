@@ -27,7 +27,7 @@ import networkx as nx
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 
-from synnet.encoding.fingerprints import fp_4096, fp_256
+from synnet.encoding.fingerprints import fp_2048, fp_256
 
 
 # the definition of reaction classes below
@@ -828,13 +828,16 @@ class Skeleton:
                 whole_tree.add_edge(j, i)
 
         self.tree = whole_tree
+        self.tree_edges = np.array(self.tree.edges).T        
         self.tree_root = len(st.chemicals)-1
+        self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
         self.index = index
         self.reset()
 
 
     def reset(self, mask=None):
         self._mask = np.zeros(len(self.tree), dtype=np.int8)
+        self.leaves_up = True
         if mask is not None:
             self.mask = mask
 
@@ -847,12 +850,16 @@ class Skeleton:
     @mask.setter
     def mask(self, mask):
         self._mask[mask] = 1        
+        src = self.mask[self.non_root_tree_edges[0]]
+        dest = self.mask[self.non_root_tree_edges[1]]
+        self.leaves_up = not (src > dest).any()
+
         
         
-        
-    def get_state(self):
+    def get_state(self, leaves_up=False):
         """
         Return the partial graph with self.mask determining which nodes are available
+        If leaves_up is true, further zero out y at nodes where there is an un-filled child
         Specifically, return (node_mask, edge_index, X)
             node_mask: self.mask (len(self.tree),)
             X: (len(self.tree), in_dim) matrix of node features, with rows at ~node_mask zero'ed out
@@ -864,7 +871,8 @@ class Skeleton:
             if self.mask[n]:
                 if 'smiles' in self.tree.nodes[n]:
                     try:
-                        X[n][:4096] = fp_4096(self.tree.nodes[n]['smiles'])
+                        X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
+                        X[n][2048:4096] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
                     except:
                         pass
                         # print(self.tree.nodes[n])
@@ -872,7 +880,7 @@ class Skeleton:
                     X[n][4096] = self.tree.nodes[n]['rxn_id']
                 else:
                     print("bad node")
-            else:
+            elif (not leaves_up or self.mask[list(self.tree.neighbors(n))].all()):
                 if 'smiles' in self.tree.nodes[n]:
                     try:
                         y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])
@@ -883,6 +891,7 @@ class Skeleton:
                     y[n][256] = self.tree.nodes[n]['rxn_id']
                 else:
                     print("bad node")
+
         return np.atleast_2d(self.mask), X, y
     
 

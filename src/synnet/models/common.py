@@ -21,11 +21,19 @@ def get_args():
     parser.add_argument(
         "--skeleton-dir", type=str, help="Directory with X,y data."
     )    
+
+    # for training gnn
     parser.add_argument(
         "--gnn-input-feats",
         type=str,
         help="Where to load featurized data to train GNN",
     )    
+    parser.add_argument(
+        "--gnn-datasets",
+        type=int,
+        nargs='+',
+    )
+
     parser.add_argument(
         "-f", "--featurize", type=str, default="fp", help="Choose from ['fp', 'gin']"
     )

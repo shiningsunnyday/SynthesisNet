@@ -36,26 +36,46 @@ def load_dataloaders(input_dir, args):
     datasets_train = []
     datasets_valid = []
     datasets_test = []
-    while True:
-        try:
-            edge_index = np.load(os.path.join(input_dir, f"{i}_edge_index.npy"))
-            node_masks = np.load(os.path.join(input_dir, f"{i}_node_masks.npy"))
+    used_is = []
+    while i < 100:
+        if i not in args.gnn_datasets:
+            i += 1
+            continue
+        if not os.path.exists(os.path.join(input_dir, f"{i}_edge_index.npy")):
+            i += 1
+            continue
+
+        edge_index = np.load(os.path.join(input_dir, f"{i}_edge_index.npy"))
+        node_masks, Xs, ys = [], [], []
+        smiles = []
+        index = 0        
+        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")):
+            node_masks.append(np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")))
             num_nodes = edge_index.max()+1
-            X = np.load(os.path.join(input_dir, f"{i}_Xs.npy"))
-            y = np.load(os.path.join(input_dir, f"{i}_ys.npy"))
-            X = X.reshape(-1, num_nodes, X.shape[-1])     
+            X = np.load(os.path.join(input_dir, f"{i}_{index}_Xs.npy"))
+            y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
+            smile = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))
+            smiles.append(smile)
+            X = X.reshape(-1, num_nodes, X.shape[-1])
             y = y.reshape(-1, num_nodes, y.shape[-1])
-            
-            start_inds = np.where(node_masks.sum(axis=-1) == node_masks.sum(axis=-1).min())[0] # each distinct tree
-            n = len(start_inds)
-            train_ind, val_ind = start_inds[int(0.8*n)], start_inds[int(0.9*n)]
-            X_train, y_train, node_mask_train = X[:train_ind], y[:train_ind], node_masks[:train_ind]
-            X_valid, y_valid, node_mask_valid = X[train_ind+1:val_ind], y[train_ind+1:val_ind], node_masks[train_ind+1:val_ind]
-            X_test, y_test, node_mask_test = X[val_ind+1:], y[val_ind+1:], node_masks[val_ind+1:]
-            # X_train, X_valid_test, node_mask_train, node_mask_valid_test, y_train, y_valid_test = train_test_split(X, node_masks, y, test_size=0.2, random_state=42)
-            # X_valid, X_test, node_mask_valid, node_mask_test, y_valid, y_test = train_test_split(X_valid_test, node_mask_valid_test, y_valid_test, test_size=0.5, random_state=42)            
-        except:
-            break
+            Xs.append(X)
+            ys.append(y)
+            print(f"loaded {i}_{index}")
+            index += 1
+        node_masks = np.concatenate(node_masks, axis=0)
+        X = np.concatenate(Xs, axis=0)
+        y = np.concatenate(ys, axis=0)
+        smiles = np.concatenate(smiles)[:, None]
+        start_inds = np.where(node_masks.sum(axis=-1) == node_masks.sum(axis=-1).min())[0] # each distinct tree
+        n = len(start_inds)
+        print(f"splitting {n} trees into 80-10-10 with {index} partitions for skeleton {i}")
+        train_ind, val_ind = start_inds[int(0.8*n)], start_inds[int(0.9*n)]
+        X_train, y_train, node_mask_train, smiles_train = X[:train_ind], y[:train_ind], node_masks[:train_ind], smiles[:train_ind]
+        X_valid, y_valid, node_mask_valid, smiles_valid = X[train_ind+1:val_ind], y[train_ind+1:val_ind], node_masks[train_ind+1: val_ind], smiles[train_ind+1: val_ind]
+        X_test, y_test, node_mask_test, smiles_test = X[val_ind+1:], y[val_ind+1:], node_masks[val_ind+1:], smiles[val_ind+1:]
+        # X_train, X_valid_test, node_mask_train, node_mask_valid_test, y_train, y_valid_test = train_test_split(X, node_masks, y, test_size=0.2, random_state=42)
+        # X_valid, X_test, node_mask_valid, node_mask_test, y_valid, y_test = train_test_split(X_valid_test, node_mask_valid_test, y_valid_test, test_size=0.5, random_state=42)            
+
         dataset_train = torch.utils.data.TensorDataset(
             torch.tensor([edge_index for _ in range(X_train.shape[0])], dtype=torch.int64),
             torch.Tensor(node_mask_train),
@@ -77,7 +97,7 @@ def load_dataloaders(input_dir, args):
         datasets_train.append(dataset_train)
         datasets_valid.append(dataset_valid)
         datasets_test.append(dataset_test)        
-        break
+        used_is.append(str(i))
         i += 1
     dataset_train = torch.utils.data.ConcatDataset(datasets_train)
     dataset_valid = torch.utils.data.ConcatDataset(datasets_valid)
@@ -85,13 +105,13 @@ def load_dataloaders(input_dir, args):
     train_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_train], batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True)
     valid_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_valid], batch_size=args.batch_size, num_workers=args.ncpu)
     test_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_test], batch_size=args.batch_size, num_workers=args.ncpu)
-    return train_dataloader, valid_dataloader, test_dataloader
+    return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
 
 
 
 if __name__ == "__main__":
     args = get_args()
-    train_dataloader, valid_dataloader, _ = load_dataloaders(args.gnn_input_feats, args)
+    train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args.gnn_input_feats, args)
     input_dim = 4097
     out_dim = 257
     molembedder = _fetch_molembedder(args)
@@ -109,7 +129,8 @@ if __name__ == "__main__":
         val_freq=1,
         molembedder=molembedder,
         ncpu=args.ncpu,
-        X=args.mol_embedder_file if args.mol_embedder_file else None
+        X=args.mol_embedder_file,
+        datasets=used_is
     )
 
     # Set up Trainer
@@ -133,7 +154,7 @@ if __name__ == "__main__":
     # Create trainer
     trainer = pl.Trainer(
         accelerator='gpu',
-        devices=[0],
+        devices=[1],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],
