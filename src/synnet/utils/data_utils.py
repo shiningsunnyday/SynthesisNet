@@ -854,8 +854,7 @@ class Skeleton:
         dest = self.mask[self.non_root_tree_edges[1]]
         self.leaves_up = not (src > dest).any()
 
-        
-        
+           
     def get_state(self, leaves_up=False):
         """
         Return the partial graph with self.mask determining which nodes are available
@@ -894,6 +893,48 @@ class Skeleton:
 
         return np.atleast_2d(self.mask), X, y
     
+
+    def get_partial_state(self, poss, node):
+        """
+        Return the partial graph with self.mask determining which nodes are available
+        Similar to get_state, but poss is all possible nodes for where node can be
+            node_mask: self.mask + poss
+            X: (len(self.tree), in_dim) matrix of node features, with rows at ~self.mask zero'ed out
+            y: (len(self.tree), out_dim) 256-dim, with rows at poss having the 256-dim mol_fp of node
+        """
+        X = np.zeros((len(self.tree), 4096+1))
+        y = np.zeros((len(self.tree), 256+1))
+        node_mask = self.mask.copy()
+        node_mask[poss] = 1
+        for n in self.tree.nodes():
+            if self.mask[n]:
+                if 'smiles' in self.tree.nodes[n]:
+                    try:
+                        X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
+                        X[n][2048:4096] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
+                    except:
+                        pass
+                elif 'rxn_id' in self.tree.nodes[n]:
+                    X[n][4096] = self.tree.nodes[n]['rxn_id']
+                else:
+                    print("bad node")
+            elif node_mask[n]:
+                breakpoint()
+                print(f"{n} is symmetric with {node}")
+                assert not (('smiles' in self.tree.nodes[n]) ^ ('smiles' in self.tree.nodes[node]))
+                assert not (('rxn_id' in self.tree.nodes[n]) ^ ('rxn_id' in self.tree.nodes[node]))
+                if 'smiles' in self.tree.nodes[n]:
+                    try: 
+                        y[n][:256] = fp_256(self.tree.nodes[node]['smiles'])
+                    except: 
+                        pass
+                elif 'rxn_id' in self.tree.nodes[node]:
+                    y[n][256] = self.tree.nodes[node]['rxn_id']
+                else:
+                    print("bad node")
+        if len(poss):
+            breakpoint()
+        return np.atleast_2d(self.mask), X, y                
 
 
 

@@ -18,9 +18,7 @@ def get_args():
     parser.add_argument(
         "--data-dir", type=str, default="data/featurized/Xy", help="Directory with X,y data."
     )
-    parser.add_argument(
-        "--skeleton-dir", type=str, help="Directory with X,y data."
-    )    
+    parser.add_argument("--skeleton-dir", type=str, help="Directory with X,y data.")    
 
     # for training gnn
     parser.add_argument(
@@ -28,11 +26,8 @@ def get_args():
         type=str,
         help="Where to load featurized data to train GNN",
     )    
-    parser.add_argument(
-        "--gnn-datasets",
-        type=int,
-        nargs='+',
-    )
+    parser.add_argument("--gnn-datasets", type=int, nargs='+')
+    parser.add_argument("--lazy_load", action='store_true')
 
     parser.add_argument(
         "-f", "--featurize", type=str, default="fp", help="Choose from ['fp', 'gin']"
@@ -46,6 +41,7 @@ def get_args():
     )
     parser.add_argument("--out_dim", type=int, default=256, help="Output dimension.")
     parser.add_argument("--ncpu", type=int, default=16, help="Number of cpus")
+    parser.add_argument("--prefetch_factor", type=int, default=2, help="Number of batches to prefetch")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--epoch", type=int, default=2000, help="Maximum number of epoches.")
     parser.add_argument(
@@ -62,6 +58,10 @@ def get_args():
     parser.add_argument("-v", "--version", type=int, default=1, help="Version")
     parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--fast-dev-run", default=False, action="store_true")
+
+    # training args
+    parser.add_argument('--lr',type=float, default=3e-4)
+
     return parser.parse_args()
 
 

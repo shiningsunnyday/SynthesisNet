@@ -2,6 +2,7 @@ from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, S
 import pickle
 import os
 import networkx as nx
+from networkx.algorithms import weisfeiler_lehman_graph_hash
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -30,6 +31,11 @@ def get_args():
         type=str,
         default="results/viz/",
         help="Input file for the skeletons of syntree-file",
+    )
+    parser.add_argument(
+        "--predict_anchor",
+        action='store_true',
+        help="Whether to predict anchors"
     )
     parser.add_argument(
         "--output-dir",
@@ -145,16 +151,38 @@ def get_bool_mask(i):
 
 
 
-def process_syntree_mask(i, sk, min_r_set):
-    sk.reset(min_r_set)
-    zero_mask_inds = np.where(sk.mask == 0)[0]    
-    bool_mask = get_bool_mask(i)
-    sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-    if sk.leaves_up:
-        node_mask, X, y = sk.get_state(leaves_up=True)
+def get_wl_kernel(tree: nx.digraph, fill_in=[]):
+    for n in tree.nodes():
+        tree.nodes[n]['id'] = 0
+    for i, n in enumerate(fill_in):
+        tree.nodes[n]['id'] = i+1
+    return weisfeiler_lehman_graph_hash(tree, iterations=len(tree), node_attr='id')
+
+
+
+def process_syntree_mask(i, sk, min_r_set, anchors=None):
+    if anchors is not None:
+        poss_vals = []
+        val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
+        sk.reset(min_r_set[:1+len(anchors)])
+        for poss in min_r_set[len(anchors)+1:]:
+            poss_val = get_wl_kernel(sk.tree, min_r_set[:1+len(anchors)] + [poss])
+            if poss_val == val:
+                poss_vals.append(poss)
+        if len(poss_vals) > 1:
+            breakpoint()
+        node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])
         return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
     else:
-        return None
+        sk.reset(min_r_set)
+        zero_mask_inds = np.where(sk.mask == 0)[0]    
+        bool_mask = get_bool_mask(i)
+        sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+        if sk.leaves_up:
+            node_mask, X, y = sk.get_state(leaves_up=True)
+            return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
+        else:
+            return None
 
 
 def test_is_leaves_up(i, sk, min_r_set):
@@ -221,11 +249,11 @@ if __name__ == "__main__":
     len_inds = np.argsort([len(skeletons[st]) for st in skeletons])
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
-    for index, st in enumerate(skeletons):
+    for index, st in tqdm(enumerate(skeletons)):
         if len(skeletons[st]) < 100:
             continue
-        if index < 2:
-            continue
+        # if index < 2:
+        #     continue
         # figure out "a" minimal resolving set
         # if index < 2:
         #     continue
@@ -243,26 +271,37 @@ if __name__ == "__main__":
             min_r_set = compute_md(sk.tree, sk.tree_root)
             for i in range(2**(len(sk.tree)-len(min_r_set))):
                 sk.reset(min_r_set)
-                zero_mask_inds = np.where(sk.mask == 0)[0]    
+                zero_mask_inds = np.where(sk.mask == 0)[0]
                 bool_mask = get_bool_mask(i)
                 sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
                 if sk.leaves_up:             
                     pargs.append([i, sk, min_r_set])
+            assert min_r_set[0] == sk.tree_root
+            if args.predict_anchor:
+                for i in range(2**(len(min_r_set)-1)):                
+                    sk.reset([sk.tree_root])
+                    zero_mask_inds = np.where(sk.mask == 0)[0][1:len(min_r_set)]
+                    bool_mask = get_bool_mask(i)
+                    fill_in = zero_mask_inds[-len(bool_mask):][bool_mask]
+                    sk.mask = fill_in
+                    pargs.append([i, sk, min_r_set, [sk.tree_root] + fill_in])
 
-        print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))} for class {index} which is {kth_largest[index]+1}th most represented")
-        batch_size = 32*2000
-        # batch_size = 1
+
+        print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))} 
+              for class {index} which is {kth_largest[index]+1}th most represented")
+        # batch_size = 200
+        batch_size = 1
         res = []
         for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
             # print(k)       
             if batch_size > 1:
                 with Pool(50) as p:
-                    res = p.starmap(process_syntree_mask, tqdm(pargs[batch_size*k:batch_size*k+batch_size]))
+                    res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
             else:
                 res.append(process_syntree_mask(*pargs[k]))
-            print("before:", len(res))
+            print("Before:", len(res))
             res = [r for r in res if r is not None]
-            print("after:", len(res))
+            print("After:", len(res))
             # if k == 2:
             #     res = []
             #     for parg in pargs[batch_size*k:batch_size*k+batch_size]:

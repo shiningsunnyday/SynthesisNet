@@ -9,8 +9,9 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 
 from torch_geometric.loader import DataLoader
+from torch.utils.data import Dataset
 from torch_geometric.data import Data, Batch
-
+import torch
 
 import pickle
 import os
@@ -20,6 +21,7 @@ import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
 from multiprocessing import Pool
+torch.multiprocessing.set_sharing_strategy('file_system')
 import torch
 import logging
 from pathlib import Path
@@ -31,12 +33,107 @@ logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
 
-def load_dataloaders(input_dir, args):
+class PtrDataset(Dataset):
+    def __init__(self, ptrs, **kwargs):
+        super().__init__(**kwargs)
+        self.ptrs = ptrs
+        self.edge_index = {}
+        for ptr in ptrs:
+            _, e, _ = ptr
+            self.edge_index[e] = np.load(e)
+    
+
+    def __getitem__(self, idx):
+        base, e, index = self.ptrs[idx]
+        node_mask = np.load(base+'_node_masks.npy')[index]
+        num_nodes = self.edge_index[e].max()+1
+        X = np.load(base+'_Xs.npy')
+        X = X.reshape(-1, num_nodes, X.shape[-1])[index]
+        y = np.load(base+'_ys.npy')
+        y = y.reshape(-1, num_nodes, y.shape[-1])[index]
+        data = (
+            torch.tensor(self.edge_index[e], dtype=torch.int64),
+            torch.tensor(node_mask),
+            torch.tensor(X, dtype=torch.float32),
+            torch.tensor(y, dtype=torch.float32),
+        )
+        return Data(edge_index=data[0], x=data[2], y=data[3])
+    
+    
+    def __len__(self):
+        return len(self.ptrs)
+
+
+
+def load_lazy_dataloaders(args):
+    input_dir = args.gnn_input_feats
+    used_is = []
+    i = 0
+    train_dataset_ptrs = []
+    val_dataset_ptrs = []
+    if not args.gnn_datasets:
+        files = os.listdir(input_dir)        
+        indices = [f.split('_')[0] for f in files]
+        indices = list(map(int, set(indices)))
+        indices = sorted(indices)
+        print(f"gnn-datasets has been set to {indices}")
+        setattr(args, 'gnn_datasets', indices)    
+    test_dataset_ptrs = []
+    while i < 100:
+        if i not in args.gnn_datasets:
+            i += 1
+            continue
+        does_exist = os.path.exists(os.path.join(input_dir, f"{i}_edge_index.npy"))        
+        if not does_exist:
+            i += 1
+            continue
+
+        index = 0        
+        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")):
+            # y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
+            node_mask = np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy"))
+            start_inds = np.where(node_mask == node_mask.min())[0]
+            n = len(start_inds)
+            print(f"splitting {n} trees into 80-10-10 for skeleton {i}")
+            train_ind, val_ind = start_inds[int(0.8*n)], start_inds[int(0.9*n)]            
+            for j in range(train_ind):
+                train_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
+                os.path.join(input_dir, f"{i}_edge_index.npy"), j))
+            for j in range(train_ind, val_ind):
+                val_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
+                os.path.join(input_dir, f"{i}_edge_index.npy"), j))
+            for j in range(val_ind):
+                test_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
+                os.path.join(input_dir, f"{i}_edge_index.npy"), j))                
+            index += 1     
+        used_is.append(str(i))
+        i += 1
+        
+    dataset_train = PtrDataset(train_dataset_ptrs)
+    dataset_valid = PtrDataset(val_dataset_ptrs)
+    dataset_test = PtrDataset(test_dataset_ptrs)
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=args.prefetch_factor, persistent_workers=True)
+    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=args.prefetch_factor, persistent_workers=True)
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=args.prefetch_factor, persistent_workers=True)
+    return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
+
+
+
+def load_dataloaders(args):
+    input_dir = args.gnn_input_feats
     i = 0
     datasets_train = []
     datasets_valid = []
     datasets_test = []
     used_is = []
+    if not args.gnn_datasets:
+        files = os.listdir(input_dir)        
+        indices = [f.split('_')[0] for f in files]
+        indices = list(map(int, set(indices)))
+        indices = sorted(indices)
+        indices = ' '.join(list(map(str, indices)))
+        print(f"gnn-datasets has been set to {indices}")
+        setattr(args, 'gnn-datasets', indices)
     while i < 100:
         if i not in args.gnn_datasets:
             i += 1
@@ -111,7 +208,10 @@ def load_dataloaders(input_dir, args):
 
 if __name__ == "__main__":
     args = get_args()
-    train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args.gnn_input_feats, args)
+    if args.lazy_load:
+        train_dataloader, valid_dataloader, _, used_is = load_lazy_dataloaders(args)
+    else:
+        train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args)
     input_dim = 4097
     out_dim = 257
     molembedder = _fetch_molembedder(args)
@@ -125,7 +225,7 @@ if __name__ == "__main__":
         loss="mse",
         valid_loss="faiss-knn",
         optimizer="adam",
-        learning_rate=3e-4,
+        learning_rate=args.lr,
         val_freq=1,
         molembedder=molembedder,
         ncpu=args.ncpu,
@@ -154,7 +254,7 @@ if __name__ == "__main__":
     # Create trainer
     trainer = pl.Trainer(
         accelerator='gpu',
-        devices=[1],
+        devices=[0],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],
