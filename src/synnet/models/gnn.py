@@ -40,7 +40,10 @@ class PtrDataset(Dataset):
         self.edge_index = {}
         for ptr in ptrs:
             _, e, _ = ptr
-            self.edge_index[e] = np.load(e)
+            if e in self.edge_index:
+                continue
+            edges = np.load(e)
+            self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)
     
 
     def __getitem__(self, idx):
@@ -112,9 +115,10 @@ def load_lazy_dataloaders(args):
     dataset_train = PtrDataset(train_dataset_ptrs)
     dataset_valid = PtrDataset(val_dataset_ptrs)
     dataset_test = PtrDataset(test_dataset_ptrs)
-    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=args.prefetch_factor, persistent_workers=True)
-    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=args.prefetch_factor, persistent_workers=True)
-    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=args.prefetch_factor, persistent_workers=True)
+    prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
+    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
 
 
@@ -212,18 +216,19 @@ if __name__ == "__main__":
         train_dataloader, valid_dataloader, _, used_is = load_lazy_dataloaders(args)
     else:
         train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args)
-    input_dim = 4097
-    out_dim = 257
+    input_dim = 2*2048+91
+    out_dim = 256+91
     molembedder = _fetch_molembedder(args)
     gnn = GNN(
         c_in=input_dim,
         c_out=out_dim,
         c_hidden=1200,
+        layer_name=args.gnn_layer, # Transformer
         num_layers=5,
-        dp_rate=0.5,
+        dp_rate=args.gnn_dp_rate, # 0.5
         task="regression",
-        loss="mse",
-        valid_loss="faiss-knn",
+        loss=args.gnn_loss, # mse+cross_entropy
+        valid_loss=args.gnn_valid_loss, # nn_accuracy+cross_entropy
         optimizer="adam",
         learning_rate=args.lr,
         val_freq=1,
@@ -241,25 +246,31 @@ if __name__ == "__main__":
     csv_logger = pl_loggers.CSVLogger(tb_logger.log_dir, name="", version="")
     logger.info(f"Log dir set to: {tb_logger.log_dir}")
 
-    checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
-        dirpath=tb_logger.log_dir,
-        filename="ckpts.{epoch}-{val_loss:.2f}",
-        save_weights_only=False,
-    )
+    # checkpoint_callback = ModelCheckpoint(
+    #     monitor="val_loss",
+    #     dirpath=tb_logger.log_dir,
+    #     filename="ckpts.{epoch}-{val_loss:.2f}",
+    #     save_weights_only=False,
+    # )
     earlystop_callback = EarlyStopping(monitor="val_loss", patience=3)
     tqdm_callback = TQDMProgressBar(refresh_rate=int(len(train_dataloader) * 0.05))
 
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
-    trainer = pl.Trainer(
-        accelerator='gpu',
-        devices=[0],
+    if args.cuda > -1:
+        gpu_kwargs = {'accelerator': 'gpu'}
+        gpu_kwargs = {'devices': [args.cuda]}
+    else:        
+        gpu_kwargs = {'accelerator': 'cpu'}
+    trainer = pl.Trainer(        
         max_epochs=max_epochs,
-        callbacks=[checkpoint_callback, tqdm_callback],
+        callbacks=[
+            # checkpoint_callback, 
+            tqdm_callback],
         logger=[tb_logger, csv_logger],
         fast_dev_run=args.fast_dev_run,
-        use_distributed_sampler=False
+        use_distributed_sampler=False,
+        **gpu_kwargs
     )
 
     logger.info(f"Start training")

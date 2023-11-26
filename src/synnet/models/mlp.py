@@ -96,6 +96,7 @@ class MLP(pl.LightningModule):
         """The complete validation loop."""
         if self.trainer.current_epoch % self.val_freq != 0:
             return None
+        breakpoint()
         x, y = batch
         y_hat = self.layers(x)
         if self.valid_loss == "cross_entropy":
@@ -168,9 +169,12 @@ class GNNModel(nn.Module):
             kwargs: Additional arguments for the graph layer (e.g. number of heads for GAT)
         """
         super().__init__()
-        gnn_layer_by_name = {"GCN": geom_nn.GCNConv, "GAT": geom_nn.GATConv, "GraphConv": geom_nn.GraphConv}
+        gnn_layer_by_name = {"GCN": geom_nn.GCNConv, 
+                             "GAT": geom_nn.GATConv, 
+                             "GraphConv": geom_nn.GraphConv,
+                             "Transformer": geom_nn.TransformerConv,
+                             "GIN": geom_nn.GINConv}
         gnn_layer = gnn_layer_by_name[layer_name]
-
         layers = []
         in_channels, out_channels = c_in, c_hidden
         for l_idx in range(num_layers - 1):
@@ -250,19 +254,27 @@ class GNN(pl.LightningModule):
         data = batch
         y_hat = self.model(data)
         y = data.y
-        mask = (y[:, :256] != 0).any(axis=-1)
-        y = y[:, :256][mask]
-        y_hat = y_hat[:, :256][mask]
-        if self.loss == "cross_entropy":
-            loss = F.cross_entropy(y_hat, y.long())         
-        elif self.loss == "mse":
-            loss = F.mse_loss(y_hat, y)
-        elif self.loss == "l1":
-            loss = F.l1_loss(y_hat, y)
-        elif self.loss == "huber":
-            loss = F.huber_loss(y_hat, y)
-        else:
-            raise ValueError("Unsupported loss function '%s'" % self.loss)
+
+        # only building blocks
+        mask_bb = (y[:, :256] != 0).any(axis=-1)
+        y_bb = y[mask_bb, :256]
+        y_hat_bb = y_hat[mask_bb, :256]
+
+        # only reactions
+        mask_rxn = (y[:, 256:] != 0).any(axis=-1)
+        y_rxn = y[mask_rxn, 256:]        
+        y_hat_rxn = y_hat[mask_rxn, 256:]
+
+        loss = torch.Tensor([0.]).to(y_rxn.device)
+        if "cross_entropy" in self.loss:
+            ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)   
+            self.log(f"train_ce_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            loss += ce_loss
+        if "mse" in self.loss:
+            mse_loss = F.mse_loss(y_hat_bb, y_bb)       
+            self.log(f"train_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            loss += mse_loss 
+
         self.log(f"train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
@@ -270,77 +282,86 @@ class GNN(pl.LightningModule):
         """The complete validation loop."""
         if self.trainer.current_epoch % self.val_freq != 0:
             return None
+
         data = batch
         y = data.y
         y_hat = self.model(data)
-        if self.valid_loss == "faiss-knn":
-            mask = (y[:, :256] != 0).any(axis=-1)
-            y = y[mask, :256]
-            y_hat = y_hat[mask, :256]           
-        # if self.valid_loss == "cross_entropy":
-        #     loss = F.cross_entropy(y_hat, y.long())
-        # elif self.valid_loss == "accuracy":
-        #     y_hat = torch.argmax(y_hat, axis=1)
-        #     accuracy = (y_hat == y).sum() / len(y)
-        #     loss = 1 - accuracy
-        # elif self.valid_loss[:11] == "nn_accuracy":
-        #     # NOTE: Very slow!
-        #     # Performing the knn-search can easily take a couple of minutes,
-        #     # even for small datasets.
-        #     y = nn_search_list(y.detach().cpu().numpy(), self.X)
-        #     y_hat = nn_search_list(y_hat.detach().cpu().numpy(), self.X)
-        #     accuracy = (y_hat == y).sum() / len(y)
-        #     loss = 1 - accuracy
-        # elif self.valid_loss == "faiss-knn":
-        #     index = self.molembedder.index
-        #     device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
-        #     import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
 
-        #     # Normalize query vectors
-        #     y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
-        #     ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
-        #     # kNN search
-        #     k = 1
-        #     _, ind_y = index.search(y_normalized.to(device), k)
-        #     _, ind_ypred = index.search(ypred_normalized.to(device), k)
-        #     accuracy = (ind_y == ind_ypred).sum() / len(y)
-        #     loss = 1 - accuracy
-        # elif self.valid_loss == "mse":
-        #     loss = F.mse_loss(y_hat, y)
-        # elif self.valid_loss == "l1":
-        #     loss = F.l1_loss(y_hat, y)
-        # elif self.valid_loss == "huber":
-        #     loss = F.huber_loss(y_hat, y)
-        # else:
-        #     raise ValueError("Unsupported loss function '%s'" % self.valid_loss)
-        # self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.valid_steps_y.append(y)
-        self.valid_steps_y_hat.append(y_hat)
+        # only building blocks
+        mask_bb = (y[:, :256] != 0).any(axis=-1)
+        y_bb = y[mask_bb, :256]
+        y_hat_bb = y_hat[mask_bb, :256]
+
+        # only reactions
+        mask_rxn = (y[:, 256:] != 0).any(axis=-1)
+        y_rxn = y[mask_rxn, 256:]        
+        y_hat_rxn = y_hat[mask_rxn, 256:]
+
+        if "cross_entropy" in self.valid_loss:
+            ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)
+            self.log("val_cross_entropy_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        if "accuracy" in self.valid_loss:
+            y_hat, y = y_hat_rxn, y_rxn
+            y_hat = torch.argmax(y_hat, axis=1)
+            y = torch.argmax(y, axis=1)
+            accuracy = (y_hat == y).sum() / len(y)
+            acc_loss = (1 - accuracy)
+            self.log("val_accuracy_loss", acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        if "nn_accuracy" in self.valid_loss:
+            y = nn_search_list(y_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))
+            y_hat = nn_search_list(y_hat_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))            
+            accuracy = (y_hat == y).sum() / len(y)
+            nn_acc_loss = (1 - accuracy)
+            self.log("val_nn_accuracy_loss", nn_acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        if "faiss-knn" in self.valid_loss:
+            index = self.molembedder.index
+            device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
+            import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+
+            # Normalize query vectors
+            y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
+            ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
+            # kNN search
+            k = 1
+            _, ind_y = index.search(y_normalized.to(device), k)
+            _, ind_ypred = index.search(ypred_normalized.to(device), k)
+            accuracy = (ind_y == ind_ypred).sum() / len(y)
+            knn_loss = (1 - accuracy)
+            self.log("val_knn_loss", knn_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+
+        
+        # self.valid_steps_y.append(y)
+        # self.valid_steps_y_hat.append(y_hat)
     
 
     
-    def on_validation_epoch_end(self):
-        # outs is a list of whatever you returned in `validation_step`
-        y = torch.cat(self.valid_steps_y, axis=0)
-        y_hat = torch.cat(self.valid_steps_y_hat, axis=0)
-        self.valid_steps_y = []
-        self.valid_steps_y_hat = []
-        index = self.molembedder.index
-        device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
-        import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
-
-        # Normalize query vectors
-        y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
-        ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
-        # kNN search
-        k = 1
-        _, ind_y = index.search(y_normalized.to(device), k)
-        _, ind_ypred = index.search(ypred_normalized.to(device), k)
-        accuracy = (ind_y == ind_ypred).sum() / len(y)
-        loss = 1 - accuracy             
-        if loss.item() > 1:
-            breakpoint()
-        self.log("val_loss", loss)
+    # def on_validation_epoch_end(self):
+    #     # outs is a list of whatever you returned in `validation_step`
+    #     y = torch.cat(self.valid_steps_y, axis=0)
+    #     y_hat = torch.cat(self.valid_steps_y_hat, axis=0)
+    #     self.valid_steps_y = []
+    #     self.valid_steps_y_hat = []
+    #     index = self.molembedder.index
+    #     device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
+    #     import faiss.contrib.torch_utils  # https://github.com/facebookresearch/faiss/issues/561
+    #     # Normalize query vectors
+    #     y_normalized = y / torch.linalg.norm(y, dim=1, keepdim=True)
+    #     ypred_normalized = y_hat / torch.linalg.norm(y_hat, dim=1, keepdim=True)
+    #     # kNN search
+    #     k = 1
+    #     _, ind_y = index.search(y_normalized.to(device), k)
+    #     _, ind_ypred = index.search(ypred_normalized.to(device), k)
+    #     ind_y = ind_y.flatten().detach().cpu().numpy()
+    #     ind_ypred = ind_ypred.flatten().detach().cpu().numpy()
+    #     accuracy = ((ind_y == ind_ypred).sum() + 0.0) / len(ind_ypred)
+    #     loss = 1 - accuracy     
+    #     print(ind_y)
+    #     print(ind_ypred)
+    #     print(f"accuracy: {accuracy}")        
+    #     if loss.item() > 1:
+    #         breakpoint()
+    #     self.log("val_loss", loss)
 
 
     def configure_optimizers(self):
@@ -354,8 +375,7 @@ class GNN(pl.LightningModule):
 
 def nn_search_list(y, X):
     def cosine_neighbors(x, y):
-        return ((x @ y.T)/(np.linalg.norm(x, axis=-1)[None].T @ np.linalg.norm(y, axis=-1)[None])).argmax(axis=-1, keepdims=True)
-    y = np.atleast_2d(y)  # (n_samples, n_features)
+        return ((x @ y.T)/(torch.norm(x, dim=-1)[None].T @ torch.norm(y, dim=-1)[None])).argmax(axis=-1, keepdims=True)
     # ind_2 = molembedder.kdtree.query(y, k=1, return_distance=False)  # (n_samples, 1)
     ind_3 = cosine_neighbors(y, X)
     # assert (ind_2 == ind_3).all()

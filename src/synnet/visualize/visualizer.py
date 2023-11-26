@@ -180,7 +180,6 @@ def demo():
 if __name__ == "__main__":
     # demo()
     parser = argparse.ArgumentParser()
-    parser.add_argument('--syntree_pkl')
     parser.add_argument('--syntree_json')
     parser.add_argument('--out_folder')
     args = parser.parse_args()

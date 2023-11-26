@@ -38,6 +38,12 @@ def get_args():
         help="Whether to predict anchors"
     )
     parser.add_argument(
+        "--determine_criteria",
+        choices=['leaves_up', 'all_leaves'],
+        default='leaves_up',
+        help="Criteria for a determined skeleton"
+    )    
+    parser.add_argument(
         "--output-dir",
         type=str,
         help="Where to save input and output for GNN"
@@ -131,14 +137,14 @@ def compute_md(tree, root_ind):
         assert eval_r_set(r_set) == set()
 
         while True:
-            for i in range(len(r_set)-1,-1,-1): # save root for last
+            for i in range(len(r_set)-1,0,-1): # don't remove root
                 new_r_set = r_set[:i]+r_set[i+1:]
                 if eval_r_set(new_r_set) == set():
                     r_set = new_r_set
                     break
             if eval_r_set(r_set):
                 break
-            if i == 0:
+            if i == 1:
                 break
             
     else:
@@ -178,11 +184,9 @@ def process_syntree_mask(i, sk, min_r_set, anchors=None):
         zero_mask_inds = np.where(sk.mask == 0)[0]    
         bool_mask = get_bool_mask(i)
         sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        if sk.leaves_up:
-            node_mask, X, y = sk.get_state(leaves_up=True)
-            return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
-        else:
-            return None
+        node_mask, X, y = sk.get_state(leaves_up=True)
+        assert sk.all_leaves
+        return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
 
 
 def test_is_leaves_up(i, sk, min_r_set):
@@ -193,22 +197,30 @@ def test_is_leaves_up(i, sk, min_r_set):
     return sk.leaves_up
 
 
-def process_syntree(syntree, min_r_set, index):
-    sk = Skeleton(syntree, index)                    
-    # check inds 
-    zero_mask_inds = np.where(sk.mask == 0)[0]
-    # the rest is determined
-    node_masks = np.zeros((0, len(sk.tree)))
-    Xs, ys = np.zeros((0, 4097)), np.zeros((0, 257))
-    for i in range(2**(len(sk.tree)-len(min_r_set))): # num 0's left
-        node_mask, X, y = process_syntree_mask(i, sk, zero_mask_inds)
-        node_masks = np.concatenate((node_masks, node_mask), axis=0)
-        Xs = np.concatenate((Xs, X), axis=0)
-        ys = np.concatenate((ys, y), axis=0)
-    return node_masks, Xs, ys
+def get_parg(syntree, min_r_set, index, determine_criteria='leaves_up', predict_anchor=False):
+    sk = Skeleton(syntree, index)
+    pargs = []
+    for i in range(2**(len(sk.tree)-len(min_r_set))):
+        sk.reset(min_r_set)
+        zero_mask_inds = np.where(sk.mask == 0)[0]
+        bool_mask = get_bool_mask(i)
+        sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+        if getattr(sk, determine_criteria):
+            pargs.append([i, sk, min_r_set])
+    if min_r_set[0] != sk.tree_root:
+        breakpoint()
+    if predict_anchor:
+        for i in range(2**(len(min_r_set)-1)):                
+            sk.reset([sk.tree_root])
+            zero_mask_inds = np.where(sk.mask == 0)[0][1:len(min_r_set)]
+            bool_mask = get_bool_mask(i)
+            fill_in = zero_mask_inds[-len(bool_mask):][bool_mask]
+            sk.mask = fill_in
+            pargs.append([i, sk, min_r_set, [sk.tree_root] + fill_in])    
+    return pargs
 
 
-if __name__ == "__main__":
+def main():
     args = get_args()
     syntree_collection = SyntheticTreeSet()
     syntrees = syntree_collection.load(args.input_file)
@@ -245,11 +257,12 @@ if __name__ == "__main__":
         pickle.dump(skeletons, open(os.path.join(args.visualize_dir, 'skeletons.pkl'), 'wb+'))
     
     sk_set = SkeletonSet().load_skeletons(skeletons)
-
     len_inds = np.argsort([len(skeletons[st]) for st in skeletons])
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
+        if index < 9:
+            continue
         if len(skeletons[st]) < 100:
             continue
         # if index < 2:
@@ -260,58 +273,44 @@ if __name__ == "__main__":
         sk = Skeleton(st, index)
         edge_index = np.array(sk.tree.edges).T           
         pargs = []
-        good_is = []
         syntree = list(skeletons[st])[0]
-        # with Pool(20) as p:
-        #     res_bool = p.starmap(test_is_leaves_up, [(i, sk, min_r_set) for i in range(2**(len(sk.tree)-len(min_r_set)))])
-        #     good_is = np.where(res_bool)[0]
-        # print(f"{len(good_is)}/{2**(len(sk.tree)-len(min_r_set))} possible sets")
-        for syntree in skeletons[st]:
-            sk = Skeleton(syntree, index)  
-            min_r_set = compute_md(sk.tree, sk.tree_root)
-            for i in range(2**(len(sk.tree)-len(min_r_set))):
-                sk.reset(min_r_set)
-                zero_mask_inds = np.where(sk.mask == 0)[0]
-                bool_mask = get_bool_mask(i)
-                sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-                if sk.leaves_up:             
-                    pargs.append([i, sk, min_r_set])
-            assert min_r_set[0] == sk.tree_root
-            if args.predict_anchor:
-                for i in range(2**(len(min_r_set)-1)):                
-                    sk.reset([sk.tree_root])
-                    zero_mask_inds = np.where(sk.mask == 0)[0][1:len(min_r_set)]
-                    bool_mask = get_bool_mask(i)
-                    fill_in = zero_mask_inds[-len(bool_mask):][bool_mask]
-                    sk.mask = fill_in
-                    pargs.append([i, sk, min_r_set, [sk.tree_root] + fill_in])
 
+        # with Pool(20) as p:        
+        #     pargs = p.starmap(get_parg, tqdm([(syntree, min_r_set, index) for syntree in skeletons[st]]))
 
-        print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))} 
+        """
+        Determine a tree using min-resolving set
+        """
+        sk = Skeleton(syntree, index)
+        min_r_set = compute_md(sk.tree, sk.tree_root)        
+        # for syntree in skeletons[st]:
+        #     test_sk = Skeleton(syntree, index)
+        #     test_min_r_set = compute_md(test_sk.tree, test_sk.tree_root)   
+        #     assert test_min_r_set == min_r_set          
+
+        """
+        Determine a tree by explicitly checking that hashes are different
+        """
+        pargs = [get_parg(syntree, min_r_set, index, determine_criteria=args.determine_criteria,
+                          predict_anchor=args.predict_anchor) for syntree in tqdm(skeletons[st])]
+        pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
+        print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))}\\\
               for class {index} which is {kth_largest[index]+1}th most represented")
-        # batch_size = 200
-        batch_size = 1
-        res = []
+        batch_size = 200
+        # batch_size = 1                
         for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
-            # print(k)       
+            # print(k)  
+            res = []     
             if batch_size > 1:
-                with Pool(50) as p:
-                    res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
+                try:
+                    with Pool(50) as p:
+                        res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
+                except:
+                    breakpoint()
+                    res = [process_syntree_mask(*pargs[j]) for j in range(batch_size*k, batch_size*k+batch_size)]
             else:
-                res.append(process_syntree_mask(*pargs[k]))
-            print("Before:", len(res))
-            res = [r for r in res if r is not None]
-            print("After:", len(res))
-            # if k == 2:
-            #     res = []
-            #     for parg in pargs[batch_size*k:batch_size*k+batch_size]:
-            #         try:
-            #             res.append(process_syntree_mask(parg))
-            #         except:
-            #             breakpoint()
-            #     breakpoint()
-        # with Pool(min(100, len(skeletons[st]))) as p:
-        #     res = p.starmap(process_syntree_mask, tqdm(pargs))               
+                res.append(process_syntree_mask(*pargs[k]))            
+            res = [r for r in res if r is not None]                       
             node_masks = np.concatenate([r[0] for r in res], axis=0)
             Xs = np.concatenate([r[1] for r in res], axis=0)
             ys = np.concatenate([r[2] for r in res], axis=0)              
@@ -322,6 +321,8 @@ if __name__ == "__main__":
             np.save(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy"), node_masks)
             np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)
 
+        # with Pool(min(100, len(skeletons[st]))) as p:
+        #     res = p.starmap(process_syntree_mask, tqdm(pargs))    
             # res += interm_res
         # with Pool(min(50, len(skeletons[st]))) as p:
         #     res = p.starmap(process_syntree_mask, tqdm(pargs))
@@ -335,3 +336,20 @@ if __name__ == "__main__":
         # np.save(os.path.join(args.output_dir, f"{index}_ys.npy"), ys)
         # np.save(os.path.join(args.output_dir, f"{index}_node_masks.npy"), node_masks)
         # np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)
+
+
+
+if __name__ == "__main__":    
+    main()
+    # args = get_args()
+    # skeletons = pickle.load(open(args.skeleton_file, 'rb'))
+    # sk_set = SkeletonSet().load_skeletons(skeletons)
+    # bad_key = list(skeletons.keys())[9]
+    # for syntree in skeletons[bad_key]:
+    #     if syntree.root.smiles == 'CN(CC(N)=O)C(=O)c1cccc(NS(=O)(=O)CCC#Cc2cc(Cl)c(F)c(CNS(=O)(=O)CCCn3cnnn3)c2)c1':
+    #         breakpoint()
+    #     sk = Skeleton(syntree, 9)
+    #     min_r_set = compute_md(sk.tree, sk.tree_root)
+    #     if min_r_set[0] != sk.tree_root:
+    #         breakpoint()        
+            

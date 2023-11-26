@@ -831,6 +831,7 @@ class Skeleton:
         self.tree_edges = np.array(self.tree.edges).T        
         self.tree_root = len(st.chemicals)-1
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
+        self.leaves = np.array([(t not in self.tree_edges[0] and t != self.tree_root) for t in self.tree.nodes()])
         self.index = index
         self.reset()
 
@@ -838,6 +839,7 @@ class Skeleton:
     def reset(self, mask=None):
         self._mask = np.zeros(len(self.tree), dtype=np.int8)
         self.leaves_up = True
+        self.all_leaves = False
         if mask is not None:
             self.mask = mask
 
@@ -853,6 +855,14 @@ class Skeleton:
         src = self.mask[self.non_root_tree_edges[0]]
         dest = self.mask[self.non_root_tree_edges[1]]
         self.leaves_up = not (src > dest).any()
+        self.all_leaves = self.mask[self.leaves].all()
+
+    
+    @staticmethod
+    def one_hot(n, ind):
+        zeros = np.zeros(n)
+        zeros[ind] = 1.
+        return zeros
 
            
     def get_state(self, leaves_up=False):
@@ -863,33 +873,42 @@ class Skeleton:
             node_mask: self.mask (len(self.tree),)
             X: (len(self.tree), in_dim) matrix of node features, with rows at ~node_mask zero'ed out
             y: (len(self.tree), out_dim) 256-dim mol_fp, with rows at node_mask zero'ed out
-        """
-        X = np.zeros((len(self.tree), 4096+1))
-        y = np.zeros((len(self.tree), 256+1))
-        for n in self.tree.nodes():
-            if self.mask[n]:
-                if 'smiles' in self.tree.nodes[n]:
-                    try:
-                        X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
-                        X[n][2048:4096] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
-                    except:
-                        pass
+        """        
+        X = np.zeros((len(self.tree), 2*2048+91))
+        y = np.zeros((len(self.tree), 256+91))
+        try:
+            for n in self.tree.nodes():
+                leaves_filled = self.mask[list(self.tree.neighbors(n))].all()
+                if self.mask[n]:
+                    # if leaves_filled and list(self.tree.neighbors(n)):
+                    #     if 'smiles' in self.tree.nodes[n]: # impossible
+                    #         if n != self.tree_root:
+                    #             breakpoint()
+                    #     else:
+                    #         if not self.leaves[list(self.tree.neighbors(n))].all(): # rxn on intermediate
+                    #             breakpoint()
+                    if 'smiles' in self.tree.nodes[n]:
+                            X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
+                            X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
+                            # print(self.tree.nodes[n])
+                    elif 'rxn_id' in self.tree.nodes[n]:
+                        assert len(list(self.tree.predecessors(n))) == 1
+                        X[n][:2048] = fp_2048(self.tree.nodes[list(self.tree.predecessors(n))[0]]['smiles'])
+                        X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
+                        X[n][2*2048:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
+                    else:
+                        print("bad node")
+                elif not leaves_up or leaves_filled:
+                    if 'smiles' in self.tree.nodes[n]:
+                        y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
                         # print(self.tree.nodes[n])
-                elif 'rxn_id' in self.tree.nodes[n]:
-                    X[n][4096] = self.tree.nodes[n]['rxn_id']
-                else:
-                    print("bad node")
-            elif (not leaves_up or self.mask[list(self.tree.neighbors(n))].all()):
-                if 'smiles' in self.tree.nodes[n]:
-                    try:
-                        y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])
-                    except:
-                        pass
-                        # print(self.tree.nodes[n])
-                elif 'rxn_id' in self.tree.nodes[n]:
-                    y[n][256] = self.tree.nodes[n]['rxn_id']
-                else:
-                    print("bad node")
+                    elif 'rxn_id' in self.tree.nodes[n]:
+                        y[n][256:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
+                    else:
+                        print("bad node")
+        except:
+            print(f"{self.tree.nodes[self.tree_root]['smiles']} bad")
+            pass
 
         return np.atleast_2d(self.mask), X, y
     
@@ -902,8 +921,8 @@ class Skeleton:
             X: (len(self.tree), in_dim) matrix of node features, with rows at ~self.mask zero'ed out
             y: (len(self.tree), out_dim) 256-dim, with rows at poss having the 256-dim mol_fp of node
         """
-        X = np.zeros((len(self.tree), 4096+1))
-        y = np.zeros((len(self.tree), 256+1))
+        X = np.zeros((len(self.tree), 2*2048+91))
+        y = np.zeros((len(self.tree), 256+91))
         node_mask = self.mask.copy()
         node_mask[poss] = 1
         for n in self.tree.nodes():
@@ -911,15 +930,14 @@ class Skeleton:
                 if 'smiles' in self.tree.nodes[n]:
                     try:
                         X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
-                        X[n][2048:4096] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
+                        X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
                     except:
                         pass
                 elif 'rxn_id' in self.tree.nodes[n]:
-                    X[n][4096] = self.tree.nodes[n]['rxn_id']
+                    X[n][2048:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
                 else:
                     print("bad node")
             elif node_mask[n]:
-                breakpoint()
                 print(f"{n} is symmetric with {node}")
                 assert not (('smiles' in self.tree.nodes[n]) ^ ('smiles' in self.tree.nodes[node]))
                 assert not (('rxn_id' in self.tree.nodes[n]) ^ ('rxn_id' in self.tree.nodes[node]))
@@ -929,7 +947,7 @@ class Skeleton:
                     except: 
                         pass
                 elif 'rxn_id' in self.tree.nodes[node]:
-                    y[n][256] = self.tree.nodes[node]['rxn_id']
+                    y[n][256:] = self.one_hot(91,self.tree.nodes[node]['rxn_id'])
                 else:
                     print("bad node")
         if len(poss):
