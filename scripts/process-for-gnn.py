@@ -33,15 +33,23 @@ def get_args():
         help="Input file for the skeletons of syntree-file",
     )
     parser.add_argument(
-        "--predict_anchor",
+        "--anchor_type",
         choices=['rset', 'leaves'],
-        help="What type of anchors to predict, if any"
+        default='rset',
+        help="What constitutes anchors"
     )
+    parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves', 'frontier'],
+        choices=['leaves_up', 'all_leaves', 'rxn_frontier', 'bb_frontier'],
         default='leaves_up',
-        help="Criteria for a determined skeleton"
+        help="""
+        Criteria for a determined skeleton:
+            leaves_up: all children present
+            all_leaves: all leaves present
+            rxn_frontier: there exists rxn on bfs frontier, predict rxns
+            bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier
+        """
     )
     parser.add_argument(
         "--output-dir",
@@ -169,10 +177,16 @@ def get_wl_kernel(tree: nx.digraph, fill_in=[]):
 def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
     if args.determine_criteria in ['leaves_up', 'all_leaves']:
         leaves_up = True
-        frontier = False
-    else:
+        rxn_frontier = False
+        bb_frontier = False
+    elif args.determine_criteria == 'rxn_frontier':
         leaves_up = False
-        frontier = True
+        rxn_frontier = True
+        bb_frontier = False
+    elif args.determine_criteria == 'bb_frontier':
+        leaves_up = False
+        rxn_frontier = True
+        bb_frontier = True        
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
@@ -191,8 +205,9 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         zero_mask_inds = np.where(sk.mask == 0)[0]    
         bool_mask = get_bool_mask(i)
         sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        node_mask, X, y = sk.get_state(leaves_up, frontier)
-        assert sk.all_leaves
+        node_mask, X, y = sk.get_state(leaves_up, rxn_frontier, bb_frontier)
+        if args.determine_criteria == 'all_leaves':
+            assert sk.all_leaves
         return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
 
 
@@ -272,8 +287,6 @@ def main():
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
-        if index < 3:
-            continue
         if len(skeletons[st]) < 100:
             continue
         # if index < 2:
@@ -291,7 +304,7 @@ def main():
 
         sk = Skeleton(syntree, index)
         
-        if args.predict_anchor == 'rset':
+        if args.anchor_type == 'rset':
             # Anchors are the min-resolving set
             min_r_set = compute_md(sk.tree, sk.tree_root)        
         else:
@@ -303,8 +316,8 @@ def main():
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))}\\\
               for class {index} which is {kth_largest[index]+1}th most represented")
-        # batch_size = 200
-        batch_size = 1                
+        batch_size = 200
+        # batch_size = 1                
         for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
             # print(k)  
             res = []     

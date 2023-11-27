@@ -832,7 +832,9 @@ class Skeleton:
         self.tree_edges = np.array(self.tree.edges).T        
         self.tree_root = len(st.chemicals)-1
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
-        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in self.tree.nodes()])        
+        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in self.tree.nodes()])                
+        self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree.nodes()))])
+        self.bidir_edges = np.concatenate((self.tree_edges, self.tree_edges[::-1]), axis=-1)
         self.index = index
         self.reset()
 
@@ -841,6 +843,7 @@ class Skeleton:
         self._mask = np.zeros(len(self.tree), dtype=np.int8)
         self.leaves_up = True
         self.all_leaves = False
+        self.frontier = True # because we have target?
         if mask is not None:
             self.mask = mask
 
@@ -857,6 +860,12 @@ class Skeleton:
         dest = self.mask[self.non_root_tree_edges[1]]
         self.leaves_up = not (src > dest).any()
         self.all_leaves = self.mask[self.leaves].all()
+        non_mask_rxns = ~(self.mask == 1) & self.rxns
+        src_in_mask = self.mask[self.bidir_edges.T[:, 0]]
+        self.frontier_nodes = self.bidir_edges.T[src_in_mask == 1][:, 1]        
+        self.rxn_frontier = non_mask_rxns[self.frontier_nodes].any()
+        self.bb_frontier = self.mask.sum() < len(self.mask) # bad only when no frontier
+        
 
     
     @staticmethod
@@ -864,9 +873,19 @@ class Skeleton:
         zeros = np.zeros(n)
         zeros[ind] = 1.
         return zeros
+    
+
+    def fill_node(self, n, y):
+        if 'smiles' in self.tree.nodes[n]:
+            y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
+            # print(self.tree.nodes[n])
+        elif 'rxn_id' in self.tree.nodes[n]:
+            y[n][256:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
+        else:
+            print("bad node")
 
            
-    def get_state(self, leaves_up=False, frontier=False):
+    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False):
         """
         Return the partial graph with self.mask determining which nodes are available
         If leaves_up is true, further zero out y at nodes where there is an un-filled child
@@ -875,13 +894,20 @@ class Skeleton:
             X: (len(self.tree), in_dim) matrix of node features, with rows at ~node_mask zero'ed out
             y: (len(self.tree), out_dim) 256-dim mol_fp, with rows at node_mask zero'ed out
         leaves_up: whether to set targets to be nodes where all its children are targets
-        frontier: whether to set targets to be nodes on bfs frontier
+        rxn_frontier: whether to set targets to be rxn nodes on bfs frontier
+        bb_frontier: whether to set targets to be rxn nodes on bfs frontier if present, else bb nodes
         """        
         X = np.zeros((len(self.tree), 2*2048+91))
         y = np.zeros((len(self.tree), 256+91))
         try:
             for n in self.tree.nodes():
                 leaves_filled = self.mask[list(self.tree.neighbors(n))].all()
+                is_frontier = n in self.frontier_nodes
+                is_frontier_rxn = is_frontier and self.rxns[n]
+                is_frontier_bb = is_frontier and not self.rxns[n] and not self.rxn_frontier
+                if is_frontier_rxn:
+                    assert self.mask[self.bidir_edges.T[self.bidir_edges[1] == n][:, 0]].any()
+                    assert 'rxn_id' in self.tree.nodes[n]                
                 if self.mask[n]:
                     # if leaves_filled and list(self.tree.neighbors(n)):
                     #     if 'smiles' in self.tree.nodes[n]: # impossible
@@ -891,9 +917,9 @@ class Skeleton:
                     #         if not self.leaves[list(self.tree.neighbors(n))].all(): # rxn on intermediate
                     #             breakpoint()
                     if 'smiles' in self.tree.nodes[n]:
-                            X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
-                            X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
-                            # print(self.tree.nodes[n])
+                        X[n][:2048] = fp_2048(self.tree.nodes[n]['smiles'])
+                        X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
+                        # print(self.tree.nodes[n])
                     elif 'rxn_id' in self.tree.nodes[n]:
                         assert len(list(self.tree.predecessors(n))) == 1
                         X[n][:2048] = fp_2048(self.tree.nodes[list(self.tree.predecessors(n))[0]]['smiles'])
@@ -901,15 +927,16 @@ class Skeleton:
                         X[n][2*2048:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
                     else:
                         print("bad node")
-                elif not leaves_up or leaves_filled:
-                    if 'smiles' in self.tree.nodes[n]:
-                        y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
-                        # print(self.tree.nodes[n])
-                    elif 'rxn_id' in self.tree.nodes[n]:
-                        y[n][256:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
-                    else:
-                        print("bad node")
-        except:
+                else:
+                    if rxn_frontier and is_frontier_rxn:
+                        self.fill_node(n, y)
+                    if bb_frontier and is_frontier_bb:
+                        self.fill_node(n, y)
+                    if not rxn_frontier and not bb_frontier:
+                        if not leaves_up or leaves_filled:
+                            self.fill_node(n, y)
+        except Exception as e:
+            print(e)
             print(f"{self.tree.nodes[self.tree_root]['smiles']} bad")
             pass
 
