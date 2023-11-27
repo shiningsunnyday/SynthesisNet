@@ -34,15 +34,15 @@ def get_args():
     )
     parser.add_argument(
         "--predict_anchor",
-        action='store_true',
-        help="Whether to predict anchors"
+        choices=['rset', 'leaves'],
+        help="What type of anchors to predict, if any"
     )
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves'],
+        choices=['leaves_up', 'all_leaves', 'frontier'],
         default='leaves_up',
         help="Criteria for a determined skeleton"
-    )    
+    )
     parser.add_argument(
         "--output-dir",
         type=str,
@@ -166,7 +166,13 @@ def get_wl_kernel(tree: nx.digraph, fill_in=[]):
 
 
 
-def process_syntree_mask(i, sk, min_r_set, anchors=None):
+def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
+    if args.determine_criteria in ['leaves_up', 'all_leaves']:
+        leaves_up = True
+        frontier = False
+    else:
+        leaves_up = False
+        frontier = True
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
@@ -177,6 +183,7 @@ def process_syntree_mask(i, sk, min_r_set, anchors=None):
                 poss_vals.append(poss)
         if len(poss_vals) > 1:
             breakpoint()
+        # featurize prediction problem of next anchor, which can be any of poss_vals
         node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])
         return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
     else:
@@ -184,7 +191,7 @@ def process_syntree_mask(i, sk, min_r_set, anchors=None):
         zero_mask_inds = np.where(sk.mask == 0)[0]    
         bool_mask = get_bool_mask(i)
         sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        node_mask, X, y = sk.get_state(leaves_up=True)
+        node_mask, X, y = sk.get_state(leaves_up, frontier)
         assert sk.all_leaves
         return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
 
@@ -197,26 +204,30 @@ def test_is_leaves_up(i, sk, min_r_set):
     return sk.leaves_up
 
 
-def get_parg(syntree, min_r_set, index, determine_criteria='leaves_up', predict_anchor=False):
+def get_parg(syntree, min_r_set, index, args):
+    determine_criteria=args.determine_criteria
+    predict_anchor=args.predict_anchor
     sk = Skeleton(syntree, index)
     pargs = []
-    for i in range(2**(len(sk.tree)-len(min_r_set))):
-        sk.reset(min_r_set)
-        zero_mask_inds = np.where(sk.mask == 0)[0]
-        bool_mask = get_bool_mask(i)
-        sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        if getattr(sk, determine_criteria):
-            pargs.append([i, sk, min_r_set])
     if min_r_set[0] != sk.tree_root:
         breakpoint()
     if predict_anchor:
-        for i in range(2**(len(min_r_set)-1)):                
+        # fill some anchors, predict the next
+        for i in range(2**(len(min_r_set)-1)-1):
             sk.reset([sk.tree_root])
-            zero_mask_inds = np.where(sk.mask == 0)[0][1:len(min_r_set)]
+            zero_mask_inds = np.array(min_r_set[1:])
             bool_mask = get_bool_mask(i)
             fill_in = zero_mask_inds[-len(bool_mask):][bool_mask]
             sk.mask = fill_in
-            pargs.append([i, sk, min_r_set, [sk.tree_root] + fill_in])    
+            pargs.append([i, sk, args, min_r_set, [sk.tree_root] + fill_in])    
+    else:
+        for i in range(2**(len(sk.tree)-len(min_r_set))):
+            sk.reset(min_r_set)
+            zero_mask_inds = np.where(sk.mask == 0)[0]
+            bool_mask = get_bool_mask(i)
+            sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+            if getattr(sk, determine_criteria):
+                pargs.append([i, sk, args, min_r_set])
     return pargs
 
 
@@ -261,7 +272,7 @@ def main():
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
-        if index < 9:
+        if index < 3:
             continue
         if len(skeletons[st]) < 100:
             continue
@@ -278,26 +289,22 @@ def main():
         # with Pool(20) as p:        
         #     pargs = p.starmap(get_parg, tqdm([(syntree, min_r_set, index) for syntree in skeletons[st]]))
 
-        """
-        Determine a tree using min-resolving set
-        """
         sk = Skeleton(syntree, index)
-        min_r_set = compute_md(sk.tree, sk.tree_root)        
-        # for syntree in skeletons[st]:
-        #     test_sk = Skeleton(syntree, index)
-        #     test_min_r_set = compute_md(test_sk.tree, test_sk.tree_root)   
-        #     assert test_min_r_set == min_r_set          
-
-        """
-        Determine a tree by explicitly checking that hashes are different
-        """
-        pargs = [get_parg(syntree, min_r_set, index, determine_criteria=args.determine_criteria,
-                          predict_anchor=args.predict_anchor) for syntree in tqdm(skeletons[st])]
+        
+        if args.predict_anchor == 'rset':
+            # Anchors are the min-resolving set
+            min_r_set = compute_md(sk.tree, sk.tree_root)        
+        else:
+            # Anchors are all the non-target leaves
+            min_r_set = [sk.tree_root] + np.array(sk.tree.nodes)[sk.leaves].tolist()
+        
+# 
+        pargs = [get_parg(syntree, min_r_set, index, args) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))}\\\
               for class {index} which is {kth_largest[index]+1}th most represented")
-        batch_size = 200
-        # batch_size = 1                
+        # batch_size = 200
+        batch_size = 1                
         for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
             # print(k)  
             res = []     

@@ -1,10 +1,12 @@
-from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet
+from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton
 import pickle
 import os
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+import random
+from networkx.drawing.nx_pydot import graphviz_layout
 
 def get_args():
     import argparse
@@ -59,7 +61,8 @@ def skeleton2graph(skeleton):
         lookup[n] = name
     for e in skeleton.edges:
         graph.add_edge(lookup[skeleton.nodes[e[0]]], lookup[skeleton.nodes[e[1]]])
-    return graph
+    return graph, count[skeleton.root.smiles]
+
 
 
 def vis_skeletons(args, skeletons):
@@ -71,13 +74,15 @@ def vis_skeletons(args, skeletons):
     for i in range(max_i):
         for j, sk in enumerate(skeletons):
             ax = fig.add_subplot(max_i, len(skeletons), i*len(skeletons)+j+1)
-            G = skeleton2graph(skeletons[sk][i])
-            pos = nx.circular_layout(G)
+            G, root = skeleton2graph(skeletons[sk][i])
+            pos = Skeleton.hierarchy_pos(G, root)
+            # pos = graphviz_layout(G, prog="twopi")
+            # pos = nx.circular_layout(G)
             node_sizes = [200 for _ in G.nodes()]
             node_sizes[list(G.nodes()).index(skeletons[sk][i].root.smiles)] *= 2
             nx.draw_networkx(G, pos=pos, ax=ax, node_size=node_sizes)
     
-    # fig(f"{args.num_to_vis} representing {len(skeletons)} classes")
+    # fig(f"{args.num_to_vis} representing {len(skeletons)} classes")    
     fig.savefig(fig_path)    
     print(f"visualized some skeletons at {fig_path}")
 
@@ -130,7 +135,7 @@ if __name__ == "__main__":
             print(f"count: {len(v)}") 
 
         pickle.dump(skeletons, open(os.path.join(args.visualize_dir, 'skeletons.pkl'), 'wb+'))
-    breakpoint()
+
     vis_skeletons(args, skeletons)
     count_skeletons(args, skeletons)
     
