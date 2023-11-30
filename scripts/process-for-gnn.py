@@ -34,7 +34,7 @@ def get_args():
     )
     parser.add_argument(
         "--anchor_type",
-        choices=['rset', 'leaves'],
+        choices=['rset', 'leaves', 'target'],
         default='rset',
         help="What constitutes anchors"
     )
@@ -289,6 +289,8 @@ def main():
     for index, st in tqdm(enumerate(skeletons)):
         if len(skeletons[st]) < 100:
             continue
+        if index < 3:
+            continue
         # if index < 2:
         #     continue
         # figure out "a" minimal resolving set
@@ -307,23 +309,26 @@ def main():
         if args.anchor_type == 'rset':
             # Anchors are the min-resolving set
             min_r_set = compute_md(sk.tree, sk.tree_root)        
-        else:
+        elif args.anchor_type == 'leaves':
             # Anchors are all the non-target leaves
             min_r_set = [sk.tree_root] + np.array(sk.tree.nodes)[sk.leaves].tolist()
+        else:
+            min_r_set = [sk.tree_root]
         
 # 
         pargs = [get_parg(syntree, min_r_set, index, args) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
-        print(f"mapping {len(pargs)}/{len(skeletons[st])*(2**(len(sk.tree)-len(min_r_set)))}\\\
-              for class {index} which is {kth_largest[index]+1}th most represented")
-        batch_size = 200
-        # batch_size = 1                
-        for k in tqdm(range((len(pargs)+batch_size-1)//batch_size)): 
+        print(f"mapping {len(pargs)} for class {index} which is {kth_largest[index]+1}th most represented")
+        batch_size = 1000*len(pargs)//len(skeletons[st])
+        # batch_size = 1    
+        num_batches = (len(pargs)+batch_size-1)//batch_size
+        print(f"{num_batches} batches")
+        for k in tqdm(range(num_batches)): 
             # print(k)  
             res = []     
             if batch_size > 1:
                 try:
-                    with Pool(50) as p:
+                    with Pool(80) as p:
                         res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
                 except:
                     breakpoint()
