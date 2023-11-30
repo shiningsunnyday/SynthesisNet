@@ -43,7 +43,7 @@ class BuildingBlockFilter:
 
         func = partial(__match, self.building_blocks)
         with mp.Pool(processes=self.processes) as pool:
-            self.rxns = pool.map(func, self.rxns)
+            self.rxns = pool.map(func, tqdm(self.rxns))
         return self
 
     def _init_rxns_with_reactants(self):
@@ -52,7 +52,7 @@ class BuildingBlockFilter:
         Info: This can take a while for lots of possible reactants."""
         self.rxns = tqdm(self.rxns) if self.verbose else self.rxns
         if self.processes == 1:
-            self.rxns = [rxn.set_available_reactants(self.building_blocks) for rxn in self.rxns]
+            self.rxns = [rxn.set_available_reactants(self.building_blocks) for rxn in tqdm(self.rxns)]
         else:
             self._match_mp()
 

@@ -22,7 +22,7 @@ from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
 from tqdm import tqdm
 import pickle
-from itertools import permutations
+from itertools import permutations, product
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 import networkx as nx
 from sklearn.manifold import MDS
@@ -250,7 +250,7 @@ class Reaction:
         # <<< ^ delete this line if resolved.
         return uniqps
 
-    def _filter_reactants(
+    def  _filter_reactants(
         self, smiles: list[str], verbose: bool = False
     ) -> Tuple[list[str], list[str]]:
         """
@@ -303,6 +303,100 @@ class Reaction:
         out = copy.deepcopy(self.__dict__)  # TODO:
         _ = out.pop("rxn")
         return out
+
+
+
+class Program:
+    def __init__(self, rxn_tree=None):
+        self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()
+        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []]
+        self.rxn_map = {}
+        self.reactant_map = {}
+        self.product_map = {}
+
+
+    @property
+    def entries(self):
+        return self._entries
+    
+
+    def add_rxn(self, id, left, right=None):
+        assert left in self.rxn_tree.nodes()
+        assert right is None or right in self.rxn_tree.nodes()
+        key = len(self.rxn_tree)
+        self.rxn_tree.add_node(key, rxn_id=id)        
+        self.rxn_tree.add_edge(key, left)
+        if right:
+            self.rxn_tree.add_edge(key, right)
+    
+
+    def combine(self, other):
+        self.rxn_tree = nx.disjoint_union(self.rxn_tree, other.rxn_tree)
+        self._entries = self._entries + other.entries
+        return self
+    
+
+    def init_rxns(self, rxns):
+        for n in self.rxn_tree.nodes():
+            rxn = rxns[self.rxn_tree.nodes[n]['rxn_id']]
+            assert rxn.available_reactants is not None
+            self.rxn_map[n] = rxn                    
+            
+
+    @staticmethod
+    def run_rxns(entries, rxn_map, rxn_tree, entry_reactants):
+        good = True
+        product_map = {}
+        for node in nx.dfs_postorder_nodes(rxn_tree, len(rxn_tree)-1):
+            if node in entries:
+                entry = entries.index(node)
+                prod = rxn_map[node].run_reaction(entry_reactants[entry])
+                product_map[node] = prod
+            else:
+                reactants = []
+                for i, n in enumerate(rxn_tree.successors(node)):
+                    if i == 0:
+                        if rxn_map[node].is_reactant_first(product_map[n]):
+                            reactants.append(product_map[n])
+                        else: good = False
+                    if i == 1:
+                        if rxn_map[node].is_reactant_second(product_map[n]):
+                            reactants.append(product_map[n])
+                        else: good = False                            
+                    if good:
+                        product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
+                    else: break
+        return good
+    
+
+    def run_rxn_tree(self):   
+        reactant_map = {}        
+        for n in self.entries:
+            reactant_map[n] = product(*[reactants for reactants in self.rxn_map[n].available_reactants])
+        all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
+        res = []
+        count = len(list(all_entry_reactants))
+        # if count > 10000:
+        with Pool(100) as p:
+            res = p.starmap(self.run_rxns, [[self.entries, self.rxn_map, self.rxn_tree, entry_reactants] for entry_reactants in all_entry_reactants])
+            # res = [self.run_rxns(entry_reactants) for entry_reactants in all_entry_reactants]
+            assert len(res) == len(all_entry_reactants)
+        res = [entry_reactants for (r, entry_reactants) in zip(res, all_entry_reactants) if r]
+        # Update the reactants to only valid inputs
+        for n in self.entries:
+            cur = self.rxn_map[n].available_reactants
+            self.rxn_map[n].available_reactants = tuple([] for _ in cur)
+
+        for entry_reactants in res:
+            for entry_reactant, n in zip(entry_reactants, self.entries):
+                for i, reactant in enumerate(entry_reactant):
+                    self.rxn_map[n].available_reactants[i].append(reactant)
+
+        for n in self.entries:
+            self.rxn_map[n].available_reactants = [list(set(reactants)) for reactants in self.rxn_map[n].available_reactants]
+        return count, res
+                        
+
 
 
 class ReactionSet:
@@ -866,7 +960,6 @@ class Skeleton:
         self.rxn_frontier = non_mask_rxns[self.frontier_nodes].any()
         self.bb_frontier = self.mask.sum() < len(self.mask) # bad only when no frontier
         
-
     
     @staticmethod
     def one_hot(n, ind):
