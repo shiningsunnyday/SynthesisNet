@@ -5,7 +5,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-import random
+from collections import defaultdict
 from networkx.drawing.nx_pydot import graphviz_layout
 
 def get_args():
@@ -100,6 +100,43 @@ def count_skeletons(args, skeletons):
     print(f"visualized count at {fig_path}")
 
 
+def count_bbs(args, skeletons):
+    fig_path = os.path.join(args.visualize_dir, 'bb_count.png')
+    fig = plt.Figure()
+    bb_count = defaultdict(int)
+    for sk in tqdm(skeletons):
+        for st in skeletons[sk]:
+            for c in st.chemicals:
+                if c.is_leaf:
+                    bb_count[c.smiles] += 1
+    counts = list(bb_count.values())
+    ax = fig.add_subplot(1, 1, 1)
+    ax.bar(range(len(counts)), sorted(counts, key=lambda x:-x))
+    ax.set_xlabel('bb')
+    ax.set_ylabel('count')
+    ax.set_yscale('log')
+    fig.savefig(fig_path)
+    print(f"visualized count at {fig_path}")    
+
+
+def count_rxns(args, skeletons):
+    fig_path = os.path.join(args.visualize_dir, 'rxn_count.png')
+    fig = plt.Figure()
+    rxn_count = defaultdict(int)
+    for sk in skeletons:
+        for st in skeletons[sk]:
+            for r in st.reactions:
+                rxn_count[r.rxn_id] += 1
+    counts = list(rxn_count.values())
+    ax = fig.add_subplot(1, 1, 1)
+    ax.bar(range(len(counts)), sorted(counts, key=lambda x:-x))
+    ax.set_xlabel('rxn')
+    ax.set_ylabel('count')
+    ax.set_yscale('log')
+    fig.savefig(fig_path)
+    print(f"visualized count at {fig_path}")      
+
+
 if __name__ == "__main__":
     args = get_args()
     syntree_collection = SyntheticTreeSet()
@@ -136,6 +173,8 @@ if __name__ == "__main__":
 
         pickle.dump(skeletons, open(os.path.join(args.visualize_dir, 'skeletons.pkl'), 'wb+'))
 
+    count_bbs(args, skeletons)
+    count_rxns(args, skeletons)
     vis_skeletons(args, skeletons)
     count_skeletons(args, skeletons)
     
