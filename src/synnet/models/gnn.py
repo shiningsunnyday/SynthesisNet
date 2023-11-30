@@ -95,7 +95,13 @@ def load_lazy_dataloaders(args):
         while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")):
             # y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
             node_mask = np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy"))
-            start_inds = np.where(node_mask == node_mask.min())[0]
+            smiles = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))
+            start_inds = [0]
+            for j, s in enumerate(smiles):
+                if s == smiles[start_inds[-1]]:
+                    continue
+                start_inds.append(j)               
+            start_inds = np.where(node_mask.sum(axis=-1) == node_mask.sum(axis=-1).min())[0] # each distinct tree
             n = len(start_inds)
             print(f"splitting {n} trees into 80-10-10 for skeleton {i}")
             train_ind, val_ind = start_inds[int(0.8*n)], start_inds[int(0.9*n)]            
@@ -105,7 +111,7 @@ def load_lazy_dataloaders(args):
             for j in range(train_ind, val_ind):
                 val_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
                 os.path.join(input_dir, f"{i}_edge_index.npy"), j))
-            for j in range(val_ind):
+            for j in range(val_ind, n):
                 test_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
                 os.path.join(input_dir, f"{i}_edge_index.npy"), j))                
             index += 1     

@@ -5,6 +5,7 @@ from synnet.data_generation.preprocessing import (
     ReactionTemplateFileHandler,
 )
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, Program
+from synnet.utils.analysis_utils import count_bbs
 import pickle
 import os
 import networkx as nx
@@ -53,6 +54,7 @@ def get_args():
     ) 
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
+    parser.add_argument("--top-bb", type=int)
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
@@ -184,6 +186,8 @@ def expand_programs(all_progs, size):
 
 
 def create_run_programs(args, bbf, size=3):     
+    if args.cache_dir:
+        os.makedirs(args.cache_dir, exist_ok=True)
     for d in range(1, size+1):
         cache_fpath = os.path.join(args.cache_dir, f"{d}.pkl")
         exist = os.path.exists(cache_fpath)
@@ -215,7 +219,16 @@ if __name__ == "__main__":
     # Parse input args
     args = get_args()
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)    
-    bblocks = bblocks
+    if os.path.exists(args.skeleton_file):
+        # Use to filter building blocks
+        skeletons = pickle.load(open(args.skeleton_file, 'rb'))    
+        bb_counts = count_bbs(args, skeletons, vis=False)
+        for bblock in bblocks:
+            bb_counts[bblock]
+        bblocks = sorted(bb_counts.keys(), key=lambda x:-bb_counts[x])
+        if args.top_bb:            
+            bblocks = bblocks[:args.top_bb]
+            print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
     bbf = BuildingBlockFilter(
         building_blocks=bblocks,

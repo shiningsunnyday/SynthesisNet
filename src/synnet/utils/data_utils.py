@@ -181,12 +181,16 @@ class Reaction:
     def is_reactant_first(self, smi: Union[str, Chem.Mol]) -> bool:
         """Check if `smi` is the first reactant in this reaction"""
         mol = self.get_mol(smi)
+        if mol is None:
+            return False
         pattern = Chem.MolFromSmarts(self.reactant_template[0])
         return mol.HasSubstructMatch(pattern)
 
     def is_reactant_second(self, smi: Union[str, Chem.Mol]) -> bool:
         """Check if `smi` the second reactant in this reaction"""
         mol = self.get_mol(smi)
+        if mol is None:
+            return False
         pattern = Chem.MolFromSmarts(self.reactant_template[1])
         return mol.HasSubstructMatch(pattern)
 
@@ -376,11 +380,12 @@ class Program:
         all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
         res = []
         count = len(list(all_entry_reactants))
-        # if count > 10000:
-        with Pool(100) as p:
-            res = p.starmap(self.run_rxns, [[self.entries, self.rxn_map, self.rxn_tree, entry_reactants] for entry_reactants in all_entry_reactants])
-            # res = [self.run_rxns(entry_reactants) for entry_reactants in all_entry_reactants]
-            assert len(res) == len(all_entry_reactants)
+        if count > 1000:
+            with Pool(100) as p:
+                res = p.starmap(self.run_rxns, [[self.entries, self.rxn_map, self.rxn_tree, entry_reactants] for entry_reactants in all_entry_reactants])           
+                assert len(res) == len(all_entry_reactants)
+        else:
+            res = [self.run_rxns(self.entries, self.rxn_map, self.rxn_tree, entry_reactants) for entry_reactants in all_entry_reactants]
         res = [entry_reactants for (r, entry_reactants) in zip(res, all_entry_reactants) if r]
         # Update the reactants to only valid inputs
         for n in self.entries:
