@@ -5,7 +5,7 @@ from synnet.data_generation.preprocessing import (
     ReactionTemplateFileHandler,
 )
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, Program
-from synnet.utils.analysis_utils import count_bbs
+from synnet.utils.analysis_utils import count_bbs, count_rxns
 import pickle
 import os
 import networkx as nx
@@ -49,12 +49,13 @@ def get_args():
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default="results/program_cache/",
+        default="",
         help="Intermediate results",
     ) 
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--top-bb", type=int)
+    parser.add_argument("--top-rxn", type=int)
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
@@ -115,6 +116,7 @@ def get_programs(rxns, size=1):
         for i, rxn in enumerate(rxns):
             g = nx.DiGraph()
             g.add_node(0, rxn_id=i)
+            # g.graph['super'] = False
             prog = Program(g)
             progs.append(prog)
         return {1: progs}
@@ -131,8 +133,8 @@ def get_programs(rxns, size=1):
                 A = all_progs[j]
                 B = all_progs[size-1-j]
                 for a in A:
-                    for b in B:                   
-                        prog = deepcopy(a).combine(b)
+                    for b in B:                
+                        prog = deepcopy(a).combine(deepcopy(b))
                         prog.add_rxn(i, 0, len(a.rxn_tree)-1)
                         progs.append(prog)
     all_progs[size] = progs
@@ -162,26 +164,56 @@ def run_programs(progs, bbf, depths=[]):
 
 
 
+def expand_program(i, a, b=None):
+    prog = deepcopy(a)
+    if b is not None:
+        prog = prog.combine(deepcopy(b))      
+        prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
+    else:
+        prog.add_rxn(i, len(a.rxn_tree)-1)
+    return prog
+
+
+
 def expand_programs(all_progs, size):
     progs = []
+    pargs = []
     for i, r in enumerate(bbf.rxns):
         if r.num_reactant == 1:
             A = all_progs[size-1]
             for a in A:
-                prog = deepcopy(a)
-                prog.add_rxn(i, len(a.rxn_tree)-1)
-                progs.append(prog)
+                pargs.append((i, a))
         else:
             for j in range(1, size-1):
                 A = all_progs[j]
                 B = all_progs[size-1-j]
                 for a in A:
-                    for b in B:                   
-                        prog = deepcopy(a).combine(b)
-                        prog.add_rxn(i, 0, len(a.rxn_tree)-1)
-                        progs.append(prog)  
+                    for b in B:   
+                        pargs.append((i, a, b))
+    # with Pool(20) as p:
+        # progs = p.starmap(expand_program,tqdm(pargs))
+    progs = []
+    for i, parg in enumerate(pargs):
+        print(i)
+        progs.append(expand_program(*parg))      
     all_progs[size] = progs
     return all_progs
+
+
+
+def filter_programs(progs):
+    new_progs = []
+    for p in progs:
+        good = True
+        for e in p.entries:
+            if np.prod([len(reactants) for reactants in p.rxn_map[e].available_reactants]):
+                continue
+            good = False
+            break
+        if good:
+            new_progs.append(p)
+
+    return new_progs
 
 
 
@@ -194,22 +226,29 @@ def create_run_programs(args, bbf, size=3):
         if args.cache_dir and exist:
             all_progs = pickle.load(open(cache_fpath, 'rb'))
             print(f"loaded {len(all_progs[d])} size-{d} programs")
+            all_progs[d] = filter_programs(all_progs[d])
             assert d in all_progs
             continue
         if d == 1: 
-            progs = get_programs(bbf.rxns, size=1)    
+            progs = get_programs(bbf.rxns, size=1)
             all_progs = progs
-            continue
-        
-        print(f"expanding {len(all_progs[d-1])} size-{d-1} programs")
-        expand_programs(all_progs, d)
-        print(f"create-running {len(all_progs[d])} size-{d} programs")
-        # with Pool(bbf.processes) as p:
-            # progs = p.map(run_program, tqdm(all_progs[d]))
-        progs = [run_program(p) for p in tqdm(all_progs[d])]
-        all_progs[d] = progs               
+        else:  
+            cache_fpath_pre = cache_fpath.replace(f"{d}.pkl", f"{d}_pre.pkl")
+            if args.cache_dir and os.path.exists(cache_fpath_pre):
+                all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
+            else:
+                print(f"expanding {len(all_progs[d-1])} size-{d-1} programs")
+                expand_programs(all_progs, d)
+                if args.cache_dir:
+                    pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
+            print(f"create-running {len(all_progs[d])} size-{d} programs")
+            # with Pool(bbf.processes) as p:
+                # progs = p.map(run_program, tqdm(all_progs[d]))
+  
+        progs = [run_program(p) for p in tqdm(all_progs[d])]        
+        all_progs[d] = filter_programs(progs)
         if args.cache_dir and not exist:
-            pickle.dump(open(cache_fpath, 'wb'))
+            pickle.dump(all_progs, open(cache_fpath, 'wb'))
         
 
 
@@ -219,17 +258,34 @@ if __name__ == "__main__":
     # Parse input args
     args = get_args()
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)    
+    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
+
     if os.path.exists(args.skeleton_file):
         # Use to filter building blocks
-        skeletons = pickle.load(open(args.skeleton_file, 'rb'))    
-        bb_counts = count_bbs(args, skeletons, vis=False)
-        for bblock in bblocks:
-            bb_counts[bblock]
-        bblocks = sorted(bb_counts.keys(), key=lambda x:-bb_counts[x])
-        if args.top_bb:            
+        skeletons = pickle.load(open(args.skeleton_file, 'rb'))            
+        if args.top_bb: 
+            bb_counts = count_bbs(args, skeletons, vis=False)
+            for bblock in bblocks:
+                bb_counts[bblock]
+            bblocks = sorted(bb_counts.keys(), key=lambda x:-bb_counts[x])                       
             bblocks = bblocks[:args.top_bb]
-            print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")
-    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
+            print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")                
+        if args.top_rxn:            
+            rxn_counts = count_rxns(args, skeletons, vis=False)
+            for rxn in rxn_templates:
+                rxn_counts[rxn]            
+            rxn_templates = sorted(rxn_templates, key=lambda x:-rxn_counts[x])        
+            rxn_templates = rxn_templates[:args.top_rxn]
+            print(f"top rxn have counts: {[rxn_counts[x] for x in rxn_templates]}")
+        
+
+    # debug
+    test_st = list(skeletons.keys())[0]
+    bblock_inds = [bblocks.index(n.smiles) for n in test_st.chemicals if n.smiles in bblocks]
+    bblocks = [bblocks[ind] for ind in bblock_inds]
+    rxn_templates = [rxn_templates[r.rxn_id] for r in test_st.reactions]
+
+
     bbf = BuildingBlockFilter(
         building_blocks=bblocks,
         rxn_templates=rxn_templates,
@@ -243,7 +299,8 @@ if __name__ == "__main__":
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
-    create_run_programs(args,bbf, size=3)
+    create_run_programs(args, bbf, size=3)
+
     skeletons = pickle.load(open(args.skeleton_file, 'rb'))
     sts = []
     for index, sk in enumerate(skeletons):

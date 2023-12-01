@@ -81,7 +81,7 @@ def count_bbs(args, skeletons, vis=True):
     return bb_count   
 
 
-def count_rxns(args, skeletons):
+def count_rxns(args, skeletons, vis=True):
     fig_path = os.path.join(args.visualize_dir, 'rxn_count.png')
     fig = plt.Figure()
     rxn_count = defaultdict(int)
@@ -89,11 +89,13 @@ def count_rxns(args, skeletons):
         for st in skeletons[sk]:
             for r in st.reactions:
                 rxn_count[r.rxn_id] += 1
-    counts = list(rxn_count.values())
-    ax = fig.add_subplot(1, 1, 1)
-    ax.bar(range(len(counts)), sorted(counts, key=lambda x:-x))
-    ax.set_xlabel('rxn')
-    ax.set_ylabel('count')
-    ax.set_yscale('log')
-    fig.savefig(fig_path)
-    print(f"visualized count at {fig_path}")   
+    if vis:
+        counts = list(rxn_count.values())
+        ax = fig.add_subplot(1, 1, 1)
+        ax.bar(range(len(counts)), sorted(counts, key=lambda x:-x))
+        ax.set_xlabel('rxn')
+        ax.set_ylabel('count')
+        ax.set_yscale('log')
+        fig.savefig(fig_path)
+        print(f"visualized count at {fig_path}")   
+    return rxn_count

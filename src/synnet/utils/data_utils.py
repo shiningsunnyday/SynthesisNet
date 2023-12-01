@@ -23,10 +23,12 @@ RDLogger.DisableLog('rdApp.*')
 from tqdm import tqdm
 import pickle
 from itertools import permutations, product
+from collections import defaultdict
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 import networkx as nx
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
+from copy import deepcopy
 
 from synnet.encoding.fingerprints import fp_2048, fp_256
 
@@ -313,10 +315,9 @@ class Reaction:
 class Program:
     def __init__(self, rxn_tree=None):
         self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()
-        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []]
+        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []] 
         self.rxn_map = {}
-        self.reactant_map = {}
-        self.product_map = {}
+        self.product_map = defaultdict(lambda: defaultdict(dict)) # map from node -> {interm: entry: {[index1, index2]}}
 
 
     @property
@@ -328,23 +329,72 @@ class Program:
         assert left in self.rxn_tree.nodes()
         assert right is None or right in self.rxn_tree.nodes()
         key = len(self.rxn_tree)
-        self.rxn_tree.add_node(key, rxn_id=id)        
+        self.rxn_tree.add_node(key, rxn_id=id)
         self.rxn_tree.add_edge(key, left)
+        self.rxn_tree.nodes[left]['child'] = 'left'
         if right:
+            self.rxn_tree.nodes[right]['child'] = 'right'
             self.rxn_tree.add_edge(key, right)
     
 
-    def combine(self, other):
+    def combine(self, other):    
+        offset = len(self.rxn_tree)
         self.rxn_tree = nx.disjoint_union(self.rxn_tree, other.rxn_tree)
-        self._entries = self._entries + other.entries
+        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []]                 
+        for n in other.rxn_map:
+            self.rxn_map[n+offset] = other.rxn_map[n]
+        # combine rxn_map's
+        for n in other.product_map:
+            for r in other.product_map[n]:
+                for e, v in other.product_map[n][r].items():
+                    self.product_map[n+offset][r][e+offset] = v
+        # combine self.product_map's and correct for entries
         return self
     
 
     def init_rxns(self, rxns):
         for n in self.rxn_tree.nodes():
-            rxn = rxns[self.rxn_tree.nodes[n]['rxn_id']]
-            assert rxn.available_reactants is not None
-            self.rxn_map[n] = rxn                    
+            if n not in self.rxn_map:                
+                rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
+                assert rxn.available_reactants is not None
+                self.rxn_map[n] = rxn
+                prod_before = [[len(avail_reactants) for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries]
+
+                for succ in self.rxn_tree.successors(n):
+                    if self.rxn_tree.nodes[succ]['child'] == 'left':
+                        filter_func = rxn.is_reactant_first 
+                    else:
+                        filter_func = rxn.is_reactant_second
+
+                    res = []
+                    for interm in self.product_map[succ]:
+                        if filter_func(interm):
+                            if list(self.product_map[succ][interm].keys()) != self.entries: # same order
+                                # make sure appear in same order
+                                appear_entries = [self.entries.index(p) for p in list(self.product_map[succ][interm].keys())]
+                                assert sorted(appear_entries) == appear_entries                        
+                            entry_reactants = [[self.rxn_map[e].available_reactants[i][ind] for (i, ind) in enumerate(self.product_map[succ][interm][e])] for e in self.product_map[succ][interm]]
+                            res.append((interm, entry_reactants))
+                    
+                    entries = list(self.product_map[succ][interm].keys())                    
+                    for n in entries:
+                        cur = self.rxn_map[n].available_reactants
+                        self.rxn_map[n].available_reactants = tuple([] for _ in cur)                    
+                                        
+                    avail_index = {n: [{}, {}] for n in entries}  # sets of possible first and second reactants per entry
+                    for _, entry_reactants in res:            
+                        for entry_reactant, n in zip(entry_reactants, entries):
+                            for i, reactant in enumerate(entry_reactant):
+                                if reactant not in avail_index[n][i]:                        
+                                    avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i])
+                                    self.rxn_map[n].available_reactants[i].append(reactant)
+
+                
+                prod_after = [[len(avail_reactants) for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries]
+                print(f"pruned avail reactants from {prod_before}->{prod_after} using interm prods")
+                # change available_reactants to be valid products of previous            
+                # propagate down the tree            
+                
             
 
     @staticmethod
@@ -358,7 +408,11 @@ class Program:
                 product_map[node] = prod
             else:
                 reactants = []
-                for i, n in enumerate(rxn_tree.successors(node)):
+                succ = list(rxn_tree.successors(node))
+                assert len(succ) in [1, 2]
+                if len(succ) == 2 and rxn_tree.nodes[succ[-1]]['child'] == 'left':
+                    succ = succ[::-1]
+                for i, n in enumerate(succ):                    
                     if i == 0:
                         if rxn_map[node].is_reactant_first(product_map[n]):
                             reactants.append(product_map[n])
@@ -367,14 +421,21 @@ class Program:
                         if rxn_map[node].is_reactant_second(product_map[n]):
                             reactants.append(product_map[n])
                         else: good = False                            
-                    if good:
-                        product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
-                    else: break
-        return good
+                    if not good:
+                        break                        
+                if good:
+                    product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
+        if good:
+            return product_map[len(rxn_tree)-1]
+        else:
+            return None        
     
 
-    def run_rxn_tree(self):   
-        reactant_map = {}        
+    def run_rxn_tree(self): 
+        # Assume entry inputs satisfy everything except the "root"        
+        reactant_map = {}
+        # if self.rxn_tree.graph['super']:
+        #     breakpoint()
         for n in self.entries:
             reactant_map[n] = product(*[reactants for reactants in self.rxn_map[n].available_reactants])
         all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
@@ -386,19 +447,23 @@ class Program:
                 assert len(res) == len(all_entry_reactants)
         else:
             res = [self.run_rxns(self.entries, self.rxn_map, self.rxn_tree, entry_reactants) for entry_reactants in all_entry_reactants]
-        res = [entry_reactants for (r, entry_reactants) in zip(res, all_entry_reactants) if r]
+        res = [(r, entry_reactants) for (r, entry_reactants) in zip(res, all_entry_reactants) if r is not None]
+
         # Update the reactants to only valid inputs
         for n in self.entries:
             cur = self.rxn_map[n].available_reactants
             self.rxn_map[n].available_reactants = tuple([] for _ in cur)
 
-        for entry_reactants in res:
+        avail_index = {n: [{}, {}] for n in self.entries}  # sets of possible first and second reactants per entry
+        for r, entry_reactants in res:            
             for entry_reactant, n in zip(entry_reactants, self.entries):
+                entry_point = []
                 for i, reactant in enumerate(entry_reactant):
-                    self.rxn_map[n].available_reactants[i].append(reactant)
-
-        for n in self.entries:
-            self.rxn_map[n].available_reactants = [list(set(reactants)) for reactants in self.rxn_map[n].available_reactants]
+                    if reactant not in avail_index[n][i]:                        
+                        avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i])
+                        self.rxn_map[n].available_reactants[i].append(reactant)
+                    entry_point.append(avail_index[n][i][reactant])
+                self.product_map[len(self.rxn_tree)-1][r][n] = entry_point
         return count, res
                         
 
