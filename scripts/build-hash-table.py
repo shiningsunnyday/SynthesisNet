@@ -52,10 +52,17 @@ def get_args():
         default="",
         help="Intermediate results",
     ) 
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="",
+        help="Store results",
+    )
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--top-bb", type=int)
     parser.add_argument("--top-rxn", type=int)
+    parser.add_argument("--stats-file")
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
@@ -141,26 +148,19 @@ def get_programs(rxns, size=1):
     return all_progs
 
 
-def run_program(prog):
+def run_program(prog):    
+    """
+    Init program, which prunes entry reactants using the most recent node
+    Then runs the programs, returning validity and (if prog.keep_prods) storing intermediates
+    """
     prog.init_rxns(bbf.rxns)
     start_len, res = prog.run_rxn_tree()
-    print(f"{len(res)}/{start_len} pass")
-    return prog
+    if start_len:
+        print(f"{len(res)}/{start_len} pass")
+        return prog
+    else:
+        return None
 
-
-
-def run_programs(progs, bbf, depths=[]):
-    if depths == []:
-        depths = progs.keys()
-    
-    for depth in depths:
-        pass_rates = []
-        print(f"running {len(progs[depth])} depth-{depth} programs")
-        with Pool(bbf.processes) as p:
-            pass_rates = p.map(run_program, tqdm(progs[depth]))
-
-        #     pass_rates.append(len(res)/start_len)
-        print(f"depth-{depth} pass rate: {np.mean(pass_rates)}")
 
 
 
@@ -178,7 +178,7 @@ def expand_program(i, a, b=None):
 def expand_programs(all_progs, size):
     progs = []
     pargs = []
-    for i, r in enumerate(bbf.rxns):
+    for i, r in tqdm(enumerate(bbf.rxns)):
         if r.num_reactant == 1:
             A = all_progs[size-1]
             for a in A:
@@ -190,12 +190,11 @@ def expand_programs(all_progs, size):
                 for a in A:
                     for b in B:   
                         pargs.append((i, a, b))
-    # with Pool(20) as p:
-        # progs = p.starmap(expand_program,tqdm(pargs))
-    progs = []
-    for i, parg in enumerate(pargs):
-        print(i)
-        progs.append(expand_program(*parg))      
+    with Pool(20) as p:
+        progs = p.starmap(expand_program, tqdm(pargs))
+    # progs = []
+    # for i, parg in enumerate(pargs):
+    #     progs.append(expand_program(*parg))      
     all_progs[size] = progs
     return all_progs
 
@@ -204,6 +203,8 @@ def expand_programs(all_progs, size):
 def filter_programs(progs):
     new_progs = []
     for p in progs:
+        if p is None:
+            continue
         good = True
         for e in p.entries:
             if np.prod([len(reactants) for reactants in p.rxn_map[e].available_reactants]):
@@ -242,14 +243,14 @@ def create_run_programs(args, bbf, size=3):
                 if args.cache_dir:
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
             print(f"create-running {len(all_progs[d])} size-{d} programs")
-            # with Pool(bbf.processes) as p:
-                # progs = p.map(run_program, tqdm(all_progs[d]))
-  
-        progs = [run_program(p) for p in tqdm(all_progs[d])]        
+
+        with Pool(bbf.processes) as p:
+            progs = p.map(run_program, tqdm(all_progs[d]))  
+        # progs = [run_program(p) for p in tqdm(all_progs[d])]
         all_progs[d] = filter_programs(progs)
         if args.cache_dir and not exist:
             pickle.dump(all_progs, open(cache_fpath, 'wb'))
-        
+    return all_progs
 
 
 
@@ -280,10 +281,10 @@ if __name__ == "__main__":
         
 
     # debug
-    test_st = list(skeletons.keys())[0]
-    bblock_inds = [bblocks.index(n.smiles) for n in test_st.chemicals if n.smiles in bblocks]
-    bblocks = [bblocks[ind] for ind in bblock_inds]
-    rxn_templates = [rxn_templates[r.rxn_id] for r in test_st.reactions]
+    # test_st = list(skeletons.keys())[0]
+    # bblock_inds = [bblocks.index(n.smiles) for n in test_st.chemicals if n.smiles in bblocks]
+    # bblocks = [bblocks[ind] for ind in bblock_inds]
+    # rxn_templates = [rxn_templates[r.rxn_id] for r in test_st.reactions]
 
 
     bbf = BuildingBlockFilter(
@@ -299,21 +300,35 @@ if __name__ == "__main__":
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
-    create_run_programs(args, bbf, size=3)
+    all_progs = create_run_programs(args, bbf, size=5)
+    def avg_input(progs):
+        num_poss = []
+        for p in progs:
+            react = []
+            for e in p.entries:
+                num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
+                react.append(num)
+            num_poss.append(np.prod(react))
+        return np.mean(num_poss)
+    if args.stats_file:
+        with open(args.stats_file, 'a+') as f:
+            f.write(f"{args.top_bb}\n")
+            f.write(','.join([str(len(all_progs[d])) for d in all_progs])+'\n')
+            f.write(','.join([str(avg_input(all_progs[d])) for d in all_progs])+'\n')
 
-    skeletons = pickle.load(open(args.skeleton_file, 'rb'))
-    sts = []
-    for index, sk in enumerate(skeletons):
-        for st in skeletons[sk]:
-            sts.append([st, index])
+    # skeletons = pickle.load(open(args.skeleton_file, 'rb'))
+    # sts = []
+    # for index, sk in enumerate(skeletons):
+    #     for st in skeletons[sk]:
+    #         sts.append([st, index])
 
-    if args.ncpu == 1:
-        res = [hash_st(st, index) for st, index in sts]
-    else:
-        with Pool(args.ncpu) as p:
-            res = p.starmap(hash_st, tqdm(sts))
-    res = [k_val for r in res for k_val in r]
-    table = defaultdict(lambda: defaultdict(int))
-    for length, k_val in res:
-        table[length][k_val] += 1
-    vis_table(args, table)
+    # if args.ncpu == 1:
+    #     res = [hash_st(st, index) for st, index in sts]
+    # else:
+    #     with Pool(args.ncpu) as p:
+    #         res = p.starmap(hash_st, tqdm(sts))
+    # res = [k_val for r in res for k_val in r]
+    # table = defaultdict(lambda: defaultdict(int))
+    # for length, k_val in res:
+    #     table[length][k_val] += 1
+    # vis_table(args, table)
