@@ -205,7 +205,7 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         zero_mask_inds = np.where(sk.mask == 0)[0]    
         bool_mask = get_bool_mask(i)
         sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        node_mask, X, y = sk.get_state(leaves_up, rxn_frontier, bb_frontier)
+        node_mask, X, y = sk.get_state(leaves_up, rxn_frontier, bb_frontier)        
         if args.determine_criteria == 'all_leaves':
             assert sk.all_leaves
         return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
@@ -289,13 +289,13 @@ def main():
     for index, st in tqdm(enumerate(skeletons)):
         if len(skeletons[st]) < 100:
             continue
-        if index < 3:
-            continue
+        # if index < 3:
+        #     continue
         # if index < 2:
         #     continue
         # figure out "a" minimal resolving set
-        # if index < 2:
-        #     continue
+        if index < 2:
+            continue
         sk = Skeleton(st, index)
         edge_index = np.array(sk.tree.edges).T           
         pargs = []
@@ -315,8 +315,9 @@ def main():
         else:
             min_r_set = [sk.tree_root]
         
-# 
-        pargs = [get_parg(syntree, min_r_set, index, args) for syntree in tqdm(skeletons[st])]
+        # with Pool(50) as p:
+            # pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st])]))
+        pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)} for class {index} which is {kth_largest[index]+1}th most represented")
         batch_size = 1000*len(pargs)//len(skeletons[st])
@@ -324,11 +325,13 @@ def main():
         num_batches = (len(pargs)+batch_size-1)//batch_size
         print(f"{num_batches} batches")
         for k in tqdm(range(num_batches)): 
+            if os.path.exists(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy")):
+                continue
             # print(k)  
             res = []     
             if batch_size > 1:
                 try:
-                    with Pool(80) as p:
+                    with Pool(50) as p:
                         res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
                 except:
                     breakpoint()

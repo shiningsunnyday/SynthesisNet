@@ -267,13 +267,15 @@ class GNN(pl.LightningModule):
 
         loss = torch.Tensor([0.]).to(y_rxn.device)
         if "cross_entropy" in self.loss:
-            ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)   
-            self.log(f"train_ce_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-            loss += ce_loss
+            if y_rxn.shape[0]:
+                ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)   
+                self.log(f"train_ce_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+                loss += ce_loss
         if "mse" in self.loss:
-            mse_loss = F.mse_loss(y_hat_bb, y_bb)       
-            self.log(f"train_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-            loss += mse_loss 
+            if y_bb.shape[0]:
+                mse_loss = F.mse_loss(y_hat_bb, y_bb)       
+                self.log(f"train_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+                loss += mse_loss 
 
         self.log(f"train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
@@ -298,21 +300,24 @@ class GNN(pl.LightningModule):
         y_hat_rxn = y_hat[mask_rxn, 256:]
 
         if "cross_entropy" in self.valid_loss:
-            ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)
-            self.log("val_cross_entropy_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            if y_rxn.shape[0]:
+                ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)
+                self.log("val_cross_entropy_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         if "accuracy" in self.valid_loss:
-            y_hat, y = y_hat_rxn, y_rxn
-            y_hat = torch.argmax(y_hat, axis=1)
-            y = torch.argmax(y, axis=1)
-            accuracy = (y_hat == y).sum() / len(y)
-            acc_loss = (1 - accuracy)
-            self.log("val_accuracy_loss", acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            if y_rxn.shape[0]:
+                y_hat, y = y_hat_rxn, y_rxn
+                y_hat = torch.argmax(y_hat, axis=1)
+                y = torch.argmax(y, axis=1)
+                accuracy = (y_hat == y).sum() / len(y)
+                acc_loss = (1 - accuracy)
+                self.log("val_accuracy_loss", acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         if "nn_accuracy" in self.valid_loss:
-            y = nn_search_list(y_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))
-            y_hat = nn_search_list(y_hat_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))            
-            accuracy = (y_hat == y).sum() / len(y)
-            nn_acc_loss = (1 - accuracy)
-            self.log("val_nn_accuracy_loss", nn_acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            if y_bb.shape[0]:
+                y = nn_search_list(y_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))
+                y_hat = nn_search_list(y_hat_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))            
+                accuracy = (y_hat == y).sum() / len(y)
+                nn_acc_loss = (1 - accuracy)
+                self.log("val_nn_accuracy_loss", nn_acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         if "faiss-knn" in self.valid_loss:
             index = self.molembedder.index
             device = index.getDevice() if hasattr(index, "getDevice") else "cpu"
