@@ -2,15 +2,20 @@ from pathlib import Path
 from typing import Union
 
 import sys
-from synnet.utils.data_utils import NodeChemical, NodeRxn, SyntheticTree, SyntheticTreeSet
-from synnet.visualize.drawers import MolDrawer
+from synnet.utils.data_utils import NodeChemical, NodeRxn, SyntheticTree, SyntheticTreeSet, Skeleton
+from synnet.visualize.drawers import MolDrawer, RxnDrawer
+from synnet.data_generation.preprocessing import (
+    BuildingBlockFileHandler,
+    ReactionTemplateFileHandler,
+)
 from synnet.visualize.writers import subgraph
 
 from synnet.visualize.drawers import MolDrawer
-from synnet.visualize.writers import SynTreeWriter
+from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
 
 import pickle
 import argparse
+import networkx as nx
 
 
 class SynTreeVisualizer:
@@ -126,7 +131,6 @@ class SynTreeVisualizer:
         text = []
 
         # Add node definitions
-        breakpoint()
         text.extend(self._define_chemicals(self.CHEMICALS))
 
         # Add paragraphs (<=> actions taken)
@@ -143,6 +147,151 @@ class SynTreeVisualizer:
                 return self._write_reaction_connectivity(
                     [self.CHEMICALS.get(reactant1), self.CHEMICALS.get(reactant2)],
                     self.CHEMICALS.get(product),
+                )
+
+            out = __printer()
+            text.extend(out)
+        return text
+
+class SkeletonVisualizer:
+    outfolder: Union[str, Path]
+
+    def __init__(self, skeleton: Skeleton, outfolder: str = "./syntree-viz/st"):
+        self.skeleton = skeleton
+        # Placeholder for images for molecues.
+        self.mol_drawer: Union[MolDrawer, None]
+        self.rxn_drawer: Union[RxnDrawer, None]
+        self.molecule_filesnames: Union[None, dict[str, str]] = None
+        self.reaction_filenames: Union[None, dict[str, str]] = None        
+
+        # Folders
+        outfolder = Path(outfolder)
+        self.version = self._get_next_version(outfolder)
+        self.path = outfolder.with_name(outfolder.name + f"_{self.version}")
+        return None
+
+    def _get_next_version(self, dir: str) -> int:
+        root_dir = Path(dir).parent
+        name = Path(dir).name
+
+        existing_versions = []
+        for d in Path(root_dir).glob(f"{name}_*"):
+            d = str(d.resolve())
+            existing_versions.append(int(d.split("_")[1]))
+
+        if len(existing_versions) == 0:
+            return 0
+
+        return max(existing_versions) + 1
+
+    def with_drawings(self, mol_drawer: MolDrawer, rxn_drawer: RxnDrawer):
+        """Init `MolDrawer` or `RxnDrawer` to plot molecules or rxns in the nodes."""
+        self.path.mkdir(parents=True)
+        self.mol_drawer = mol_drawer(self.path)
+        self.rxn_drawer = rxn_drawer(self.path)
+        return self
+
+    def plot(self):
+        """Plots molecules and reactions via `self.drawer.plot()`."""
+        if self.mol_drawer is None:
+            raise ValueError("Must initialize drawer beforehand.")
+        if self.rxn_drawer is None:
+            raise ValueError("Must initialize drawer beforehand.")        
+ 
+        smiles = []
+        smirks = []
+        tree = self.skeleton.tree
+        for n in tree.nodes():
+            if 'smiles' in tree.nodes[n]:
+                smiles.append(tree.nodes[n]['smiles'])
+            else:
+                assert 'rxn_id' in tree.nodes[n]
+                assert 'smirks' in tree.nodes[n]
+                smirks.append(tree.nodes[n]['smirks'])
+        self.mol_drawer.plot(smiles)
+        self.rxn_drawer.plot(smirks)
+        self.molecule_filesnames = self.mol_drawer.get_molecule_filesnames()
+        self.reaction_filesnames = self.rxn_drawer.get_reaction_filesnames()
+        return self
+
+    def _define_chemicals_and_reactions(
+        self        
+    ) -> list[str]:
+
+        if self.mol_drawer.outfolder is None or self.molecule_filesnames is None:
+            raise NotImplementedError("Must provide drawer via `_with_drawings()` before plotting.")
+        if self.rxn_drawer.outfolder is None or self.reaction_filesnames is None:
+            raise NotImplementedError("Must provide drawer via `_with_drawings()` before plotting.")
+
+        out: list[str] = []
+        tree = self.skeleton.tree
+        for node in tree:
+            if 'smiles' in tree.nodes[node]:
+                name = f'"node.smiles"'
+                fname = self.molecule_filesnames[tree.nodes[node]['smiles']]
+                fname += ".svg"
+            else: 
+                name = f'"node.rxn"'
+                fname = self.reaction_filesnames[tree.nodes[node]['smirks']]
+                fname += ".png"
+            assert self.mol_drawer.outfolder.name == self.rxn_drawer.outfolder.name
+            name = f'<img src=""{self.mol_drawer.outfolder.name}/{fname}"" height=75px/>'
+            classdef = self._map_node_type_to_classdef(tree, node)
+            info = f"n{node}[{name}]:::{classdef}"
+            out += [info]
+        return out
+
+    def _map_node_type_to_classdef(self, tree, node) -> str:
+        """Map a node to pre-defined mermaid class for styling."""        
+        if 'rxn_id' in tree.nodes[node]:
+            classdef = "reaction"
+        elif list(tree.successors(node)) == 0:
+            classdef = "buildingblock"
+        elif list(tree.predecessors(node)) == 0:
+            classdef = "final"
+        else:
+            classdef = "intermediate"
+        return classdef
+
+    def _write_reaction_connectivity(
+        self, reactants, product
+    ) -> list[str]:
+        """Write the connectivity of the graph.
+        Unimolecular reactions have one edge, bimolecular two.
+
+        Examples:
+            n1 --> n3
+            n2 --> n3
+        """
+        NODE_PREFIX = "n"
+        r1, r2 = reactants
+        out = [f"{NODE_PREFIX}{r1} --> {NODE_PREFIX}{product}"]
+        if r2:
+            out += [f"{NODE_PREFIX}{r2} --> {NODE_PREFIX}{product}"]
+        return out
+
+    def write(self) -> list[str]:
+        """Write markdown with mermaid block."""
+        # 1. Plot images
+        self.plot()
+        # 2. Write markdown (with reference to image files.)
+        text = []
+
+        # Add node definitions        
+        text.extend(self._define_chemicals_and_reactions())
+
+        tree = self.skeleton.tree
+        assert list(tree.predecessors(self.skeleton.tree_root)) == []
+        order = nx.dfs_postorder_nodes(tree, self.skeleton.tree_root)
+        # Add paragraphs (<=> actions taken)
+        for (i, node) in enumerate(order):
+            if not list(tree.successors(node)):
+                continue
+            reactant1, *reactant2 = list(tree.successors(node))
+            @subgraph(f'"{i:>2d} : {node}"')
+            def __printer():
+                return self._write_reaction_connectivity(
+                    [reactant1, reactant2], node
                 )
 
             out = __printer()
@@ -181,19 +330,43 @@ if __name__ == "__main__":
     # demo()
     parser = argparse.ArgumentParser()
     parser.add_argument('--syntree_json')
+    parser.add_argument('--rxn-templates-file', help="to visualize reactions")
+    parser.add_argument(
+        "--skeleton-file",
+        type=str,
+        default="results/viz/skeletons.pkl",
+        help="Input file for the skeletons of syntree-file",
+    )
     parser.add_argument('--out_folder')
     args = parser.parse_args()
-    syntree_collection = SyntheticTreeSet().load(args.syntree_json)
-    for st in syntree_collection:
-        if st == None:
-            breakpoint()
-            continue
-        breakpoint()
-        stviz = SynTreeVisualizer(syntree=st, outfolder=args.out_folder).with_drawings(drawer=MolDrawer)
-        mermaid_txt = stviz.write()        
-        outfile = stviz.path / f"syntree.md"
-        SynTreeWriter().write(mermaid_txt).to_file(outfile)
-        print(f"Generated markdown file.", outfile)
+
+    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
+
+    # syntree_collection = SyntheticTreeSet().load(args.syntree_json)
+    # for st in syntree_collection:
+    #     if st == None:
+    #         breakpoint()
+    #         continue
+    #     breakpoint()
+    #     stviz = SynTreeVisualizer(syntree=st, outfolder=args.out_folder).with_drawings(drawer=MolDrawer)
+    #     mermaid_txt = stviz.write()        
+    #     outfile = stviz.path / f"syntree.md"
+    #     SynTreeWriter().write(mermaid_txt).to_file(outfile)
+    #     print(f"Generated markdown file.", outfile)
         
-    for st in syntree_collection:
-        print(st.root.smiles)
+    # for st in syntree_collection:
+    #     print(st.root.smiles)
+
+
+    skeletons = pickle.load(open(args.skeleton_file, 'rb'))
+    syntree = list(skeletons)[0]
+    sk = Skeleton(syntree, index=0)
+    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
+    for n in sk.tree: # add reactions
+        if 'rxn_id' in sk.tree.nodes[n]:
+            sk.tree.nodes[n]['smirks'] = rxn_templates[sk.tree.nodes[n]['rxn_id']]
+    skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_folder).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
+    mermaid_txt = skviz.write()
+    outfile = skviz.path / f"skeleton.md"
+    SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
+    print(f"Generated markdown file.", outfile)

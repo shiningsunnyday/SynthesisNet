@@ -55,6 +55,55 @@ class PostfixWriter:
         return ["```"]
 
 
+class SkeletonPrefixWriter:
+    def __init__(self, file: str = None):
+        self.prefix = self._default_prefix() if file is None else self._load(file)
+
+    def _default_prefix(self):
+        md = [
+            "# Skeleton Visualisation",
+            "",
+            "Legend",
+            "- :grey_square: Building Block",
+            "- :orange_square: Intermediate",
+            "- :blue_square: Final Molecule",
+            "- :red_square: Reaction",
+            "",
+        ]
+        start = ["```mermaid"]
+        theming = [
+            "%%{init: {",
+            "    'theme': 'base',",
+            "    'themeVariables': {",
+            "        'backgroud': '#ffffff',",
+            "        'primaryColor': '#ffffff',",
+            "        'clusterBkg': '#ffffff',",
+            "        'clusterBorder': '#000000',",
+            "        'edgeLabelBackground':'#dbe1e1',",
+            "        'fontSize': '20px'",
+            "        }",
+            "    }",
+            "}%%",
+        ]
+        diagram_id = ["graph BT"]
+        style = [
+            "classDef buildingblock stroke:#080808,stroke-width:2px",
+            "classDef intermediate stroke:#ff6723,stroke-width:2px",
+            "classDef reaction stroke:#f8312f,stroke-width:2px",
+            "classDef final stroke:#0074ba,stroke-width:2px",
+        ]
+        return md + start + theming + diagram_id + style
+
+    def _load(self, file):
+        with open(file, "rt") as f:
+            out = [l.removesuffix("\n") for l in f]
+        return out
+
+    def write(self) -> list[str]:
+        return self.prefix
+
+
+
 class SynTreeWriter:
     def __init__(self, prefixer=PrefixWriter(), postfixer=PostfixWriter()):
         self.prefixer = prefixer
