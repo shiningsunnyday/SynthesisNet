@@ -1055,6 +1055,10 @@ class Skeleton:
         self.frontier_nodes = self.bidir_edges.T[src_in_mask == 1][:, 1]        
         self.rxn_frontier = non_mask_rxns[self.frontier_nodes].any()
         self.bb_frontier = self.mask.sum() < len(self.mask) # bad only when no frontier
+        src = self.mask[self.tree_edges[0]]
+        dest = self.mask[self.tree_edges[1]]
+        self.target_down = (src >= dest).all()
+
         
     
     @staticmethod
@@ -1074,7 +1078,7 @@ class Skeleton:
             print("bad node")
 
            
-    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False):
+    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False, target_down=False):
         """
         Return the partial graph with self.mask determining which nodes are available
         If leaves_up is true, further zero out y at nodes where there is an un-filled child
@@ -1085,6 +1089,7 @@ class Skeleton:
         leaves_up: whether to set targets to be nodes where all its children are targets
         rxn_frontier: whether to set targets to be rxn nodes on bfs frontier
         bb_frontier: whether to set targets to be rxn nodes on bfs frontier if present, else bb nodes
+        target_down: same as leaves_up but from target down
         """        
         X = np.zeros((len(self.tree), 2*2048+91))
         y = np.zeros((len(self.tree), 256+91))

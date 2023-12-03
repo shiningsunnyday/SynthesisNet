@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import torch_geometric.nn as geom_nn
+from collections import defaultdict
 
 from synnet.MolEmbedder import MolEmbedder
 from sklearn.neighbors import NearestNeighbors
@@ -287,6 +288,7 @@ class GNN(pl.LightningModule):
 
         data = batch
         y = data.y
+        data_key = [k for data_key in data.key for k in data_key]
         y_hat = self.model(data)
 
         # only building blocks
@@ -299,10 +301,21 @@ class GNN(pl.LightningModule):
         y_rxn = y[mask_rxn, 256:]        
         y_hat_rxn = y_hat[mask_rxn, 256:]
 
+        # record batch sizes manually
+
         if "cross_entropy" in self.valid_loss:
             if y_rxn.shape[0]:
                 ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)
                 self.log("val_cross_entropy_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+                batch_ce_loss = F.cross_entropy(y_hat_rxn, y_rxn, reduce=False)
+                acc_by_key = defaultdict(list)
+                
+                for key, correct in zip(data_key, batch_ce_loss):
+                    acc_by_key[key].append(correct)
+                for k, v in acc_by_key.items():
+                    self.log(f"val_cross_entropy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
+                                    
         if "accuracy" in self.valid_loss:
             if y_rxn.shape[0]:
                 y_hat, y = y_hat_rxn, y_rxn
@@ -311,6 +324,14 @@ class GNN(pl.LightningModule):
                 accuracy = (y_hat == y).sum() / len(y)
                 acc_loss = (1 - accuracy)
                 self.log("val_accuracy_loss", acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+                acc_by_key = defaultdict(list)
+                for key, correct in zip(data_key, (y_hat == y)):
+                    acc_by_key[key].append(correct)
+                for k, v in acc_by_key.items():
+                    self.log(f"val_accuracy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
+                             
+                
         if "nn_accuracy" in self.valid_loss:
             if y_bb.shape[0]:
                 y = nn_search_list(y_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))
@@ -318,6 +339,13 @@ class GNN(pl.LightningModule):
                 accuracy = (y_hat == y).sum() / len(y)
                 nn_acc_loss = (1 - accuracy)
                 self.log("val_nn_accuracy_loss", nn_acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+                acc_by_key = defaultdict(list)
+                for key, correct in zip(data_key, (y_hat == y)):
+                    acc_by_key[key].append(correct)
+                for k, v in acc_by_key.items():
+                    self.log(f"val_nn_accuracy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
+                                      
         if "faiss-knn" in self.valid_loss:
             index = self.molembedder.index
             device = index.getDevice() if hasattr(index, "getDevice") else "cpu"

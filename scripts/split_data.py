@@ -38,6 +38,7 @@ def main(args):
             i += 1
             continue
         # copy edge_index
+        os.makedirs(args.out_dir, exist_ok=True)
         shutil.copyfile(os.path.join(input_dir, f"{i}_edge_index.npy"), os.path.join(args.out_dir, f"{i}_edge_index.npy"))
         edge_index = np.load(os.path.join(input_dir, f"{i}_edge_index.npy"))
         num_nodes = edge_index.max()+1
@@ -75,7 +76,7 @@ def main(args):
         d = start_inds[1]
         n = len(start_inds)            
         num_p = (n+p_size-1)//p_size
-        print(f"{i}_{index} splitting {n} trees into {num_p} {p_size}-sized tree partitions")            
+        print(f"{i}_{index} splitting {n} trees into {num_p} {p_size}-sized tree partitions")                    
         for k in tqdm(range(num_p)):
             start_ind = start_inds[k*p_size]                        
             end_ind = start_ind + p_size*d

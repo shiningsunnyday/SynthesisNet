@@ -44,6 +44,7 @@ class PtrDataset(Dataset):
                 continue
             edges = np.load(e)
             self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)
+
     
 
     def __getitem__(self, idx):
@@ -53,14 +54,15 @@ class PtrDataset(Dataset):
         X = np.load(base+'_Xs.npy')
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
         y = np.load(base+'_ys.npy')
-        y = y.reshape(-1, num_nodes, y.shape[-1])[index]
+        y = y.reshape(-1, num_nodes, y.shape[-1])[index]        
+        key_val = e.split('/')[-1].split('_')[0]+''.join(list(map(str, node_mask)  ))
         data = (
             torch.tensor(self.edge_index[e], dtype=torch.int64),
-            torch.tensor(node_mask),
+            np.array([key_val for _ in node_mask]), # index
             torch.tensor(X, dtype=torch.float32),
             torch.tensor(y, dtype=torch.float32),
         )
-        return Data(edge_index=data[0], x=data[2], y=data[3])
+        return Data(edge_index=data[0], key=data[1], x=data[2], y=data[3])
     
     
     def __len__(self):
@@ -122,9 +124,9 @@ def load_lazy_dataloaders(args):
     dataset_valid = PtrDataset(val_dataset_ptrs)
     dataset_test = PtrDataset(test_dataset_ptrs)
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
-    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
-    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
-    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor)
+    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor)
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor)
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
 
 

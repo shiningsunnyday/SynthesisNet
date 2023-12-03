@@ -41,12 +41,14 @@ def get_args():
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves', 'rxn_frontier', 'bb_frontier'],
+        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_frontier', 'bb_frontier'],
         default='leaves_up',
         help="""
         Criteria for a determined skeleton:
             leaves_up: all children present
             all_leaves: all leaves present
+            target_down: all predecessors present
+            bfs_frontier: bfs frontier, expand from target only
             rxn_frontier: there exists rxn on bfs frontier, predict rxns
             bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier
         """
@@ -175,18 +177,16 @@ def get_wl_kernel(tree: nx.digraph, fill_in=[]):
 
 
 def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
+    kwargs = {}
     if args.determine_criteria in ['leaves_up', 'all_leaves']:
-        leaves_up = True
-        rxn_frontier = False
-        bb_frontier = False
-    elif args.determine_criteria == 'rxn_frontier':
-        leaves_up = False
-        rxn_frontier = True
-        bb_frontier = False
-    elif args.determine_criteria == 'bb_frontier':
-        leaves_up = False
-        rxn_frontier = True
-        bb_frontier = True        
+        kwargs['leaves_up'] = True
+    elif args.determine_criteria == 'rxn_frontier':        
+        kwargs['rxn_frontier'] = True        
+    elif args.determine_criteria == 'bb_frontier':        
+        kwargs['rxn_frontier'] = True
+        kwargs['bb_frontier'] = True        
+    elif args.determine_criteria == 'target_down':
+        kwargs['target_down'] = True
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
@@ -205,7 +205,7 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         zero_mask_inds = np.where(sk.mask == 0)[0]    
         bool_mask = get_bool_mask(i)
         sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        node_mask, X, y = sk.get_state(leaves_up, rxn_frontier, bb_frontier)        
+        node_mask, X, y = sk.get_state(**kwargs)        
         if args.determine_criteria == 'all_leaves':
             assert sk.all_leaves
         return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
@@ -291,11 +291,9 @@ def main():
             continue
         # if index < 3:
         #     continue
-        # if index < 2:
-        #     continue
-        # figure out "a" minimal resolving set
-        if index < 2:
-            continue
+        if index == 2:
+            breakpoint()
+        # figure out "a" minimal resolving set   
         sk = Skeleton(st, index)
         edge_index = np.array(sk.tree.edges).T           
         pargs = []
