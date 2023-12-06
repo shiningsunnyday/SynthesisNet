@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Union
+from collections import defaultdict
 
 import sys
 from synnet.utils.data_utils import NodeChemical, NodeRxn, SyntheticTree, SyntheticTreeSet, Skeleton
@@ -16,6 +17,8 @@ from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
 import pickle
 import argparse
 import networkx as nx
+import numpy as np
+import os
 
 
 class SynTreeVisualizer:
@@ -215,7 +218,7 @@ class SkeletonVisualizer:
         return self
 
     def _define_chemicals_and_reactions(
-        self        
+        self, node_mask=None
     ) -> list[str]:
 
         if self.mol_drawer.outfolder is None or self.molecule_filesnames is None:
@@ -235,7 +238,10 @@ class SkeletonVisualizer:
                 fname = self.reaction_filesnames[tree.nodes[node]['smirks']]
                 fname += ".png"
             assert self.mol_drawer.outfolder.name == self.rxn_drawer.outfolder.name
-            name = f'<img src=""{self.mol_drawer.outfolder.name}/{fname}"" height=75px/>'
+            if node_mask[node]:
+                name = f'<img src=""{self.mol_drawer.outfolder.name}/{fname}"" height=75px/>'
+            else:
+                name = f'<div height=75px/>'
             classdef = self._map_node_type_to_classdef(tree, node)
             info = f"n{node}[{name}]:::{classdef}"
             out += [info]
@@ -245,9 +251,9 @@ class SkeletonVisualizer:
         """Map a node to pre-defined mermaid class for styling."""        
         if 'rxn_id' in tree.nodes[node]:
             classdef = "reaction"
-        elif list(tree.successors(node)) == 0:
+        elif list(tree.successors(node)) == []:
             classdef = "buildingblock"
-        elif list(tree.predecessors(node)) == 0:
+        elif list(tree.predecessors(node)) == []:
             classdef = "final"
         else:
             classdef = "intermediate"
@@ -270,7 +276,7 @@ class SkeletonVisualizer:
             out += [f"{NODE_PREFIX}{r2} --> {NODE_PREFIX}{product}"]
         return out
 
-    def write(self) -> list[str]:
+    def write(self, node_mask=None) -> list[str]:
         """Write markdown with mermaid block."""
         # 1. Plot images
         self.plot()
@@ -278,7 +284,7 @@ class SkeletonVisualizer:
         text = []
 
         # Add node definitions        
-        text.extend(self._define_chemicals_and_reactions())
+        text.extend(self._define_chemicals_and_reactions(node_mask))
 
         tree = self.skeleton.tree
         assert list(tree.predecessors(self.skeleton.tree_root)) == []
@@ -287,7 +293,13 @@ class SkeletonVisualizer:
         for (i, node) in enumerate(order):
             if not list(tree.successors(node)):
                 continue
-            reactant1, *reactant2 = list(tree.successors(node))
+            succ = list(tree.successors(node))
+            if len(succ) == 2:
+                reactant1, reactant2 = succ
+            elif len(succ) == 1:
+                reactant1, reactant2 = succ[0], None
+            else:
+                raise
             @subgraph(f'"{i:>2d} : {node}"')
             def __printer():
                 return self._write_reaction_connectivity(
@@ -337,6 +349,12 @@ if __name__ == "__main__":
         default="results/viz/skeletons.pkl",
         help="Input file for the skeletons of syntree-file",
     )
+    parser.add_argument(
+        "--features",
+        type=str,
+        default="/ssd/msun415/gnn_featurized_target/",
+        help="Directory of featurized targets",
+    )    
     parser.add_argument('--out_folder')
     args = parser.parse_args()
 
@@ -361,12 +379,25 @@ if __name__ == "__main__":
     skeletons = pickle.load(open(args.skeleton_file, 'rb'))
     syntree = list(skeletons)[0]
     sk = Skeleton(syntree, index=0)
+    fpaths = defaultdict(dict)
+    for f in os.listdir(args.features):
+        if not f.endswith('node_masks.npy'):
+            continue
+        index, batch_num, *pargs = f.split('_')
+        fpath = os.path.join(args.features, f)
+        fpaths[int(index)][int(batch_num)] = fpath
+
+    node_masks = np.load(fpaths[0][0])
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
     for n in sk.tree: # add reactions
         if 'rxn_id' in sk.tree.nodes[n]:
             sk.tree.nodes[n]['smirks'] = rxn_templates[sk.tree.nodes[n]['rxn_id']]
     skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_folder).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
-    mermaid_txt = skviz.write()
-    outfile = skviz.path / f"skeleton.md"
-    SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
-    print(f"Generated markdown file.", outfile)
+    for i in range(node_masks.shape[0]//1000):
+        node_mask = node_masks[i]
+        mermaid_txt = skviz.write(node_mask=node_mask)
+        outfile = skviz.path / f"skeleton_{i}.md"
+        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
+        print(f"Generated markdown file.", outfile)
+
+    

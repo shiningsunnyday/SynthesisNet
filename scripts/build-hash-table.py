@@ -14,6 +14,7 @@ from networkx.algorithms import dfs_tree, weisfeiler_lehman_graph_hash
 from multiprocessing import Pool
 from tqdm import tqdm
 import numpy as np
+import json
 from collections import defaultdict
 from copy import deepcopy
 
@@ -25,7 +26,7 @@ def get_args():
     parser.add_argument(
         "--building-blocks-file",
         type=str,
-        default="data/pre-process/building-blocks/enamine-us-smiles.csv.gz",  # TODO: change
+        default="data/assets/building-blocks/enamine_us_matched.csv",  # TODO: change
         help="Input file with SMILES strings (First row `SMILES`, then one per line).",
     )
     parser.add_argument(
@@ -43,7 +44,7 @@ def get_args():
     parser.add_argument(
         "--visualize-dir",
         type=str,
-        default="results/viz/",
+        default="",
         help="Where to visualize any figures",
     )        
     parser.add_argument(
@@ -58,11 +59,13 @@ def get_args():
         default="",
         help="Store results",
     )
-    # Processing
+    # Hash table args
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
+    parser.add_argument("--depth", type=int, default=3, help="depth of enumeration")
     parser.add_argument("--top-bb", type=int)
     parser.add_argument("--top-rxn", type=int)
-    parser.add_argument("--stats-file")
+    parser.add_argument("--stats", type=str, nargs='+')
+    parser.add_argument("--keep-prods", default=False, action="store_true")
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
@@ -117,17 +120,17 @@ def hash_st(st, index):
     return k_vals
 
 
-def get_programs(rxns, size=1):
+def get_programs(rxns, keep_prods=False, size=1):
     progs = []
     if size == 1:
         for i, rxn in enumerate(rxns):
             g = nx.DiGraph()
             g.add_node(0, rxn_id=i)
             # g.graph['super'] = False
-            prog = Program(g)
+            prog = Program(g, keep_prods=keep_prods)
             progs.append(prog)
         return {1: progs}
-    all_progs = get_programs(rxns, size=size-1)
+    all_progs = get_programs(rxns, keep_prods=keep_prods, size=size-1)
     for i, r in enumerate(rxns):
         if r.num_reactant == 1:
             A = all_progs[size-1]
@@ -231,22 +234,22 @@ def create_run_programs(args, bbf, size=3):
             assert d in all_progs
             continue
         if d == 1: 
-            progs = get_programs(bbf.rxns, size=1)
+            progs = get_programs(bbf.rxns, args.keep_prods, size=1)
             all_progs = progs
         else:  
             cache_fpath_pre = cache_fpath.replace(f"{d}.pkl", f"{d}_pre.pkl")
             if args.cache_dir and os.path.exists(cache_fpath_pre):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
             else:
-                print(f"expanding {len(all_progs[d-1])} size-{d-1} programs")
+                print(f"expanding {len(all_progs[d-1])} size-{d} programs")
                 expand_programs(all_progs, d)
                 if args.cache_dir:
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
             print(f"create-running {len(all_progs[d])} size-{d} programs")
 
-        with Pool(bbf.processes) as p:
-            progs = p.map(run_program, tqdm(all_progs[d]))  
-        # progs = [run_program(p) for p in tqdm(all_progs[d])]
+        # with Pool(bbf.processes) as p:
+            # progs = p.map(run_program, tqdm(all_progs[d]))  
+        progs = [run_program(p) for p in tqdm(all_progs[d])]
         all_progs[d] = filter_programs(progs)
         if args.cache_dir and not exist:
             pickle.dump(all_progs, open(cache_fpath, 'wb'))
@@ -272,8 +275,8 @@ if __name__ == "__main__":
             bblocks = bblocks[:args.top_bb]
             print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")                
         if args.top_rxn:            
-            rxn_counts = count_rxns(args, skeletons, vis=False)
-            for rxn in rxn_templates:
+            rxn_counts = count_rxns(args, skeletons, rxn_templates, vis=False)
+            for i, rxn in enumerate(rxn_templates):
                 rxn_counts[rxn]            
             rxn_templates = sorted(rxn_templates, key=lambda x:-rxn_counts[x])        
             rxn_templates = rxn_templates[:args.top_rxn]
@@ -300,35 +303,54 @@ if __name__ == "__main__":
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
-    all_progs = create_run_programs(args, bbf, size=5)
-    def avg_input(progs):
-        num_poss = []
-        for p in progs:
-            react = []
-            for e in p.entries:
-                num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
-                react.append(num)
-            num_poss.append(np.prod(react))
-        return np.mean(num_poss)
-    if args.stats_file:
-        with open(args.stats_file, 'a+') as f:
-            f.write(f"{args.top_bb}\n")
-            f.write(','.join([str(len(all_progs[d])) for d in all_progs])+'\n')
-            f.write(','.join([str(avg_input(all_progs[d])) for d in all_progs])+'\n')
+    all_progs = create_run_programs(args, bbf, size=args.depth)
 
-    # skeletons = pickle.load(open(args.skeleton_file, 'rb'))
-    # sts = []
-    # for index, sk in enumerate(skeletons):
-    #     for st in skeletons[sk]:
-    #         sts.append([st, index])
+    if args.stats:
+        os.makedirs(args.visualize_dir, exist_ok=True)
+        for stat in args.stats:
+            fpath = os.path.join(args.visualize_dir, f"{stat}.png")            
+            fig = plt.Figure()
+            ax = fig.add_subplot(1,1,1)
+            if stat == 'program-count':
+                lengths = [len(all_progs[d]) for d in all_progs]
+                ax.plot(lengths)
+                ax.set_xlabel("depth")
+                ax.set_ylabel('number of programs')
+            elif stat == 'input-length':
+                input_lengths = [Program.avg_input(all_progs[d]) for d in all_progs]
+                ax.plot(input_lengths)
+                ax.set_xlabel("depth")
+                ax.set_ylabel('number of building block input sets')
+            fig.savefig(fpath)
 
-    # if args.ncpu == 1:
-    #     res = [hash_st(st, index) for st, index in sts]
-    # else:
-    #     with Pool(args.ncpu) as p:
-    #         res = p.starmap(hash_st, tqdm(sts))
-    # res = [k_val for r in res for k_val in r]
-    # table = defaultdict(lambda: defaultdict(int))
-    # for length, k_val in res:
-    #     table[length][k_val] += 1
-    # vis_table(args, table)
+
+    breakpoint()
+            
+    
+
+    if args.output_dir:
+        breakpoint()
+        for d in all_progs:
+            dirname = os.path.join(args.output_dir, f"{d}/")
+            os.makedirs(dirname)
+            # hash all the programs
+            for p in all_progs[d]:
+                fpath = os.path.join(dirname, f"{p.hash()}.json")
+                json.dump(p.output_dict(), open(fpath, 'w+'))
+
+
+    sts = []
+    for index, sk in enumerate(skeletons):
+        for st in skeletons[sk]:
+            sts.append([st, index])
+
+    if args.ncpu == 1:
+        res = [hash_st(st, index) for st, index in sts]
+    else:
+        with Pool(args.ncpu) as p:
+            res = p.starmap(hash_st, tqdm(sts))
+    res = [k_val for r in res for k_val in r]
+    table = defaultdict(lambda: defaultdict(int))
+    for length, k_val in res:
+        table[length][k_val] += 1
+    vis_table(args, table)
