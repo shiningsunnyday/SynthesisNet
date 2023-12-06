@@ -3,6 +3,7 @@ import multiprocessing
 
 # Multiprocessing
 MAX_PROCESSES = min(32, multiprocessing.cpu_count()) - 1
+MP_MIN_COMBINATIONS = 1000
 
 # TODO: Remove these paths bit by bit
 

@@ -1,4 +1,4 @@
-from synnet.config import MAX_PROCESSES
+from synnet.config import MAX_PROCESSES, MP_MIN_COMBINATIONS
 from synnet.data_generation.preprocessing import (
     BuildingBlockFileHandler,
     BuildingBlockFilter,
@@ -11,7 +11,7 @@ import os
 import networkx as nx
 import matplotlib.pyplot as plt
 from networkx.algorithms import dfs_tree, weisfeiler_lehman_graph_hash
-from multiprocessing import Pool
+import multiprocessing as mp
 from tqdm import tqdm
 import numpy as np
 import json
@@ -151,12 +151,19 @@ def get_programs(rxns, keep_prods=False, size=1):
     return all_progs
 
 
+def init_program(prog):    
+    """
+    Then runs the programs, returning validity and (if prog.keep_prods) storing intermediates
+    """    
+    prog.init_rxns(bbf.rxns)
+    return prog
+    
+
+
 def run_program(prog):    
     """
-    Init program, which prunes entry reactants using the most recent node
     Then runs the programs, returning validity and (if prog.keep_prods) storing intermediates
-    """
-    prog.init_rxns(bbf.rxns)
+    """    
     start_len, res = prog.run_rxn_tree()
     if start_len:
         print(f"{len(res)}/{start_len} pass")
@@ -193,7 +200,7 @@ def expand_programs(all_progs, size):
                 for a in A:
                     for b in B:   
                         pargs.append((i, a, b))
-    with Pool(20) as p:
+    with mp.Pool(20) as p:
         progs = p.starmap(expand_program, tqdm(pargs))
     # progs = []
     # for i, parg in enumerate(pargs):
@@ -241,16 +248,38 @@ def create_run_programs(args, bbf, size=3):
             if args.cache_dir and os.path.exists(cache_fpath_pre):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
             else:
-                print(f"expanding {len(all_progs[d-1])} size-{d} programs")
+                print(f"expanding size-{d} programs")
                 expand_programs(all_progs, d)
                 if args.cache_dir:
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
-            print(f"create-running {len(all_progs[d])} size-{d} programs")
+            print(f"created {len(all_progs[d])} size-{d} programs")
 
-        # with Pool(bbf.processes) as p:
-            # progs = p.map(run_program, tqdm(all_progs[d]))  
-        progs = [run_program(p) for p in tqdm(all_progs[d])]
+        with mp.Pool(bbf.processes) as p:
+            all_progs[d] = p.map(init_program, tqdm(all_progs[d]))          
+        # Filter after init prunes the input space
+        all_progs[d] = filter_programs(all_progs[d])
+        print(f"running {len(all_progs[d])} size-{d} programs")
+
+        """
+        Strategy: use mp to run easy programs in parallel
+        Run hard programs sequentially, use mp among the input combinations
+        """
+        easy_prog_inds, hard_prog_inds = [], []
+        for i, p in enumerate(all_progs[d]):
+            if Program.input_length(p) <= MP_MIN_COMBINATIONS:
+                easy_prog_inds.append(i)
+            else:
+                hard_prog_inds.append(i)
+        with mp.Pool(bbf.processes) as p:
+            easy_progs = p.map(run_program, tqdm([all_progs[d][i] for i in easy_prog_inds]))
+        hard_progs = [run_program(p) for p in tqdm([all_progs[d][i] for i in hard_prog_inds])]
+        progs = [None for _ in all_progs[d]]
+        for i, p in zip(easy_prog_inds+hard_prog_inds, easy_progs+hard_progs):
+            progs[i] = p
+        # Filter after reaction is run
         all_progs[d] = filter_programs(progs)
+        print(f"done! {len(all_progs[d])} size-{d} programs")
+
         if args.cache_dir and not exist:
             pickle.dump(all_progs, open(cache_fpath, 'wb'))
     return all_progs
@@ -317,7 +346,7 @@ if __name__ == "__main__":
                 ax.set_xlabel("depth")
                 ax.set_ylabel('number of programs')
             elif stat == 'input-length':
-                input_lengths = [Program.avg_input(all_progs[d]) for d in all_progs]
+                input_lengths = [Program.avg_input_length(all_progs[d]) for d in all_progs]
                 ax.plot(input_lengths)
                 ax.set_xlabel("depth")
                 ax.set_ylabel('number of building block input sets')

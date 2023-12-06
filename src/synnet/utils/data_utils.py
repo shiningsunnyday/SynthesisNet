@@ -14,8 +14,9 @@ import json
 import numpy as np
 import random
 from typing import Any, Optional, Set, Tuple, Union
-from multiprocessing import Pool
-
+import multiprocessing as mp
+mp.set_start_method('fork')
+from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
 from rdkit import RDLogger
@@ -336,16 +337,21 @@ class Program:
     def make_default_dict():
         return defaultdict(dict)  
     
+    
+    @staticmethod
+    def input_length(p):
+        react = []
+        for e in p.entries:
+            num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
+            react.append(num)
+        return np.prod(react)
+    
 
     @staticmethod
-    def avg_input(progs):
+    def avg_input_length(progs):
         num_poss = []
         for p in progs:
-            react = []
-            for e in p.entries:
-                num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
-                react.append(num)
-            num_poss.append(np.prod(react))        
+            num_poss.append(Program.input_length(p))
         return np.mean(num_poss) if len(num_poss) else 0
 
 
@@ -455,10 +461,9 @@ class Program:
                     # change available_reactants to be valid products of previous            
                     # propagate down the tree    
 
-            
-
     @staticmethod
-    def run_rxns(entries, rxn_map, rxn_tree, entry_reactants):
+    def run_rxns(i):
+        entry_reactants = all_entry_reactants[i]
         good = True
         product_map = {}
         for node in nx.dfs_postorder_nodes(rxn_tree, len(rxn_tree)-1):
@@ -493,7 +498,8 @@ class Program:
         if good:
             return product_map[len(rxn_tree)-1]
         else:          
-            return None        
+            return None             
+
     
 
     def run_rxn_tree(self): 
@@ -508,12 +514,22 @@ class Program:
         count = len(list(all_entry_reactants))
         if count == 0:            
             return 0, None
-        # if count > 1000:
-        #     with Pool(100) as p:
-        #         res = p.starmap(self.run_rxns, [[self.entries, self.rxn_map, self.rxn_tree, entry_reactants] for entry_reactants in all_entry_reactants])           
-        #         assert len(res) == len(all_entry_reactants)
-        # else:
-        res = [self.run_rxns(self.entries, self.rxn_map, self.rxn_tree, entry_reactants) for entry_reactants in all_entry_reactants]        
+        
+        rxn_tree = self.rxn_tree
+        rxn_map = self.rxn_map
+        entries = self.entries
+
+        globals()["all_entry_reactants"] = all_entry_reactants
+        globals()["rxn_tree"] = rxn_tree
+        globals()["rxn_map"] = rxn_map
+        globals()["entries"] = entries
+
+        if count >= MP_MIN_COMBINATIONS:
+            with mp.Pool(MAX_PROCESSES) as p:
+                res = p.map(self.run_rxns, range(len(all_entry_reactants)))           
+                assert len(res) == len(all_entry_reactants)
+        else:
+            res = [self.run_rxns(i) for i in range(len(all_entry_reactants))]
         res = [(r, entry_reactants) for (r, entry_reactants) in zip(res, all_entry_reactants) if r is not None]
 
         # Update the reactants to only valid inputs
