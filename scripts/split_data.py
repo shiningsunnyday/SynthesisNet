@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from scipy import sparse
 import shutil
 from tqdm import tqdm
 
@@ -29,6 +30,7 @@ def main(args):
         indices = sorted(indices)
         print(f"gnn-datasets has been set to {indices}")
         setattr(args, 'gnn_datasets', indices)    
+
     while i < 100:
         if i not in args.gnn_datasets:
             i += 1
@@ -44,25 +46,29 @@ def main(args):
         num_nodes = edge_index.max()+1
         index = 0                
         smiles, node_mask, X, y = None, None, None, None
-        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")):
+        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npz")):
             # y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))            
             print(f"{i}_{index}")
+            node_mask_path = os.path.join(input_dir, f"{i}_{index}_node_masks.npz")
+            smiles_path = os.path.join(input_dir, f"{i}_{index}_smiles.npy")
+            Xs_path = os.path.join(input_dir, f"{i}_{index}_Xs.npz")
+            ys_path = os.path.join(input_dir, f"{i}_{index}_ys.npz")
             if node_mask is not None:
-                node_mask = np.concatenate((node_mask, np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy"))), axis=0)
+                node_mask = np.concatenate((node_mask, sparse.load_npz(node_mask_path).todense()), axis=0)
             else:
-                node_mask = np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy"))
+                node_mask = sparse.load_npz(node_mask_path).todense()
             if smiles is not None:
-                smiles = np.concatenate((smiles, np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))))
+                smiles = np.concatenate((smiles, np.load(smiles_path)))
             else:
-                smiles = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))
+                smiles = np.load(smiles_path)
             if X is not None:
-                X = np.concatenate((X, np.load(os.path.join(input_dir, f"{i}_{index}_Xs.npy"))), axis=0)
+                X = np.concatenate((X, sparse.load_npz(Xs_path).todense()), axis=0)
             else:
-                X = np.load(os.path.join(input_dir, f"{i}_{index}_Xs.npy"))
+                X = sparse.load_npz(Xs_path).todense()
             if y is not None:
-                y = np.concatenate((y, np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))))
+                y = np.concatenate((y, sparse.load_npz(ys_path).todense()))
             else: 
-                y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
+                y = sparse.load_npz(ys_path).todense()
             index += 1
 
         start_inds = [0]
@@ -84,10 +90,13 @@ def main(args):
             X_k = X[num_nodes*start_ind:num_nodes*end_ind]
             y_k = y[num_nodes*start_ind:num_nodes*end_ind]
             smiles_k = smiles[start_ind:end_ind]
-            np.save(os.path.join(args.out_dir, f"{i}_{k}_Xs.npy"), X_k)
-            np.save(os.path.join(args.out_dir, f"{i}_{k}_ys.npy"), y_k)
+            X_k = sparse.csr_array(X_k)
+            y_k = sparse.csr_array(y_k)
+            node_mask_k = sparse.csr_array(node_mask_k)
+            sparse.save_npz(os.path.join(args.out_dir, f"{i}_{k}_Xs.npz"), X_k)
+            sparse.save_npz(os.path.join(args.out_dir, f"{i}_{k}_ys.npz"), y_k)
             np.save(os.path.join(args.out_dir, f"{i}_{k}_smiles.npy"), smiles_k)
-            np.save(os.path.join(args.out_dir, f"{i}_{k}_node_masks.npy"), node_mask_k)
+            sparse.save_npz(os.path.join(args.out_dir, f"{i}_{k}_node_masks.npz"), node_mask_k)
     
         used_is.append(str(i))
         i += 1

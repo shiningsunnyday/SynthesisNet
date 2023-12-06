@@ -285,10 +285,9 @@ class GNN(pl.LightningModule):
         """The complete validation loop."""
         if self.trainer.current_epoch % self.val_freq != 0:
             return None
-
         data = batch
         y = data.y
-        data_key = [k for data_key in data.key for k in data_key]
+        data_key = np.array([k for data_key in data.key for k in data_key])
         y_hat = self.model(data)
 
         # only building blocks
@@ -311,7 +310,7 @@ class GNN(pl.LightningModule):
                 batch_ce_loss = F.cross_entropy(y_hat_rxn, y_rxn, reduce=False)
                 acc_by_key = defaultdict(list)
                 
-                for key, correct in zip(data_key, batch_ce_loss):
+                for key, correct in zip(data_key[mask_rxn], batch_ce_loss):
                     acc_by_key[key].append(correct)
                 for k, v in acc_by_key.items():
                     self.log(f"val_cross_entropy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
@@ -326,7 +325,7 @@ class GNN(pl.LightningModule):
                 self.log("val_accuracy_loss", acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
                 acc_by_key = defaultdict(list)
-                for key, correct in zip(data_key, (y_hat == y)):
+                for key, correct in zip(data_key[mask_rxn], (y_hat == y)):
                     acc_by_key[key].append(correct)
                 for k, v in acc_by_key.items():
                     self.log(f"val_accuracy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
@@ -341,7 +340,7 @@ class GNN(pl.LightningModule):
                 self.log("val_nn_accuracy_loss", nn_acc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
                 acc_by_key = defaultdict(list)
-                for key, correct in zip(data_key, (y_hat == y)):
+                for key, correct in zip(data_key[mask_bb], (y_hat == y)):
                     acc_by_key[key].append(correct)
                 for k, v in acc_by_key.items():
                     self.log(f"val_nn_accuracy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    

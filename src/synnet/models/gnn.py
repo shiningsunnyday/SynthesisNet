@@ -18,6 +18,7 @@ import os
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import sparse
 from tqdm import tqdm
 from copy import deepcopy
 from multiprocessing import Pool
@@ -49,11 +50,11 @@ class PtrDataset(Dataset):
 
     def __getitem__(self, idx):
         base, e, index = self.ptrs[idx]
-        node_mask = np.load(base+'_node_masks.npy')[index]
+        node_mask = sparse.load_npz(base+'_node_masks.npz').toarray()[index]
         num_nodes = self.edge_index[e].max()+1
-        X = np.load(base+'_Xs.npy')
+        X = sparse.load_npz(base+'_Xs.npz').toarray()
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
-        y = np.load(base+'_ys.npy')
+        y = sparse.load_npz(base+'_ys.npz').toarray()
         y = y.reshape(-1, num_nodes, y.shape[-1])[index]        
         key_val = e.split('/')[-1].split('_')[0]+''.join(list(map(str, node_mask)  ))
         data = (
@@ -94,9 +95,9 @@ def load_lazy_dataloaders(args):
             continue
 
         index = 0        
-        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")):
+        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npz")):
             # y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
-            node_mask = np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy"))
+            node_mask = sparse.load_npz(os.path.join(input_dir, f"{i}_{index}_node_masks.npz"))
             smiles = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))
             start_inds = [0]
             for j, s in enumerate(smiles):
@@ -124,9 +125,9 @@ def load_lazy_dataloaders(args):
     dataset_valid = PtrDataset(val_dataset_ptrs)
     dataset_test = PtrDataset(test_dataset_ptrs)
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
-    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor)
-    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor)
-    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor)
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
+    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
 
 
@@ -158,11 +159,11 @@ def load_dataloaders(args):
         node_masks, Xs, ys = [], [], []
         smiles = []
         index = 0        
-        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")):
-            node_masks.append(np.load(os.path.join(input_dir, f"{i}_{index}_node_masks.npy")))
+        while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npz")):
+            node_masks.append(sparse.load_npz(os.path.join(input_dir, f"{i}_{index}_node_masks.npz")))
             num_nodes = edge_index.max()+1
-            X = np.load(os.path.join(input_dir, f"{i}_{index}_Xs.npy"))
-            y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
+            X = sparse.load_npz(os.path.join(input_dir, f"{i}_{index}_Xs.npz"))
+            y = sparse.load_npz(os.path.join(input_dir, f"{i}_{index}_ys.npz"))
             smile = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))
             smiles.append(smile)
             X = X.reshape(-1, num_nodes, X.shape[-1])

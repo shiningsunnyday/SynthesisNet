@@ -5,6 +5,7 @@ import networkx as nx
 from networkx.algorithms import weisfeiler_lehman_graph_hash
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import sparse
 from tqdm import tqdm
 from copy import deepcopy
 from multiprocessing import Pool
@@ -289,10 +290,12 @@ def main():
     for index, st in tqdm(enumerate(skeletons)):
         if len(skeletons[st]) < 100:
             continue
+        if index < 1:
+            continue
         # if index < 3:
         #     continue
-        if index == 2:
-            breakpoint()
+        # if index == 2:
+        #     breakpoint()
         # figure out "a" minimal resolving set   
         sk = Skeleton(st, index)
         edge_index = np.array(sk.tree.edges).T           
@@ -341,10 +344,14 @@ def main():
             Xs = np.concatenate([r[1] for r in res], axis=0)
             ys = np.concatenate([r[2] for r in res], axis=0)              
             smiles = np.array([r[3] for r in res])
-            np.save(os.path.join(args.output_dir, f"{index}_{k}_Xs.npy"), Xs)
-            np.save(os.path.join(args.output_dir, f"{index}_{k}_ys.npy"), ys)
+            
+            Xs = sparse.csr_array(Xs)
+            ys = sparse.csr_array(ys)
+            node_masks = sparse.csr_array(node_masks)
+            sparse.save_npz(os.path.join(args.output_dir, f"{index}_{k}_Xs.npz"), Xs)
+            sparse.save_npz(os.path.join(args.output_dir, f"{index}_{k}_ys.npz"), ys)
             np.save(os.path.join(args.output_dir, f"{index}_{k}_smiles.npy"), smiles)
-            np.save(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy"), node_masks)
+            sparse.save_npz(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npz"), node_masks)
             np.save(os.path.join(args.output_dir, f"{index}_edge_index.npy"), edge_index)
 
         # with Pool(min(100, len(skeletons[st]))) as p:
