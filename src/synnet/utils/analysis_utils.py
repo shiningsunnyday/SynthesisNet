@@ -24,7 +24,6 @@ def skeleton2graph(skeleton):
     return graph, count[skeleton.root.smiles]
 
 
-
 def vis_skeletons(args, skeletons):
     min_count = args.min_count
     max_i = args.num_to_vis

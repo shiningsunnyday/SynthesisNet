@@ -4,7 +4,8 @@ from synnet.data_generation.preprocessing import (
     BuildingBlockFilter,
     ReactionTemplateFileHandler,
 )
-from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, Program
+from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, Program, \
+get_bool_mask
 from synnet.utils.analysis_utils import count_bbs, count_rxns
 import pickle
 import os
@@ -15,7 +16,8 @@ import multiprocessing as mp
 from tqdm import tqdm
 import numpy as np
 import json
-from collections import defaultdict
+from pathlib import Path
+from collections import deque, defaultdict
 from copy import deepcopy
 
 def get_args():
@@ -120,12 +122,13 @@ def hash_st(st, index):
     return k_vals
 
 
-def get_programs(rxns, keep_prods=False, size=1):
+def get_programs(rxns, keep_prods=0, size=1):
     progs = []
     if size == 1:
         for i, rxn in enumerate(rxns):
             g = nx.DiGraph()
             g.add_node(0, rxn_id=i)
+            g.nodes[0]['depth'] = 1
             # g.graph['super'] = False
             prog = Program(g, keep_prods=keep_prods)
             progs.append(prog)
@@ -285,6 +288,75 @@ def create_run_programs(args, bbf, size=3):
     return all_progs
 
 
+def hash_program(prog, output_dir):
+    """
+    We perform bfs search on all possible unmasks satisfying topological order.
+    Each unmask can expand a reaction on the frontier.
+    Each unmask is an int (binary mask over the nodes 0...len(prog)-1)
+    """
+    tree = prog.rxn_tree
+    if sorted(list(tree.nodes())) != list(tree.nodes()):
+        breakpoint()
+    bfs = deque()    
+    start = ''.join(['0' for _ in range(len(tree)-1)] + ['1'])
+    vis = dict({start: 1})
+    start_hash = prog.hash(list(map(int, start)))
+    start_dirname = os.path.join(output_dir, start_hash)
+    bfs.append((start, Path(start_dirname)))
+    edges = np.array(tree.edges, dtype=np.int32) if len(tree.edges) else np.empty((0, 2), dtype=np.int32)
+    
+    while bfs:
+        cur, cur_dirname = bfs.popleft()
+        os.makedirs(cur_dirname, exist_ok=True)
+        cur_fpath = cur_dirname.parent / f"{cur_dirname.name}.json"        
+        mask = np.array(list(map(int, cur)))                
+        frontier = [f for f in edges[mask[edges[:, 0]] == 1][:, 1] if not mask[f]]
+        if os.path.exists(cur_fpath):   
+            data = json.load(open(cur_fpath, 'r'))          
+            assert 'rxn_ids' in data
+        else:            
+            data = {'rxn_ids': {},
+                    'mask': mask.tolist(), # debug
+                    'tree': prog.hash(mask, return_json=True) # debug
+                    }
+        # make/append to json file the continuation
+        for f in frontier:
+            f = f.item()
+            data['rxn_ids'][f] = data['rxn_ids'].get(f, []) + [tree.nodes[f]['rxn_id']]
+   
+        json.dump(data, open(cur_fpath, 'w+'))
+        for f in frontier:
+            if cur[f] != '0':
+                breakpoint()
+            cur = cur[:f] + '1' + cur[f+1:]
+            if cur in vis:
+                continue
+            cur_hash = prog.hash(list(map(int, cur)))
+            vis[cur] = 1
+            bfs.append((cur, cur_dirname / cur_hash))
+            cur = cur[:f] + '0' + cur[f+1:]
+
+
+    
+            
+
+
+
+def hash_programs(all_progs, output_dir):
+    """
+    We create a recursive directory in output_dir with all programs and their partial
+    program representations.
+    Each first-level directory in output_dir corresponds to one empty rooted tree structure.
+    For each program, we enumerate its partial programs by enumerating all topological sort paths.
+    We mask out every reaction except the top, then unmask one-by-one.
+    """
+    for d in all_progs:
+        for p in all_progs[d]:
+            hash_program(p, output_dir)
+
+            
+
+
 
 if __name__ == "__main__":
 
@@ -350,36 +422,26 @@ if __name__ == "__main__":
                 ax.plot(input_lengths)
                 ax.set_xlabel("depth")
                 ax.set_ylabel('number of building block input sets')
-            fig.savefig(fpath)
-
-
-    breakpoint()
-            
+            fig.savefig(fpath)    
     
 
     if args.output_dir:
-        breakpoint()
-        for d in all_progs:
-            dirname = os.path.join(args.output_dir, f"{d}/")
-            os.makedirs(dirname)
-            # hash all the programs
-            for p in all_progs[d]:
-                fpath = os.path.join(dirname, f"{p.hash()}.json")
-                json.dump(p.output_dict(), open(fpath, 'w+'))
+        hash_programs(all_progs, args.output_dir)
 
 
-    sts = []
-    for index, sk in enumerate(skeletons):
-        for st in skeletons[sk]:
-            sts.append([st, index])
 
-    if args.ncpu == 1:
-        res = [hash_st(st, index) for st, index in sts]
-    else:
-        with Pool(args.ncpu) as p:
-            res = p.starmap(hash_st, tqdm(sts))
-    res = [k_val for r in res for k_val in r]
-    table = defaultdict(lambda: defaultdict(int))
-    for length, k_val in res:
-        table[length][k_val] += 1
-    vis_table(args, table)
+# sts = []
+# for index, sk in enumerate(skeletons):
+#     for st in skeletons[sk]:
+#         sts.append([st, index])
+
+# if args.ncpu == 1:
+#     res = [hash_st(st, index) for st, index in sts]
+# else:
+#     with Pool(args.ncpu) as p:
+#         res = p.starmap(hash_st, tqdm(sts))
+# res = [k_val for r in res for k_val in r]
+# table = defaultdict(lambda: defaultdict(int))
+# for length, k_val in res:
+#     table[length][k_val] += 1
+# vis_table(args, table)

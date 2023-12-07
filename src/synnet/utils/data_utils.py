@@ -26,6 +26,7 @@ import pickle
 from itertools import permutations, product
 from collections import defaultdict
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
+from networkx.algorithms import weisfeiler_lehman_graph_hash
 import networkx as nx
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
@@ -314,8 +315,8 @@ class Reaction:
 
 
 class Program:
-    def __init__(self, rxn_tree=None, keep_prods=False):
-        self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()
+    def __init__(self, rxn_tree=None, keep_prods=0):
+        self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()        
         self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []] 
         self.rxn_map = {}
         self.keep_prods = keep_prods
@@ -327,11 +328,13 @@ class Program:
             for each entry, store the indices in .available_reactants
             """
             self.product_map = defaultdict(self.make_default_dict)
+            assert 'depth' in self.rxn_tree.graph
 
 
     @property
     def entries(self):
         return self._entries
+
     
     @staticmethod
     def make_default_dict():
@@ -355,8 +358,21 @@ class Program:
         return np.mean(num_poss) if len(num_poss) else 0
 
 
-    def hash(self):
-        breakpoint()
+    def hash(self, mask, return_json=False):
+        # used to hash the partial state defined by mask
+        # can also return the tree data defined by mask
+        data = {}
+        for n in self.rxn_tree.nodes():
+            if not mask[n]:
+                data[n] = self.rxn_tree.nodes[n]['rxn_id']
+                self.rxn_tree.nodes[n].pop('rxn_id')
+        json_data = nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)
+        ans = hash(json.dumps(json_data))
+        for n, r in data.items():
+            self.rxn_tree.nodes[n]['rxn_id'] = r
+        if return_json:
+            return json_data        
+        return str(ans)
 
 
     def output_dict(self):
@@ -368,12 +384,15 @@ class Program:
         assert left in self.rxn_tree.nodes()
         assert right is None or right in self.rxn_tree.nodes()
         key = len(self.rxn_tree)
-        self.rxn_tree.add_node(key, rxn_id=id)
+        self.rxn_tree.add_node(key, rxn_id=id)                
         self.rxn_tree.add_edge(key, left)
         self.rxn_tree.nodes[left]['child'] = 'left'
+        depth = self.rxn_tree.nodes[left]['depth'] +1
         if right:
             self.rxn_tree.nodes[right]['child'] = 'right'
+            depth = max(depth, self.rxn_tree.nodes[right]['depth'] +1)
             self.rxn_tree.add_edge(key, right)
+        self.rxn_tree.nodes[key]['depth'] = depth
     
 
     def combine(self, other):    
@@ -399,9 +418,9 @@ class Program:
                 assert rxn.available_reactants is not None
                 self.rxn_map[n] = rxn
                 
-                if self.keep_prods:
+                if self.keep_prods <= self.rxn_tree.nodes[n]['depth']:
                     """
-                    n is a new reaction node, but we can filter the entry reactants using the interms                    
+                    n is a new reaction node, but we can filter the entry reactants using the interms
                     """
                     prod_before = [[len(avail_reactants) for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries]
                     # print([[avail_reactants for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries])
@@ -1300,6 +1319,154 @@ class Skeleton:
                                         vert_loc = vert_loc-vert_gap, xcenter=nextx,
                                         pos=pos, parent = root)
             return pos
+
+
+# helper functions
+def skeleton2graph(skeleton):
+    graph = nx.MultiDiGraph()
+    count = {}
+    lookup = {}
+    for n in skeleton.nodes:
+        name = n.smiles
+        if n.smiles in count:
+            name += f":{count[n.smiles]}"
+        graph.add_node(name)
+        count[n.smiles] = count.get(n.smiles, 0)+1
+        lookup[n] = name
+    for e in skeleton.edges:
+        graph.add_edge(lookup[skeleton.nodes[e[0]]], lookup[skeleton.nodes[e[1]]])
+    return graph
+
+
+def compute_md(tree, root_ind):
+    """
+    https://en.wikipedia.org/wiki/Metric_dimension_(graph_theory)
+    The metric dimension for a path is 1
+    The metric dimension for a tree is |leaves|-|joints|
+    Leaf is node of degree 1
+    Joint is node of degree 3 that has a straight path to at least one leaf
+    This function obtains |leaves|-|joints| leaves which is resolving
+    Then prune ones which are redundant because the root is also in the set
+    """
+    leaves = [n for n in tree.nodes() if tree.degree(n) == 1]
+    if [n for n in tree.nodes() if tree.degree(n) > 2]:
+        joints = dict()
+        for leaf in leaves:
+            if root_ind == leaf:
+                continue
+            cur = leaf
+            while tree.degree(cur) < 3:
+                preds = list(tree.predecessors(cur))
+                if len(preds) != 1:
+                    breakpoint()
+                cur = preds[0]
+            joints[cur] = joints.get(cur, []) + [leaf]
+        r_set = [root_ind]
+        for j, j_leaves in joints.items():
+            if len(j_leaves) > 2:
+                breakpoint()
+            r_set.append(j_leaves[0])
+        ntable = {}
+        ancs = dict(nx.tree_all_pairs_lowest_common_ancestor(tree))
+        dists = dict(nx.all_pairs_shortest_path_length(tree))
+        for k in range(len(tree)):
+            for i in range(len(tree)):
+                for j in range(len(tree)):  
+                    if i == j: continue
+                    ik = ancs[(i,k)] if (i,k) in ancs else ancs[(k,i)]
+                    jk = ancs[(j,k)] if (j,k) in ancs else ancs[(k,j)]
+                    d1 = dists[ik][i]+dists[ik][k]
+                    d2 = dists[jk][j]+dists[jk][k]    
+                    if d1 == d2:
+                        ntable[k] = ntable.get(k, []) + [(i, j)]
+        for k in ntable:
+            ntable[k] = set(ntable[k])
+        # greedily remove redundant landmarks
+        # later try to prove this will be optimal
+        def eval_r_set(r_set):
+            cur_set = None
+            for r in r_set:
+                if cur_set is None:
+                    cur_set = deepcopy(ntable[r])
+                else:
+                    cur_set &= ntable[r]
+            return cur_set
+        assert eval_r_set(r_set) == set()
+
+        while True:
+            for i in range(len(r_set)-1,0,-1): # don't remove root
+                new_r_set = r_set[:i]+r_set[i+1:]
+                if eval_r_set(new_r_set) == set():
+                    r_set = new_r_set
+                    break
+            if eval_r_set(r_set):
+                break
+            if i == 1:
+                break
+            
+    else:
+        r_set = [root_ind]
+    return r_set
+            
+
+def get_bool_mask(i, size=-1):    
+    mask = list(map(bool, map(int, format(i,'b'))))
+    if size > -1:
+        mask = [0 for _ in range(size-len(mask))] + mask
+    return mask
+
+
+
+def get_wl_kernel(tree: nx.digraph, fill_in=[]):
+    for n in tree.nodes():
+        tree.nodes[n]['id'] = 0
+    for i, n in enumerate(fill_in):
+        tree.nodes[n]['id'] = i+1
+    return weisfeiler_lehman_graph_hash(tree, iterations=len(tree), node_attr='id')
+
+
+
+def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
+    kwargs = {}
+    if args.determine_criteria in ['leaves_up', 'all_leaves']:
+        kwargs['leaves_up'] = True
+    elif args.determine_criteria == 'rxn_frontier':        
+        kwargs['rxn_frontier'] = True        
+    elif args.determine_criteria == 'bb_frontier':        
+        kwargs['rxn_frontier'] = True
+        kwargs['bb_frontier'] = True        
+    elif args.determine_criteria == 'target_down':
+        kwargs['target_down'] = True
+    if anchors is not None:
+        poss_vals = []
+        val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
+        sk.reset(min_r_set[:1+len(anchors)])
+        for poss in min_r_set[len(anchors)+1:]:
+            poss_val = get_wl_kernel(sk.tree, min_r_set[:1+len(anchors)] + [poss])
+            if poss_val == val:
+                poss_vals.append(poss)
+        if len(poss_vals) > 1:
+            breakpoint()
+        # featurize prediction problem of next anchor, which can be any of poss_vals
+        node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])
+        return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
+    else:
+        sk.reset(min_r_set)
+        zero_mask_inds = np.where(sk.mask == 0)[0]    
+        bool_mask = get_bool_mask(i)
+        sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+        node_mask, X, y = sk.get_state(**kwargs)        
+        if args.determine_criteria == 'all_leaves':
+            assert sk.all_leaves
+        return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
+
+
+def test_is_leaves_up(i, sk, min_r_set):
+    sk.reset(min_r_set)
+    zero_mask_inds = np.where(sk.mask == 0)[0]    
+    bool_mask = get_bool_mask(i)
+    sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+    return sk.leaves_up
 
 
 
