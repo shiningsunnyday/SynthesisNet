@@ -308,11 +308,11 @@ class GNN(pl.LightningModule):
                 self.log("val_cross_entropy_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
                 batch_ce_loss = F.cross_entropy(y_hat_rxn, y_rxn, reduce=False)
-                acc_by_key = defaultdict(list)
+                loss_by_key = defaultdict(list)
                 
-                for key, correct in zip(data_key[mask_rxn], batch_ce_loss):
-                    acc_by_key[key].append(correct)
-                for k, v in acc_by_key.items():
+                for key, loss in zip(data_key[mask_rxn], batch_ce_loss):
+                    loss_by_key[key].append(loss)
+                for k, v in loss_by_key.items():
                     self.log(f"val_cross_entropy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
                                     
         if "accuracy" in self.valid_loss:
@@ -328,7 +328,7 @@ class GNN(pl.LightningModule):
                 for key, correct in zip(data_key[mask_rxn], (y_hat == y)):
                     acc_by_key[key].append(correct)
                 for k, v in acc_by_key.items():
-                    self.log(f"val_accuracy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
+                    self.log(f"val_accuracy_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
                              
                 
         if "nn_accuracy" in self.valid_loss:
@@ -343,7 +343,7 @@ class GNN(pl.LightningModule):
                 for key, correct in zip(data_key[mask_bb], (y_hat == y)):
                     acc_by_key[key].append(correct)
                 for k, v in acc_by_key.items():
-                    self.log(f"val_nn_accuracy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
+                    self.log(f"val_nn_accuracy_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
                                       
         if "faiss-knn" in self.valid_loss:
             index = self.molembedder.index

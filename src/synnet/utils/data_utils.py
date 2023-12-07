@@ -1110,8 +1110,7 @@ class Skeleton:
     def reset(self, mask=None):
         self._mask = np.zeros(len(self.tree), dtype=np.int8)
         self.leaves_up = True
-        self.all_leaves = False
-        breakpoint()
+        self.all_leaves = False        
         self.frontier = True # because we have target?
         if mask is not None:
             self.mask = mask
@@ -1206,8 +1205,12 @@ class Skeleton:
                     if bb_frontier and is_frontier_bb:
                         self.fill_node(n, y)
                     if not rxn_frontier and not bb_frontier:
-                        if not leaves_up or leaves_filled:
-                            self.fill_node(n, y)
+                        if target_down:
+                            if is_frontier:
+                                self.fill_node(n, y)
+                        else:
+                            if not leaves_up or leaves_filled:
+                                self.fill_node(n, y)
         except Exception as e:
             print(e)
             print(f"{self.tree.nodes[self.tree_root]['smiles']} bad")

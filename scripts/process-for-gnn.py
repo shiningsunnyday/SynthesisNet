@@ -147,8 +147,6 @@ def main():
     for index, st in tqdm(enumerate(skeletons)):
         if len(skeletons[st]) < 100:
             continue
-        if index < 1:
-            continue
         # if index < 3:
         #     continue
         # if index == 2:
