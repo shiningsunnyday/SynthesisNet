@@ -300,7 +300,10 @@ class GNN(pl.LightningModule):
         y_rxn = y[mask_rxn, 256:]        
         y_hat_rxn = y_hat[mask_rxn, 256:]
 
-        # record batch sizes manually
+        
+        # turn into numpy for logging
+        mask_rxn = mask_rxn.cpu().numpy()
+        mask_bb = mask_bb.cpu().numpy()
 
         if "cross_entropy" in self.valid_loss:
             if y_rxn.shape[0]:
@@ -309,9 +312,8 @@ class GNN(pl.LightningModule):
 
                 batch_ce_loss = F.cross_entropy(y_hat_rxn, y_rxn, reduce=False)
                 loss_by_key = defaultdict(list)
-                
                 for key, loss in zip(data_key[mask_rxn], batch_ce_loss):
-                    loss_by_key[key].append(loss)
+                    loss_by_key[key].append(loss.item())
                 for k, v in loss_by_key.items():
                     self.log(f"val_cross_entropy_loss_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
                                     
@@ -326,7 +328,7 @@ class GNN(pl.LightningModule):
 
                 acc_by_key = defaultdict(list)
                 for key, correct in zip(data_key[mask_rxn], (y_hat == y)):
-                    acc_by_key[key].append(correct)
+                    acc_by_key[key].append(correct.item())
                 for k, v in acc_by_key.items():
                     self.log(f"val_accuracy_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
                              
@@ -341,7 +343,7 @@ class GNN(pl.LightningModule):
 
                 acc_by_key = defaultdict(list)
                 for key, correct in zip(data_key[mask_bb], (y_hat == y)):
-                    acc_by_key[key].append(correct)
+                    acc_by_key[key].append(correct.item())
                 for k, v in acc_by_key.items():
                     self.log(f"val_nn_accuracy_{k}", np.mean(v), batch_size=len(v), on_step=False, on_epoch=True, prog_bar=True, logger=True)                    
                                       

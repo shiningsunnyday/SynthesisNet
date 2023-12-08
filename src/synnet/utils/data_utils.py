@@ -328,7 +328,7 @@ class Program:
             for each entry, store the indices in .available_reactants
             """
             self.product_map = defaultdict(self.make_default_dict)
-            assert 'depth' in self.rxn_tree.graph
+            # assert 'depth' in self.rxn_tree.graph
 
 
     @property

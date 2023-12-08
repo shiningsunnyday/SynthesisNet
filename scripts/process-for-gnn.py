@@ -145,6 +145,7 @@ def main():
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
+        breakpoint()
         if len(skeletons[st]) < 100:
             continue
         # if index < 3:

@@ -71,22 +71,16 @@ class PtrDataset(Dataset):
 
 
 
-def load_lazy_dataloaders(args):
-    input_dir = args.gnn_input_feats
+def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
     used_is = []
     i = 0
     train_dataset_ptrs = []
     val_dataset_ptrs = []
-    if not args.gnn_datasets:
-        files = os.listdir(input_dir)        
-        indices = [f.split('_')[0] for f in files]
-        indices = list(map(int, set(indices)))
-        indices = sorted(indices)
-        print(f"gnn-datasets has been set to {indices}")
-        setattr(args, 'gnn_datasets', indices)    
-    test_dataset_ptrs = []
+    test_dataset_ptrs = []    
+    train_frac = ratio[0]/sum(ratio)
+    val_frac = (ratio[0]+ratio[1])/sum(ratio)
     while i < 100:
-        if i not in args.gnn_datasets:
+        if i not in include_is:
             i += 1
             continue
         does_exist = os.path.exists(os.path.join(input_dir, f"{i}_edge_index.npy"))        
@@ -106,8 +100,9 @@ def load_lazy_dataloaders(args):
                 start_inds.append(j)               
             start_inds = np.where(node_mask.sum(axis=-1) == node_mask.sum(axis=-1).min())[0] # each distinct tree
             n = len(start_inds)
-            print(f"splitting {n} trees into 80-10-10 for skeleton {i}")
-            train_ind, val_ind = start_inds[int(0.8*n)], start_inds[int(0.9*n)]            
+            print(f"splitting {n} trees into {ratio[0]}-{ratio[1]}-{ratio[2]} for skeleton {i}")
+            train_ind = start_inds[int(train_frac*n)] if int(train_frac*n)<n else n
+            val_ind = start_inds[int(val_frac*n)] if int(val_frac*n)<n else n
             for j in range(train_ind):
                 train_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
                 os.path.join(input_dir, f"{i}_edge_index.npy"), j))
@@ -119,8 +114,22 @@ def load_lazy_dataloaders(args):
                 os.path.join(input_dir, f"{i}_edge_index.npy"), j))                
             index += 1     
         used_is.append(str(i))
-        i += 1
-        
+        i += 1    
+    return train_dataset_ptrs, val_dataset_ptrs, test_dataset_ptrs, used_is
+
+
+
+def load_lazy_dataloaders(args):
+    input_dir = args.gnn_input_feats
+    if not args.gnn_datasets:
+        files = os.listdir(input_dir)        
+        indices = [f.split('_')[0] for f in files]
+        indices = list(map(int, set(indices)))
+        indices = sorted(indices)
+        print(f"gnn-datasets has been set to {indices}")
+        setattr(args, 'gnn_datasets', indices)    
+    
+    train_dataset_ptrs, val_dataset_ptrs, test_dataset_ptrs, used_is = gather_ptrs(input_dir, args.gnn_datasets)        
     dataset_train = PtrDataset(train_dataset_ptrs)
     dataset_valid = PtrDataset(val_dataset_ptrs)
     dataset_test = PtrDataset(test_dataset_ptrs)
@@ -130,6 +139,37 @@ def load_lazy_dataloaders(args):
     test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
 
+
+def load_split_dataloaders(args):
+    input_dir = {}
+    used_is = {}
+    
+    for split in ['train', 'valid', 'test']:
+        input_dir[split] = Path(args.gnn_input_feats).parent / (Path(args.gnn_input_feats).name+f'_{split}')        
+
+    if not args.gnn_datasets:
+        files = os.listdir(input_dir)        
+        indices = [f.split('_')[0] for f in files]
+        indices = list(map(int, set(indices)))
+        indices = sorted(indices)
+        print(f"gnn-datasets has been set to {indices}")
+        setattr(args, 'gnn_datasets', indices)    
+
+    train_dataset_ptrs, _, _, used_is['train'] = gather_ptrs(input_dir['train'], args.gnn_datasets, [1,0,0])
+    _, val_dataset_ptrs, _, used_is['valid'] = gather_ptrs(input_dir['valid'], args.gnn_datasets, [0,1,0])
+    _, _, test_dataset_ptrs, used_is['test'] = gather_ptrs(input_dir['test'], args.gnn_datasets, [0,0,1])        
+    if not (used_is['train'] == used_is['valid'] == used_is['test']):
+        breakpoint()
+    dataset_train = PtrDataset(train_dataset_ptrs)
+    dataset_valid = PtrDataset(val_dataset_ptrs)
+    dataset_test = PtrDataset(test_dataset_ptrs)
+    if dataset_test.__len__() > dataset_train.__len__(): # TODO: one-time hack, get rid
+        dataset_test, dataset_train = dataset_train, dataset_test
+    prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
+    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
+    return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)    
 
 
 def load_dataloaders(args):
@@ -218,10 +258,10 @@ def load_dataloaders(args):
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
 
 
-
-if __name__ == "__main__":
-    args = get_args()
-    if args.lazy_load:
+def main(args):
+    if args.feats_split:
+        train_dataloader, valid_dataloader, _, used_is = load_split_dataloaders(args)
+    elif args.lazy_load:
         train_dataloader, valid_dataloader, _, used_is = load_lazy_dataloaders(args)
     else:
         train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args)
@@ -285,3 +325,9 @@ if __name__ == "__main__":
     logger.info(f"Start training")
     trainer.fit(gnn, train_dataloader, valid_dataloader)
     logger.info(f"Training completed.")
+
+
+
+if __name__ == "__main__":
+    args = get_args()
+    main(args)

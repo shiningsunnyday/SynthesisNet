@@ -23,7 +23,13 @@ def get_args():
         "--gnn-input-feats",
         type=str,
         help="Where to load featurized data to train GNN",
-    )    
+    )
+    parser.add_argument(
+        "--feats-split",
+        action='store_true',
+        help="add _{train|valid|test} suffix to gnn-input-feats",
+    )
+        
     parser.add_argument("--gnn-datasets", type=int, nargs='+')
     parser.add_argument("--lazy_load", action='store_true')
     parser.add_argument("-f", "--featurize", type=str, default="fp", help="Choose from ['fp', 'gin']")
