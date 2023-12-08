@@ -27,6 +27,11 @@ def get_args():
         help="Input file for the skeletons of syntree-file",
     )   
     parser.add_argument(
+        "--skeleton-canonical-file",
+        type=str,
+        help="If given, use the keys as skeleton classes",
+    )      
+    parser.add_argument(
         "--visualize-dir",
         type=str,
         default="results/viz/",
@@ -68,7 +73,12 @@ if __name__ == "__main__":
             else:
                 breakpoint()
         
-        skeletons = {}
+        # use the train set to define the skeleton classes
+        if args.skeleton_canonical_file:
+            skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
+            class_nums = {k: len(skeletons[k]) for k in skeletons}
+        else:
+            skeletons = {}
         for i, st in tqdm(enumerate(sts)):
             done = False
             for sk in skeletons:
@@ -79,12 +89,16 @@ if __name__ == "__main__":
                     
             if not done: 
                 skeletons[st] = [st]
-                
+        if args.skeleton_canonical_file:
+            if list(class_nums.keys()) != list(skeletons.keys()):
+                breakpoint()
+            for k in class_nums:
+                skeletons[k] = skeletons[k][class_nums[k]:]
         for k, v in skeletons.items():
             print(f"count: {len(v)}") 
 
-        pickle.dump(skeletons, open(os.path.join(args.visualize_dir, 'skeletons.pkl'), 'wb+'))
-
+        pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))
+    breakpoint()
     count_bbs(args, skeletons)
     count_rxns(args, skeletons)
     vis_skeletons(args, skeletons)
