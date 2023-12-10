@@ -385,45 +385,45 @@ if __name__ == "__main__":
 
 
     skeletons = pickle.load(open(args.skeleton_file, 'rb'))
-    index = 0
-    syntree = list(skeletons)[index]
-    sk = Skeleton(syntree, index=index)
-    fpaths = defaultdict(dict)
-    for f in os.listdir(args.features):
-        if not f.endswith('node_masks.npz'):
-            continue
-        ind, batch_num, *pargs = f.split('_')
-        fpath = os.path.join(args.features, f)
-        fpaths[int(ind)][int(batch_num)] = fpath
+    for index in range(len(list(skeletons))):
+        syntree = list(skeletons)[index]        
+        sk = Skeleton(syntree, index=index)
+        fpaths = defaultdict(dict)
+        for f in os.listdir(args.features):
+            if not f.endswith('node_masks.npz'):
+                continue
+            ind, batch_num, *pargs = f.split('_')
+            fpath = os.path.join(args.features, f)
+            fpaths[int(ind)][int(batch_num)] = fpath
 
-    node_masks = sparse.load_npz(fpaths[index][0]).toarray()
-    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
-    for n in sk.tree: # add reactions
-        if 'rxn_id' in sk.tree.nodes[n]:
-            sk.tree.nodes[n]['smirks'] = rxn_templates[sk.tree.nodes[n]['rxn_id']]
-    skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_folder).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
-    if args.metrics:
-        df = pd.read_csv(args.metrics)
+        node_masks = sparse.load_npz(fpaths[index][0]).toarray()
+        rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
+        for n in sk.tree: # add reactions
+            if 'rxn_id' in sk.tree.nodes[n]:
+                sk.tree.nodes[n]['smirks'] = rxn_templates[sk.tree.nodes[n]['rxn_id']]
+        skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_folder).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
+        if args.metrics:
+            df = pd.read_csv(args.metrics)
 
-    for i in range(node_masks.shape[0]//10):
-        node_mask = node_masks[i]
-        key = f'{index}'+''.join(list(map(str, node_mask)))                
-        suffix = key
-        if f'val_nn_accuracy_{key}' in df:
-            bb_acc = df[f'val_nn_accuracy_{key}']
-            bb_acc_best = bb_acc[bb_acc==bb_acc].max()
-            suffix += f"_bb_acc={bb_acc_best}"
-        if f'val_accuracy_{key}' in df:
-            rxn_acc = df[f'val_accuracy_{key}']
-            rxn_acc_best = rxn_acc[rxn_acc==rxn_acc].max()
-            suffix += f"_rxn_acc={rxn_acc_best}"
-        if f'val_cross_entropy_loss_{key}' in df:
-            ce_loss = df[f'val_cross_entropy_loss_{key}']
-            ce_loss_best = ce_loss[ce_loss==ce_loss].min()        
-            suffix += f"_ce_loss={ce_loss_best}"
-        mermaid_txt = skviz.write(node_mask=node_mask)
-        outfile = skviz.path / f"skeleton_{suffix}.md"
-        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
-        print(f"Generated markdown file.", outfile)
+        for i in range(node_masks.shape[0]//10):
+            node_mask = node_masks[i]
+            key = f'{index}'+''.join(list(map(str, node_mask)))                
+            suffix = key
+            if f'val_nn_accuracy_{key}' in df:
+                bb_acc = df[f'val_nn_accuracy_{key}']
+                bb_acc_best = bb_acc[bb_acc==bb_acc].max()
+                suffix += f"_bb_acc={bb_acc_best}"
+            if f'val_accuracy_{key}' in df:
+                rxn_acc = df[f'val_accuracy_{key}']
+                rxn_acc_best = rxn_acc[rxn_acc==rxn_acc].max()
+                suffix += f"_rxn_acc={rxn_acc_best}"
+            if f'val_cross_entropy_loss_{key}' in df:
+                ce_loss = df[f'val_cross_entropy_loss_{key}']
+                ce_loss_best = ce_loss[ce_loss==ce_loss].min()        
+                suffix += f"_ce_loss={ce_loss_best}"
+            mermaid_txt = skviz.write(node_mask=node_mask)
+            outfile = skviz.path / f"skeleton_{suffix}.md"
+            SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
+            print(f"Generated markdown file.", outfile)
 
-    
+        

@@ -33,6 +33,8 @@ from zss import Node as ZSSNode, simple_distance
 from copy import deepcopy
 
 from synnet.encoding.fingerprints import fp_2048, fp_256
+import os
+import hashlib
 
 
 # the definition of reaction classes below
@@ -367,7 +369,7 @@ class Program:
                 data[n] = self.rxn_tree.nodes[n]['rxn_id']
                 self.rxn_tree.nodes[n].pop('rxn_id')
         json_data = nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)
-        ans = hash(json.dumps(json_data))
+        ans = hashlib.md5(json.dumps(json_data, sort_keys=True).encode()).hexdigest() # deterministic hashing
         for n, r in data.items():
             self.rxn_tree.nodes[n]['rxn_id'] = r
         if return_json:
@@ -1471,6 +1473,60 @@ def test_is_leaves_up(i, sk, min_r_set):
     sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
     return sk.leaves_up
 
+
+def load_skeletons(args):
+    syntree_collection = SyntheticTreeSet()
+
+    if os.path.exists(args.skeleton_file):
+        skeletons = pickle.load(open(args.skeleton_file, 'rb'))
+        if args.skeleton_canonical_file:
+            canon_skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
+            class_nums = {k: len(canon_skeletons[k]) for k in canon_skeletons}        
+        else:
+            return skeletons
+      
+        # sanity checks
+        for sk, sk_canon in zip(skeletons, canon_skeletons):
+            if sk.edges != sk_canon.edges:
+                breakpoint()                
+    else:
+        sts = []
+        for st in syntree_collection.sts:
+            if st: 
+                try:
+                    st.build_tree()
+                except:
+                    breakpoint()
+                sts.append(st)
+            else:
+                breakpoint()
+        
+        # use the train set to define the skeleton classes
+        if args.skeleton_canonical_file:
+            skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
+            class_nums = {k: len(skeletons[k]) for k in skeletons}
+        else:
+            skeletons = {}
+        for i, st in tqdm(enumerate(sts)):
+            done = False
+            for sk in skeletons:
+                if st.is_isomorphic(sk): 
+                    done = True
+                    skeletons[sk].append(st)
+                    break
+                    
+            if not done: 
+                skeletons[st] = [st]
+        if args.skeleton_canonical_file:
+            if list(class_nums.keys()) != list(skeletons.keys()):
+                breakpoint()
+            for k in class_nums:
+                skeletons[k] = skeletons[k][class_nums[k]:]
+        for k, v in skeletons.items():
+            print(f"count: {len(v)}") 
+
+        pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))
+    return skeletons
 
 
 

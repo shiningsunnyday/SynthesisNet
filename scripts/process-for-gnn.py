@@ -1,5 +1,5 @@
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, \
-compute_md, get_bool_mask, get_wl_kernel, process_syntree_mask, test_is_leaves_up
+load_skeletons, compute_md, get_bool_mask, get_wl_kernel, process_syntree_mask, test_is_leaves_up
 import pickle
 import os
 import networkx as nx
@@ -27,7 +27,12 @@ def get_args():
         type=str,
         default="results/viz/skeletons.pkl",
         help="Input file for the skeletons of syntree-file",
-    )   
+    )       
+    parser.add_argument(
+        "--skeleton-canonical-file",
+        type=str,
+        help="If given, use the keys as skeleton classes",
+    )          
     parser.add_argument(
         "--visualize-dir",
         type=str,
@@ -106,48 +111,19 @@ def get_parg(syntree, min_r_set, index, args):
 
 def main():
     args = get_args()
-    syntree_collection = SyntheticTreeSet()
-    syntrees = syntree_collection.load(args.input_file)
-
-    if os.path.exists(args.skeleton_file):
-        skeletons = pickle.load(open(args.skeleton_file, 'rb'))
-    else:
-        sts = []
-        for st in syntree_collection.sts:
-            if st: 
-                try:
-                    st.build_tree()
-                except:
-                    breakpoint()
-                sts.append(st)
-            else:
-                breakpoint()
-        
-        skeletons = {}
-        for i, st in tqdm(enumerate(sts)):
-            done = False
-            for sk in skeletons:
-                if st.is_isomorphic(sk): 
-                    done = True
-                    skeletons[sk].append(st)
-                    break
-                    
-            if not done: 
-                skeletons[st] = [st]
-                
-        for k, v in skeletons.items():
-            print(f"count: {len(v)}") 
-
-        pickle.dump(skeletons, open(os.path.join(args.visualize_dir, 'skeletons.pkl'), 'wb+'))
+    skeletons = load_skeletons(args)
     
     sk_set = SkeletonSet().load_skeletons(skeletons)
     len_inds = np.argsort([len(skeletons[st]) for st in skeletons])
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
-        breakpoint()
-        if len(skeletons[st]) < 100:
+        if index < 17:
             continue
+        if len(list(skeletons[st])) == 0:
+            continue
+        # if len(skeletons[st]) < 100:
+        #     continue
         # if index < 3:
         #     continue
         # if index == 2:

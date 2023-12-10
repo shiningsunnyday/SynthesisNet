@@ -157,14 +157,15 @@ def load_split_dataloaders(args):
 
     train_dataset_ptrs, _, _, used_is['train'] = gather_ptrs(input_dir['train'], args.gnn_datasets, [1,0,0])
     _, val_dataset_ptrs, _, used_is['valid'] = gather_ptrs(input_dir['valid'], args.gnn_datasets, [0,1,0])
-    _, _, test_dataset_ptrs, used_is['test'] = gather_ptrs(input_dir['test'], args.gnn_datasets, [0,0,1])        
+    # _, _, test_dataset_ptrs, used_is['test'] = gather_ptrs(input_dir['test'], args.gnn_datasets, [0,0,1])        
+    # TODO: one-time hack, think if this makes sense
+    test_dataset_ptrs = val_dataset_ptrs ; used_is['test'] = used_is['valid']
     if not (used_is['train'] == used_is['valid'] == used_is['test']):
         breakpoint()
     dataset_train = PtrDataset(train_dataset_ptrs)
     dataset_valid = PtrDataset(val_dataset_ptrs)
     dataset_test = PtrDataset(test_dataset_ptrs)
-    if dataset_test.__len__() > dataset_train.__len__(): # TODO: one-time hack, get rid
-        dataset_test, dataset_train = dataset_train, dataset_test
+
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
