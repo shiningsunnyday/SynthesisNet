@@ -12,6 +12,7 @@ import os
 import networkx as nx
 import matplotlib.pyplot as plt
 from networkx.algorithms import dfs_tree, weisfeiler_lehman_graph_hash
+from networkx.readwrite import json_graph
 import multiprocessing as mp
 from tqdm import tqdm
 import numpy as np
@@ -319,12 +320,34 @@ def hash_program(prog, output_dir):
                     'mask': mask.tolist(), # debug
                     'tree': prog.hash(mask, return_json=True) # debug
                     }
+            
         # make/append to json file the continuation
         for f in frontier:
             f = f.item()
             data['rxn_ids'][f] = data['rxn_ids'].get(f, []) + [tree.nodes[f]['rxn_id']]
    
         json.dump(data, open(cur_fpath, 'w+'))
+        # debug
+        vis_fpath = cur_dirname.parent / f"{cur_dirname.name}.png"        
+        if not os.path.exists(vis_fpath):
+            T = json_graph.tree_graph(data['tree'])
+            node_label = {}
+            for n in T.nodes():
+                node_id = T.nodes[n]['node_id']  
+                node_label[n] = f"id={node_id}"
+                if 'rxn_id' in T.nodes[n]:
+                    rxn_id = T.nodes[n]['rxn_id']
+                    node_label[n] += f";rxn_id={rxn_id}"
+                                      
+            T = nx.relabel_nodes(T, node_label)
+            fig = plt.Figure(figsize=(10, 10))
+            ax = fig.add_subplot(1,1,1)
+            nx.draw_networkx(T, ax=ax)
+            
+            fig.savefig(vis_fpath)
+
+
+
         for f in frontier:
             if cur[f] != '0':
                 breakpoint()
