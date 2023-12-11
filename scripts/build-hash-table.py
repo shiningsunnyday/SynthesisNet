@@ -273,13 +273,31 @@ def create_run_programs(args, bbf, size=3):
             if Program.input_length(p) <= MP_MIN_COMBINATIONS:
                 easy_prog_inds.append(i)
             else:
-                hard_prog_inds.append(i)
-        with mp.Pool(bbf.processes) as p:
-            easy_progs = p.map(run_program, tqdm([all_progs[d][i] for i in easy_prog_inds]))
-        hard_progs = [run_program(p) for p in tqdm([all_progs[d][i] for i in hard_prog_inds])]
+                hard_prog_inds.append((Program.input_length(p), i))
+        print(sorted(hard_prog_inds))
+        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]        
         progs = [None for _ in all_progs[d]]
-        for i, p in zip(easy_prog_inds+hard_prog_inds, easy_progs+hard_progs):
-            progs[i] = p
+       
+        easy_done_path = os.path.join(args.cache_dir, f"{d}_easy.pkl")
+        if os.path.exists(easy_done_path):
+            easy_progs = pickle.load(open(easy_done_path, 'rb'))
+        else:
+            with mp.Pool(bbf.processes) as p:
+                easy_progs = p.map(run_program, tqdm([all_progs[d][i] for i in easy_prog_inds]))             
+            # easy_progs = [run_program(all_progs[d][i]) for i in easy_prog_inds]
+            if args.cache_dir:
+                pickle.dump(easy_progs, open(easy_done_path, 'wb'))
+        for i, p in zip(easy_prog_inds, easy_progs):
+            progs[i] = p       
+        for i in tqdm(hard_prog_inds):
+            hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
+            if os.path.exists(hard_path_i):
+                progs[i] = pickle.load(open(hard_path_i, 'rb'))
+            else:
+                p = all_progs[d][i]
+                progs[i] = run_program(p)    
+                if args.cache_dir:
+                    pickle.dump(progs[i], open(hard_path_i, 'wb'))
         # Filter after reaction is run
         all_progs[d] = filter_programs(progs)
         print(f"done! {len(all_progs[d])} size-{d} programs")
@@ -332,18 +350,30 @@ def hash_program(prog, output_dir):
         if not os.path.exists(vis_fpath):
             T = json_graph.tree_graph(data['tree'])
             node_label = {}
+            node_color = []
             for n in T.nodes():
-                node_id = T.nodes[n]['node_id']  
-                node_label[n] = f"id={node_id}"
+                node_label[n] = f"id={n}"
                 if 'rxn_id' in T.nodes[n]:
                     rxn_id = T.nodes[n]['rxn_id']
-                    node_label[n] += f";rxn_id={rxn_id}"
+                    rxn_label = f"\nrxn_id={rxn_id}"
+                    node_color.append('red')
+                else:
+                    rxn_label = "\nrxn_id=?"
+                    node_color.append('gray')
+                node_label[n] += rxn_label
+                depth_label = T.nodes[n]['depth']
+                node_label[n] += f"\ndepth={depth_label}"
                                       
             T = nx.relabel_nodes(T, node_label)
             fig = plt.Figure(figsize=(10, 10))
             ax = fig.add_subplot(1,1,1)
-            nx.draw_networkx(T, ax=ax)
-            
+            pos = Skeleton.hierarchy_pos(T, root=node_label[len(T)-1])
+            nx.draw(T, 
+                    ax=ax, 
+                    pos=pos, 
+                    node_size=5000, 
+                    node_color=node_color,
+                    with_labels=True)
             fig.savefig(vis_fpath)
 
 

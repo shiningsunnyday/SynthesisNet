@@ -483,14 +483,55 @@ class Program:
                     # propagate down the tree    
 
     @staticmethod
+    def infer_product_index(i, interm_counts, entries, rxn_map):
+        assert len(interm_counts) == len(entries)
+        entry_indices = [[] for _ in entries]
+        for j in range(len(interm_counts)-1,-1,-1):                        
+            num_reactants = len(rxn_map[entries[j]].available_reactants)
+            reactant_indices = [0 for _ in range(num_reactants)]
+            reactant_i = i%interm_counts[j]
+            for k in range(num_reactants-1,-1,-1):
+                num_reactants_i = len(rxn_map[entries[j]].available_reactants[k])
+                reactant_indices[k] = reactant_i%num_reactants_i
+                reactant_i //= num_reactants_i
+            assert reactant_i == 0
+            entry_indices[j] = reactant_indices
+            i //= interm_counts[j]
+
+        assert i == 0        
+
+        entry_reactants = []
+        for entry, entry_reactant_indices in zip(entries, entry_indices):
+            entry_reactants.append([])
+            for j, reactant_index in enumerate(entry_reactant_indices):
+                try:
+                    reactant = rxn_map[entry].available_reactants[j][reactant_index]
+                except:
+                    breakpoint()
+                entry_reactants[-1].append(reactant)
+        return entry_reactants
+
+
+    @staticmethod
     def run_rxns(i):
-        entry_reactants = all_entry_reactants[i]
+        """
+        Use the index and rxn_map to infer the reactant combination
+        index refers to position in product(product(reactants))
+        for example:
+        [[8,4],[8]] has 2 entry points
+        entries[0] has 8 choices for reactant1 and 4 for reactant2
+        index can be 0 to 32*8-1
+        the trick is to use the intermediate counts [32,8]
+        then repeat for (index//8, [8,4]) and (index%8, [8])
+        """        
+        entry_reactants = Program.infer_product_index(i, interm_counts, entries, rxn_map)       
+        
         good = True
         product_map = {}
         for node in nx.dfs_postorder_nodes(rxn_tree, len(rxn_tree)-1):
             if node in entries:
                 entry = entries.index(node)
-                prod = rxn_map[node].run_reaction(entry_reactants[entry])
+                prod = rxn_map[node].run_reaction(tuple(entry_reactants[entry]))
                 product_map[node] = prod
             else:
                 reactants = []
@@ -521,55 +562,86 @@ class Program:
         else:          
             return None             
 
+
+    @staticmethod
+    def retrieve_entry(r, i):
+        return (r, Program.infer_product_index(i, interm_counts, entries, rxn_map))
     
 
     def run_rxn_tree(self): 
         # Assume entry inputs satisfy everything except the "root"        
-        reactant_map = {}
+        # reactant_map = {}
         # if self.rxn_tree.graph['super']:
         #     breakpoint()
+        # for n in self.entries:
+        #     reactant_map[n] = product(*[reactants for reactants in self.rxn_map[n].available_reactants])
+        # all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
+        prods = []
         for n in self.entries:
-            reactant_map[n] = product(*[reactants for reactants in self.rxn_map[n].available_reactants])
-        all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
+            prods.append([])
+            for i in range(len(self.rxn_map[n].available_reactants)):
+                prods[-1].append(len(self.rxn_map[n].available_reactants[i]))            
+            prods[-1] = np.prod(prods[-1])
+        
         res = []
-        count = len(list(all_entry_reactants))
-        if count == 0:            
+        if len(prods):
+            interm_counts = prods
+            count = np.prod(prods)        
+        else:
+            count = 0          
             return 0, None
         
         rxn_tree = self.rxn_tree
         rxn_map = self.rxn_map
         entries = self.entries
 
-        globals()["all_entry_reactants"] = all_entry_reactants
         globals()["rxn_tree"] = rxn_tree
         globals()["rxn_map"] = rxn_map
+        globals()["interm_counts"] = interm_counts
         globals()["entries"] = entries
-
+        # globals()["all_entry_reactants"] = all_entry_reactants # debug
         if count >= MP_MIN_COMBINATIONS:
+            print(f"running {count} entry_reactants")
             with mp.Pool(MAX_PROCESSES) as p:
-                res = p.map(self.run_rxns, range(len(all_entry_reactants)))           
-                assert len(res) == len(all_entry_reactants)
+                res = p.map(self.run_rxns, tqdm(range(count), desc="executing reactions"))           
+                assert len(res) == count
         else:
-            res = [self.run_rxns(i) for i in range(len(all_entry_reactants))]
-        res = [(r, entry_reactants) for (r, entry_reactants) in zip(res, all_entry_reactants) if r is not None]
+            res = [self.run_rxns(i) for i in range(count)]
+        res = [(r, i) for (r, i) in zip(res, range(count)) if r is not None]
 
         # Update the reactants to only valid inputs
+
+        rxn_map_copy = deepcopy(self.rxn_map)
         for n in self.entries:
-            cur = self.rxn_map[n].available_reactants
-            self.rxn_map[n].available_reactants = tuple([] for _ in cur)
+            cur = rxn_map_copy[n].available_reactants
+            rxn_map_copy[n].available_reactants = tuple([] for _ in cur)
 
         avail_index = {n: [{}, {}] for n in self.entries}  # sets of possible first and second reactants per entry
-        for r, entry_reactants in res:            
+
+        # if len(res) >= MP_MIN_COMBINATIONS:
+        #     with mp.Pool(MAX_PROCESSES) as p:
+        #         res = p.starmap(self.retrieve_entry, res)   
+        # else:
+        #     res = [self.retrieve_entry(r, i) for r, i in res]
+
+        """
+        The following re-labels the available reactants of each entry
+        For each entry, for each reactant index (0 or 1),
+        we'd like a dict mapping reactant to index
+        """
+        for r, index in tqdm(res, desc="post-processing products"):               
+            entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)
             for entry_reactant, n in zip(entry_reactants, self.entries):
                 entry_point = []
                 for i, reactant in enumerate(entry_reactant):
                     if reactant not in avail_index[n][i]:                        
-                        avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i])
-                        self.rxn_map[n].available_reactants[i].append(reactant)
+                        avail_index[n][i][reactant] = len(rxn_map_copy[n].available_reactants[i])
+                        rxn_map_copy[n].available_reactants[i].append(reactant)
                     if self.keep_prods:
                         entry_point.append(avail_index[n][i][reactant])
                 if self.keep_prods:
                     self.product_map[len(self.rxn_tree)-1][r][n] = entry_point
+        self.rxn_map = rxn_map_copy
         return count, res
                         
 
@@ -1266,7 +1338,7 @@ class Skeleton:
     def hierarchy_pos(G, root=None, width=1., vert_gap = 0.2, vert_loc = 0, xcenter = 0.5):
 
         '''
-        From Joel's answer at https://stackoverflow.com/a/29597209/2966723.  
+        From Joel's answer at https://stackoverflow.com/a/29597209/2966723
         Licensed under Creative Commons Attribution-Share Alike 
         
         If the graph is a tree this will return the positions to plot this in a 
@@ -1324,6 +1396,9 @@ class Skeleton:
                                         vert_loc = vert_loc-vert_gap, xcenter=nextx,
                                         pos=pos, parent = root)
             return pos
+
+                
+        return _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
 
 
 # helper functions
