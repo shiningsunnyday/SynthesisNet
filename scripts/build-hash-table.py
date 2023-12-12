@@ -65,8 +65,9 @@ def get_args():
     # Hash table args
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--depth", type=int, default=3, help="depth of enumeration")
-    parser.add_argument("--top-bb", type=int)
-    parser.add_argument("--top-rxn", type=int)
+    parser.add_argument("--top-bb", type=int, 
+                        help='if positive, use only top-k bb/rxns as counted by skeleton-file; if -1, use all with non-zero count')
+    parser.add_argument("--top-rxn", type=int, help='use only top-k bb/rxns as counted by skeleton-file; if -1, use all with non-zero count')
     parser.add_argument("--stats", type=str, nargs='+')
     parser.add_argument("--keep-prods", default=False, action="store_true")
     parser.add_argument("--verbose", default=False, action="store_true")
@@ -275,7 +276,7 @@ def create_run_programs(args, bbf, size=3):
             else:
                 hard_prog_inds.append((Program.input_length(p), i))
         print(sorted(hard_prog_inds))
-        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]        
+        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)][::-1]
         progs = [None for _ in all_progs[d]]
        
         easy_done_path = os.path.join(args.cache_dir, f"{d}_easy.pkl")
@@ -291,13 +292,19 @@ def create_run_programs(args, bbf, size=3):
             progs[i] = p       
         for i in tqdm(hard_prog_inds):
             hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
+            print(hard_path_i)
             if os.path.exists(hard_path_i):
-                progs[i] = pickle.load(open(hard_path_i, 'rb'))
+                continue
             else:
                 p = all_progs[d][i]
                 progs[i] = run_program(p)    
                 if args.cache_dir:
                     pickle.dump(progs[i], open(hard_path_i, 'wb'))
+        for i in tqdm(hard_prog_inds):
+            hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
+            progs[i] = pickle.load(open(hard_path_i, 'rb'))
+
+        
         # Filter after reaction is run
         all_progs[d] = filter_programs(progs)
         print(f"done! {len(all_progs[d])} size-{d} programs")
@@ -423,10 +430,12 @@ if __name__ == "__main__":
         skeletons = pickle.load(open(args.skeleton_file, 'rb'))            
         if args.top_bb: 
             bb_counts = count_bbs(args, skeletons, vis=False)
-            for bblock in bblocks:
-                bb_counts[bblock]
+            if args.top_bb != -1:
+                for bblock in bblocks:
+                    bb_counts[bblock]
             bblocks = sorted(bb_counts.keys(), key=lambda x:-bb_counts[x])                       
-            bblocks = bblocks[:args.top_bb]
+            if args.top_bb != -1:
+                bblocks = bblocks[:args.top_bb]                            
             print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")                
         if args.top_rxn:            
             rxn_counts = count_rxns(args, skeletons, rxn_templates, vis=False)
@@ -454,6 +463,7 @@ if __name__ == "__main__":
     # Count number of unique (uni-reaction, building block) pairs
     bbf._init_rxns_with_reactants()
     bbf.filter()
+    breakpoint()
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
