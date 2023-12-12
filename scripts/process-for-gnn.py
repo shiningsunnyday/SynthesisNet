@@ -48,13 +48,14 @@ def get_args():
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_frontier', 'bb_frontier'],
+        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_target_down', 'rxn_frontier', 'bb_frontier'],
         default='leaves_up',
         help="""
         Criteria for a determined skeleton:
             leaves_up: all children present
             all_leaves: all leaves present
             target_down: all predecessors present
+            rxn_target_down: all reaction predecessors present
             bfs_frontier: bfs frontier, expand from target only
             rxn_frontier: there exists rxn on bfs frontier, predict rxns
             bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier

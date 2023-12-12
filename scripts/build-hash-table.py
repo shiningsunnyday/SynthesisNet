@@ -275,7 +275,7 @@ def create_run_programs(args, bbf, size=3):
             else:
                 hard_prog_inds.append((Program.input_length(p), i))
         print(sorted(hard_prog_inds))
-        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]        
+        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
         progs = [None for _ in all_progs[d]]
        
         easy_done_path = os.path.join(args.cache_dir, f"{d}_easy.pkl")
@@ -291,13 +291,17 @@ def create_run_programs(args, bbf, size=3):
             progs[i] = p       
         for i in tqdm(hard_prog_inds):
             hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
+            print(hard_path_i)
             if os.path.exists(hard_path_i):
-                progs[i] = pickle.load(open(hard_path_i, 'rb'))
+                continue
             else:
                 p = all_progs[d][i]
                 progs[i] = run_program(p)    
                 if args.cache_dir:
                     pickle.dump(progs[i], open(hard_path_i, 'wb'))
+        for i in tqdm(hard_prog_inds):
+            hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
+            progs[i] = pickle.load(open(hard_path_i, 'rb'))
         # Filter after reaction is run
         all_progs[d] = filter_programs(progs)
         print(f"done! {len(all_progs[d])} size-{d} programs")
