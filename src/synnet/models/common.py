@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from scipy import sparse
 
-from synnet.models.mlp import MLP
+from synnet.models.mlp import MLP, GNN
 
 
 def get_args():
@@ -115,6 +115,12 @@ def load_mlp_from_ckpt(ckpt_file: str):
     except TypeError:
         model = _load_mlp_from_iclr_ckpt(ckpt_file)
     return model.eval()
+
+
+def load_gnn_from_ckpt(ckpt_file: str):
+    """Load a gnn from a checkpoint"""
+    model = GNN.load_from_checkpoint(ckpt_file, map_location='cpu').model
+    return model
 
 
 def find_best_model_ckpt(path: str) -> Union[Path, None]:

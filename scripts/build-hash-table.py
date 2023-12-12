@@ -276,7 +276,7 @@ def create_run_programs(args, bbf, size=3):
             else:
                 hard_prog_inds.append((Program.input_length(p), i))
         print(sorted(hard_prog_inds))
-        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)][::-1]
+        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
         progs = [None for _ in all_progs[d]]
        
         easy_done_path = os.path.join(args.cache_dir, f"{d}_easy.pkl")

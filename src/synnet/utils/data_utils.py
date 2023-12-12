@@ -1155,6 +1155,10 @@ class Skeleton:
             nodes[a].addkid(nodes[b])        
         self.zss_tree = nodes[-1]
 
+        """
+        Build the synthetic tree using the representative st
+        With helper functions to modify this
+        """
         whole_tree = nx.DiGraph()
         for i in tree.nodes():
             whole_tree.add_node(i, smiles=st.chemicals[i].smiles)
@@ -1170,7 +1174,7 @@ class Skeleton:
                 assert tree.has_edge(p, i)
                 whole_tree.add_edge(j, i)
 
-        self.tree = whole_tree
+        self.tree = whole_tree            
         self.tree_edges = np.array(self.tree.edges).T        
         self.tree_root = len(st.chemicals)-1
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
@@ -1182,12 +1186,45 @@ class Skeleton:
 
 
     def reset(self, mask=None):
+        """
+        Resets the mask to mask out every node
+        """
         self._mask = np.zeros(len(self.tree), dtype=np.int8)
         self.leaves_up = True
         self.all_leaves = False        
         self.frontier = True # because we have target?
         if mask is not None:
             self.mask = mask
+
+    
+        
+    def modify_tree(self, i, smiles=None, rxn_id=-1):
+        """
+        Fills node i with smiles or rxn_id
+        """
+        if smiles is not None:
+            if 'smiles' not in self.tree.nodes[i]:
+                breakpoint()
+            self.tree.nodes[i]['smiles'] = smiles
+        if rxn_id != -1:
+            if 'rxn_id' not in self.tree.nodes[i]:
+                breakpoint()
+            self.tree.nodes[i]['rxn_id'] = rxn_id
+        self.mask = [i]
+
+
+    def clear_tree(self):
+        """
+        Clears the semantic information in the tree
+        """
+        for n in self.tree:
+            if 'smiles' in self.tree.nodes[n]:
+                self.tree.nodes[n]['smiles'] = ''
+            elif 'rxn_id' in self.tree.nodes[n]:
+                self.tree.nodes[n]['rxn_id'] = -1
+            else:
+                raise
+        self.reset()
 
 
     @property
@@ -1210,6 +1247,8 @@ class Skeleton:
         src = self.mask[self.tree_edges[0]]
         dest = self.mask[self.tree_edges[1]]
         self.target_down = (src >= dest).all()
+        breakpoint()
+        self.rxn_target_down = False # all interm nodes masked out, and rxns target_down
 
         
     
@@ -1222,10 +1261,16 @@ class Skeleton:
 
     def fill_node(self, n, y):
         if 'smiles' in self.tree.nodes[n]:
-            y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
-            # print(self.tree.nodes[n])
+            if self.tree.nodes[n]['smiles']:
+                y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
+                # print(self.tree.nodes[n])            
+            else:
+                print("bad smiles")
         elif 'rxn_id' in self.tree.nodes[n]:
-            y[n][256:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
+            if self.tree.nodes[n]['rxn_id'] != -1:
+                y[n][256:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
+            else:
+                print("bad rxn_id")
         else:
             print("bad node")
 

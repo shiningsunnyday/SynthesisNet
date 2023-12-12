@@ -208,8 +208,6 @@ class GNNModel(nn.Module):
         return x
 
 
-
-
 class GNN(pl.LightningModule):
     def __init__(
         self,     
@@ -238,7 +236,6 @@ class GNN(pl.LightningModule):
         self.valid_steps_y = []
         self.valid_steps_y_hat = []
         self.model = GNNModel(**model_kwargs)
-
 
     def forward(self, data, mask):
         """Forward step for inference only."""
