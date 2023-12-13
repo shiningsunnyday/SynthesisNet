@@ -58,14 +58,22 @@ def _fetch_data(name: str) -> list[str]:
 @torch.no_grad()
 def wrapper_decoder(sk, model):
     """Generate a filled-in skeleton given the input which is only filled with the target."""
-    mask = sk.mask
     model.eval()
-    while not mask.all():
+    while ((~sk.mask) & sk.rxns).any():
+        assert sk.rxn_target_down
         _, X, _ = sk.get_state()
         data = Data(edge_index=torch.tensor(sk.tree_edges, dtype=torch.int64), 
-                    x=torch.Tensor(X))
-        breakpoint()
-        X_hat = model(data)        
+                    x=torch.Tensor(X))        
+        frontier_rxns = (~sk.mask) & sk.rxns
+        frontier_rxns &= [n==sk.tree_root or sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))] for n in range(len(sk.tree))]
+        frontier_rxns = np.bool_(frontier_rxns)
+        logits = model(data)[frontier_rxns, -91:]        
+        confs, rxn_ids = logits.max(axis=-1)
+        node_id = np.arange(len(sk.tree))[frontier_rxns][confs.argmax()]        
+        rxn_id = rxn_ids[confs.argmax()]
+        sk.modify_tree(node_id, rxn_id=rxn_id)        
+
+        
     return sk
 
 
