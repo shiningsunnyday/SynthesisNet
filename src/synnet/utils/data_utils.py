@@ -10,19 +10,21 @@ Here we define the following classes for working with synthetic tree data:
 import functools
 import gzip
 import itertools
+import shutil
 import json
 import numpy as np
 import random
 from typing import Any, Optional, Set, Tuple, Union
 import multiprocessing as mp
 mp.set_start_method('fork')
-from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES
+from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
 from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
 from tqdm import tqdm
 import pickle
+from time import time
 from itertools import permutations, product
 from collections import defaultdict
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
@@ -316,6 +318,80 @@ class Reaction:
 
 
 
+class ProductMap:
+    def __init__(self, fpath, loaded=True):         
+        self.fpath = fpath
+        if loaded:
+            self._product_map = defaultdict(Program.make_default_dict)       
+            self._loaded = True
+        else:
+            assert os.path.exists(fpath)
+            self._loaded = False
+
+    
+    def save(self):
+        assert self._loaded, "need to call load() first"        
+        pickle.dump(self._product_map, open(self.fpath, 'wb'))
+        self._product_map = None
+        self._loaded = False
+        
+
+    
+    def load(self):
+        if not self._loaded:            
+            self._product_map = pickle.load(open(self.fpath, 'rb'))
+            self._loaded = True
+    
+
+    def get_num_interms(self, key):
+        assert key in self._product_map
+        return len(self._product_map[key])
+
+    
+    def __setitem__(self, key, val):   
+        assert self._loaded
+        assert isinstance(key, tuple)   
+        assert len(key) == 3
+        n, interm, e = key
+        self._product_map[n][interm][e] = val
+
+
+    def __getitem__(self, key):   
+        assert self._loaded
+        assert isinstance(key, tuple)   
+        if len(key) == 3:
+            n, interm, e = key
+            return self._product_map[n][interm][e]  
+        elif len(key) == 2:
+            n, interm = key
+            return self._product_map[n][interm]
+        elif len(key) == 1:
+            n = key[0]
+            return self._product_map[n]
+    
+
+    def copy(self):
+        new_fpath = os.path.join(PRODUCT_DIR, f"{time()}.pkl")
+        shutil.copyfile(self.fpath, new_fpath)
+        new_pmap = ProductMap(new_fpath, loaded=False)
+        return new_pmap
+
+
+
+    def combine(self, other, offset):
+        if not self._loaded:
+            self.load()
+        if not other._loaded:
+            other.load()
+        for n in other._product_map:
+            for r in other._product_map[n]:
+                for e, v in other._product_map[n][r].items():
+                    self._product_map[n+offset][r][e+offset] = v
+        # combine self.product_map's and correct for entries    
+        self.save()
+
+
+
 class Program:
     def __init__(self, rxn_tree=None, keep_prods=0):
         self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()        
@@ -328,9 +404,20 @@ class Program:
             for each node n, store its intermediates
             for each intermediate, store the entry nodes
             for each entry, store the indices in .available_reactants
-            """
-            self.product_map = defaultdict(self.make_default_dict)
+            """                       
+            fpath = os.path.join(PRODUCT_DIR, f"{time()}.pkl")
+            self.product_map = ProductMap(fpath)
+            self.product_map.save()
             # assert 'depth' in self.rxn_tree.graph
+
+
+    def copy(self):
+        other = Program(self.rxn_tree)        
+        other.rxn_map = deepcopy(self.rxn_map)        
+        other.keep_prods = self.keep_prods
+        other.product_map = self.product_map.copy()        
+        return other
+
 
 
     @property
@@ -405,15 +492,13 @@ class Program:
             self.rxn_map[n+offset] = other.rxn_map[n]
         # combine rxn_map's
         if self.keep_prods:
-            for n in other.product_map:
-                for r in other.product_map[n]:
-                    for e, v in other.product_map[n][r].items():
-                        self.product_map[n+offset][r][e+offset] = v
-            # combine self.product_map's and correct for entries
+            self.product_map.combine(other.product_map, offset=offset)
         return self
     
 
     def init_rxns(self, rxns):
+        if self.keep_prods:
+            self.product_map.load()
         for n in self.rxn_tree.nodes():
             if n not in self.rxn_map:                
                 rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
@@ -438,23 +523,23 @@ class Program:
                             filter_func = rxn.is_reactant_second
 
                         res = []    
-                        num_interms = len(self.product_map[succ])
+                        num_interms = self.product_map.get_num_interms(succ)
                         bad_interms = []                
                         """
                         product_map stores the interms at n's successor
                         """
-                        for interm in self.product_map[succ]:
+                        for interm in self.product_map[(succ,)]:
                             if filter_func(interm):
-                                if list(self.product_map[succ][interm].keys()) != self.entries: # same order
+                                if list(self.product_map[(succ, interm)].keys()) != self.entries: # same order
                                     # make sure appear in same order
-                                    appear_entries = [self.entries.index(p) for p in list(self.product_map[succ][interm].keys())]
+                                    appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
                                     assert sorted(appear_entries) == appear_entries                        
-                                entry_reactants = [[self.rxn_map[e].available_reactants[i][ind] for (i, ind) in enumerate(self.product_map[succ][interm][e])] for e in self.product_map[succ][interm]]
+                                entry_reactants = [[self.rxn_map[e].available_reactants[i][ind] for (i, ind) in enumerate(self.product_map[(succ, interm, e)])] for e in self.product_map[(succ, interm)]]
                                 res.append((interm, entry_reactants))
                             else:
                                 bad_interms.append(interm)            
                         
-                        entries = list(self.product_map[succ][interm].keys())                    
+                        entries = list(self.product_map[(succ, interm)].keys())                    
                         for n in entries:
                             cur = self.rxn_map[n].available_reactants
                             self.rxn_map[n].available_reactants = tuple([] for _ in cur)                    
@@ -471,8 +556,8 @@ class Program:
                                         self.rxn_map[n].available_reactants[i].append(reactant)
                         
                         # remove the bad interms
-                        for interm in bad_interms:
-                            self.product_map[succ].pop(interm)                    
+                        for interm in bad_interms:                            
+                            self.product_map[tuple([succ])].pop(interm)                    
                         # print(f"{num_interms}->{num_interms-len(bad_interms)} node {n} interm prods")
 
                     
@@ -481,6 +566,9 @@ class Program:
                     # print([[avail_reactants for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries])
                     # change available_reactants to be valid products of previous            
                     # propagate down the tree    
+        if self.keep_prods:
+            self.product_map.save()
+            
 
     @staticmethod
     def infer_product_index(i, interm_counts, entries, rxn_map):
@@ -629,6 +717,8 @@ class Program:
         For each entry, for each reactant index (0 or 1),
         we'd like a dict mapping reactant to index
         """
+        if self.keep_prods:
+            self.product_map.load()
         for r, index in tqdm(res, desc="post-processing products"):               
             entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)
             for entry_reactant, n in zip(entry_reactants, self.entries):
@@ -640,7 +730,9 @@ class Program:
                     if self.keep_prods:
                         entry_point.append(avail_index[n][i][reactant])
                 if self.keep_prods:
-                    self.product_map[len(self.rxn_tree)-1][r][n] = entry_point
+                    self.product_map[(len(self.rxn_tree)-1, r, n)] = entry_point
+        if self.keep_prods:
+            self.product_map.save()
         self.rxn_map = rxn_map_copy
         return count, res
                         

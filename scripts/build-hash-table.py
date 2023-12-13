@@ -1,4 +1,4 @@
-from synnet.config import MAX_PROCESSES, MP_MIN_COMBINATIONS
+from synnet.config import MAX_PROCESSES, MP_MIN_COMBINATIONS, PRODUCT_DIR
 from synnet.data_generation.preprocessing import (
     BuildingBlockFileHandler,
     BuildingBlockFilter,
@@ -178,11 +178,12 @@ def run_program(prog):
 
 
 
-
 def expand_program(i, a, b=None):
-    prog = deepcopy(a)
+    a = all_progs[a[0]][a[1]]    
+    prog = a.copy()
     if b is not None:
-        prog = prog.combine(deepcopy(b))      
+        b = all_progs[b[0]][b[1]]
+        prog = prog.combine(b.copy())      
         prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
     else:
         prog.add_rxn(i, len(a.rxn_tree)-1)
@@ -190,26 +191,29 @@ def expand_program(i, a, b=None):
 
 
 
-def expand_programs(all_progs, size):
+def expand_programs(args, all_progs, size):
     progs = []
     pargs = []
     for i, r in tqdm(enumerate(bbf.rxns)):
         if r.num_reactant == 1:
             A = all_progs[size-1]
-            for a in A:
-                pargs.append((i, a))
+            for a in range(len(A)):
+                pargs.append((i, (size-1, a)))
         else:
             for j in range(1, size-1):
                 A = all_progs[j]
                 B = all_progs[size-1-j]
-                for a in A:
-                    for b in B:   
-                        pargs.append((i, a, b))
-    with mp.Pool(20) as p:
-        progs = p.starmap(expand_program, tqdm(pargs))
-    # progs = []
-    # for i, parg in enumerate(pargs):
-    #     progs.append(expand_program(*parg))      
+                for a in range(len(A)):
+                    for b in range(len(B)):   
+                        pargs.append((i, (j, a), (size-1-j, b)))
+    globals()["all_progs"] = all_progs
+    if args.ncpu > 1:
+        with mp.Pool(args.ncpu) as p:
+            progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
+    else:
+        progs = []
+        for i, parg in enumerate(pargs):
+            progs.append(expand_program(*parg))      
     all_progs[size] = progs
     return all_progs
 
@@ -254,13 +258,16 @@ def create_run_programs(args, bbf, size=3):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
             else:
                 print(f"expanding size-{d} programs")
-                expand_programs(all_progs, d)
+                expand_programs(args, all_progs, d)
                 if args.cache_dir:
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
             print(f"created {len(all_progs[d])} size-{d} programs")
 
-        with mp.Pool(bbf.processes) as p:
-            all_progs[d] = p.map(init_program, tqdm(all_progs[d]))          
+        if args.ncpu > 1:
+            with mp.Pool(args.ncpu) as p:
+                all_progs[d] = p.map(init_program, tqdm(all_progs[d], desc="init programs"))          
+        else:
+            all_progs[d] = [init_program(p) for p in all_progs[d]]
         # Filter after init prunes the input space
         all_progs[d] = filter_programs(all_progs[d])
         print(f"running {len(all_progs[d])} size-{d} programs")
@@ -283,9 +290,11 @@ def create_run_programs(args, bbf, size=3):
         if os.path.exists(easy_done_path):
             easy_progs = pickle.load(open(easy_done_path, 'rb'))
         else:
-            with mp.Pool(bbf.processes) as p:
-                easy_progs = p.map(run_program, tqdm([all_progs[d][i] for i in easy_prog_inds]))             
-            # easy_progs = [run_program(all_progs[d][i]) for i in easy_prog_inds]
+            if args.ncpu > 1:
+                with mp.Pool(args.ncpu) as p:
+                    easy_progs = p.map(run_program, tqdm([all_progs[d][i] for i in easy_prog_inds], desc="running easy progs"))             
+            else:
+                easy_progs = [run_program(all_progs[d][i]) for i in easy_prog_inds]
             if args.cache_dir:
                 pickle.dump(easy_progs, open(easy_done_path, 'wb'))
         for i, p in zip(easy_prog_inds, easy_progs):
@@ -422,6 +431,8 @@ if __name__ == "__main__":
 
     # Parse input args
     args = get_args()
+    if args.cache_dir and args.cache_dir != PRODUCT_DIR:
+        breakpoint()
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)    
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
 
