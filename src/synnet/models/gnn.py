@@ -80,6 +80,7 @@ def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
     train_frac = ratio[0]/sum(ratio)
     val_frac = (ratio[0]+ratio[1])/sum(ratio)
     while i < 100:
+        print(i)
         if i not in include_is:
             i += 1
             continue
@@ -100,7 +101,7 @@ def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
                 start_inds.append(j)               
             start_inds = np.where(node_mask.sum(axis=-1) == node_mask.sum(axis=-1).min())[0] # each distinct tree
             n = len(start_inds)
-            print(f"splitting {n} trees into {ratio[0]}-{ratio[1]}-{ratio[2]} for skeleton {i}")
+            # print(f"splitting {n} trees into {ratio[0]}-{ratio[1]}-{ratio[2]} for skeleton {i}")
             train_ind = start_inds[int(train_frac*n)] if int(train_frac*n)<n else n
             val_ind = start_inds[int(val_frac*n)] if int(val_frac*n)<n else n
             for j in range(train_ind):
@@ -170,7 +171,7 @@ def load_split_dataloaders(args):
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
-    return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)    
+    return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is['train'])
 
 
 def load_dataloaders(args):

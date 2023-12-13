@@ -1230,6 +1230,9 @@ class Skeleton:
     @property
     def mask(self):
         return self._mask
+    
+    def pred(self, n):
+        return list(self.tree.predecessors(n))[0]
 
 
     @mask.setter
@@ -1246,9 +1249,19 @@ class Skeleton:
         self.bb_frontier = self.mask.sum() < len(self.mask) # bad only when no frontier
         src = self.mask[self.tree_edges[0]]
         dest = self.mask[self.tree_edges[1]]
-        self.target_down = (src >= dest).all()
-        breakpoint()
-        self.rxn_target_down = False # all interm nodes masked out, and rxns target_down
+        self.target_down = (src >= dest).all()     
+
+        # check that if true, all parent of parent is true
+        non_target_interms = (self.mask & ~self.rxns)
+        non_target_interms[self.tree_root] = 0
+        self.rxn_target_down = not non_target_interms.any() # all interm nodes masked out, and rxns target_down
+        if self.rxn_target_down:
+            for n in np.argwhere((self.mask & self.rxns)).flatten().tolist(): # rxns
+                if self.pred(n) == self.tree_root:
+                    continue
+                parent_rxn = self.pred(self.pred(n))
+                if not (self.mask & self.rxns)[parent_rxn]:
+                    self.rxn_target_down = False
 
         
     
@@ -1275,7 +1288,7 @@ class Skeleton:
             print("bad node")
 
            
-    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False, target_down=False):
+    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False, target_down=False, rxn_target_down=False):
         """
         Return the partial graph with self.mask determining which nodes are available
         If leaves_up is true, further zero out y at nodes where there is an un-filled child
@@ -1287,11 +1300,14 @@ class Skeleton:
         rxn_frontier: whether to set targets to be rxn nodes on bfs frontier
         bb_frontier: whether to set targets to be rxn nodes on bfs frontier if present, else bb nodes
         target_down: same as leaves_up but from target down
+        rxn_target_down: same as leaves_up but from target down, and for reactions only
         """        
         X = np.zeros((len(self.tree), 2*2048+91))
         y = np.zeros((len(self.tree), 256+91))
         try:
             for n in self.tree.nodes():
+                # if there is rxn parent, whether rxn is fulfilled
+                rxn_parent = (n == self.tree_root) or self.pred(n) == self.tree_root or (self.mask & self.rxns)[self.pred(self.pred(n))]
                 leaves_filled = self.mask[list(self.tree.neighbors(n))].all()
                 is_frontier = n in self.frontier_nodes
                 is_frontier_rxn = is_frontier and self.rxns[n]
@@ -1313,7 +1329,7 @@ class Skeleton:
                         # print(self.tree.nodes[n])
                     elif 'rxn_id' in self.tree.nodes[n]:
                         assert len(list(self.tree.predecessors(n))) == 1
-                        X[n][:2048] = fp_2048(self.tree.nodes[list(self.tree.predecessors(n))[0]]['smiles'])
+                        X[n][:2048] = fp_2048(self.tree.nodes[self.pred(n)]['smiles'])
                         X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
                         X[n][2*2048:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
                     else:
@@ -1324,13 +1340,17 @@ class Skeleton:
                     if bb_frontier and is_frontier_bb:
                         self.fill_node(n, y)
                     if not rxn_frontier and not bb_frontier:
-                        if target_down:
+                        if rxn_target_down:
+                            if rxn_parent:
+                                self.fill_node(n, y)
+                        elif target_down:
                             if is_frontier:
                                 self.fill_node(n, y)
                         else:
                             if not leaves_up or leaves_filled:
                                 self.fill_node(n, y)
         except Exception as e:
+            breakpoint()
             print(e)
             print(f"{self.tree.nodes[self.tree_root]['smiles']} bad")
             pass
@@ -1562,6 +1582,8 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         kwargs['bb_frontier'] = True        
     elif args.determine_criteria == 'target_down':
         kwargs['target_down'] = True
+    elif args.determine_criteria == 'rxn_target_down':
+        kwargs['rxn_target_down'] = True
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])

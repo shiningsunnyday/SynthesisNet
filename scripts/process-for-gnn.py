@@ -119,8 +119,6 @@ def main():
     kth_largest = np.zeros(len(skeletons))
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
-        if index < 17:
-            continue
         if len(list(skeletons[st])) == 0:
             continue
         # if len(skeletons[st]) < 100:
@@ -155,7 +153,7 @@ def main():
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)} for class {index} which is {kth_largest[index]+1}th most represented")
         batch_size = 1000*len(pargs)//len(skeletons[st])
-        # batch_size = 1    
+        batch_size = 1    
         num_batches = (len(pargs)+batch_size-1)//batch_size
         print(f"{num_batches} batches")
         for k in tqdm(range(num_batches)): 
@@ -168,7 +166,6 @@ def main():
                     with Pool(50) as p:
                         res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
                 except:
-                    breakpoint()
                     res = [process_syntree_mask(*pargs[j]) for j in range(batch_size*k, batch_size*k+batch_size)]
             else:
                 res.append(process_syntree_mask(*pargs[k]))            
