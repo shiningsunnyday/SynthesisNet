@@ -93,16 +93,20 @@ def main(args):
         with mp.Pool(50) as p:
             res = p.starmap(load_npy, [(input_dir,f"{i}_{ind}","smiles") for ind in tqdm(range(index), desc="loading smiles")])                         
         smiles = np.concatenate(res, axis=0)           
-
+        breakpoint()
         start_inds = [0]
         for j, s in enumerate(smiles):
             if s == smiles[start_inds[-1]]:
                 continue
             start_inds.append(j)
         for j in range(len(start_inds)-1):
-            assert (start_inds[j+1]-start_inds[j]) == (start_inds[1]-start_inds[0])
+            if (start_inds[j+1]-start_inds[j]) != (start_inds[1]-start_inds[0]):
+                breakpoint()
 
-        d = start_inds[1]
+        if len(start_inds) == 1:
+            d = len(smiles)
+        else:
+            d = start_inds[1]
         n = len(start_inds)            
         num_p = (n+p_size-1)//p_size
         print(f"{i}_{index} splitting {n} trees into {num_p} {p_size}-sized tree partitions")                    

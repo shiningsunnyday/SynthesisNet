@@ -286,12 +286,10 @@ class GNN(pl.LightningModule):
         y = data.y
         data_key = np.array([k for data_key in data.key for k in data_key])
         y_hat = self.model(data)
-
         # only building blocks
         mask_bb = (y[:, :256] != 0).any(axis=-1)
         y_bb = y[mask_bb, :256]
         y_hat_bb = y_hat[mask_bb, :256]
-
         # only reactions
         mask_rxn = (y[:, 256:] != 0).any(axis=-1)
         y_rxn = y[mask_rxn, 256:]        

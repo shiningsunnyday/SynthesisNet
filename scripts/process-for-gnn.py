@@ -48,14 +48,15 @@ def get_args():
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_target_down', 'rxn_frontier', 'bb_frontier'],
+        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_target_down', 'rxn_target_down_bb', 'rxn_frontier', 'bb_frontier'],
         default='leaves_up',
         help="""
         Criteria for a determined skeleton:
             leaves_up: all children present
             all_leaves: all leaves present
             target_down: all predecessors present
-            rxn_target_down: all reaction predecessors present
+            rxn_target_down: all non-rxns masked, reaction target down, predict rxns
+            rxn_target_down_bb: all interms masked, reaction target down, predict rxns and bb's
             bfs_frontier: bfs frontier, expand from target only
             rxn_frontier: there exists rxn on bfs frontier, predict rxns
             bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier
@@ -66,6 +67,12 @@ def get_args():
         type=str,
         help="Where to save input and output for GNN"
     )
+    parser.add_argument(
+        "--num-trees-per-batch",
+        type=int,
+        default=-1,
+        help="Number of trees per batch, if -1 then debug with 1"
+    )    
     # Visualization args
     parser.add_argument(
         "--min_count",
@@ -79,7 +86,7 @@ def get_args():
     )   
 
     # Processing
-    parser.add_argument("--ncpu", type=int, help="Number of cpus")
+    parser.add_argument("--ncpu", type=int, help="Number of cpus", default=1)
     return parser.parse_args()
 
 
@@ -147,26 +154,25 @@ def main():
         else:
             min_r_set = [sk.tree_root]
         
-        # with Pool(50) as p:
-            # pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st])]))
+        # with Pool(args.ncpu) as p:
+        #     pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
         pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)} for class {index} which is {kth_largest[index]+1}th most represented")
-        batch_size = 1000*len(pargs)//len(skeletons[st])
-        batch_size = 1    
+        if args.num_trees_per_batch == -1:
+            batch_size = 1
+        else:
+            batch_size = args.num_trees_per_batch*len(pargs)//len(skeletons[st])        
         num_batches = (len(pargs)+batch_size-1)//batch_size
         print(f"{num_batches} batches")
-        for k in tqdm(range(num_batches)): 
+        for k in tqdm(range(num_batches), desc="batches"): 
             if os.path.exists(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy")):
                 continue
             # print(k)  
             res = []     
             if batch_size > 1:
-                try:
-                    with Pool(50) as p:
-                        res = p.starmap(process_syntree_mask, pargs[batch_size*k:batch_size*k+batch_size])
-                except:
-                    res = [process_syntree_mask(*pargs[j]) for j in range(batch_size*k, batch_size*k+batch_size)]
+                with Pool(args.ncpu) as p:
+                    res = p.starmap(process_syntree_mask, tqdm(pargs[batch_size*k:batch_size*k+batch_size], desc="featurize a batch"))
             else:
                 res.append(process_syntree_mask(*pargs[k]))            
             res = [r for r in res if r is not None]                       

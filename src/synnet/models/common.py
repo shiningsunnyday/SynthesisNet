@@ -24,6 +24,7 @@ def get_args():
         type=str,
         help="Where to load featurized data to train GNN",
     )
+    parser.add_argument("--pe", choices=['sin'], help='pos encoding')
     parser.add_argument(
         "--feats-split",
         action='store_true',

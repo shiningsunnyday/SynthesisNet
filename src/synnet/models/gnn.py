@@ -27,7 +27,7 @@ import torch
 import logging
 from pathlib import Path
 from synnet.models.common import get_args
-
+import math
 from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,11 @@ MODEL_ID = Path(__file__).stem
 
 
 class PtrDataset(Dataset):
-    def __init__(self, ptrs, **kwargs):
+    def __init__(self, ptrs, pe=None, **kwargs):
         super().__init__(**kwargs)
         self.ptrs = ptrs
         self.edge_index = {}
+        self.pe = pe
         for ptr in ptrs:
             _, e, _ = ptr
             if e in self.edge_index:
@@ -46,6 +47,25 @@ class PtrDataset(Dataset):
             edges = np.load(e)
             self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)
 
+
+    @staticmethod
+    def positionalencoding1d(d_model, length):
+        """
+        :param d_model: dimension of the model
+        :param length: length of positions
+        :return: length*d_model position matrix
+        """
+        if d_model % 2 != 0:
+            raise ValueError("Cannot use sin/cos positional encoding with "
+                            "odd dim (got dim={:d})".format(d_model))
+        pe = torch.zeros(length, d_model)
+        position = torch.arange(0, length).unsqueeze(1)
+        div_term = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) *
+                            -(math.log(10000.0) / d_model)))
+        pe[:, 0::2] = torch.sin(position.float() * div_term)
+        pe[:, 1::2] = torch.cos(position.float() * div_term)
+
+        return pe
     
 
     def __getitem__(self, idx):
@@ -54,6 +74,10 @@ class PtrDataset(Dataset):
         num_nodes = self.edge_index[e].max()+1
         X = sparse.load_npz(base+'_Xs.npz').toarray()
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
+        # add 1D positional encoding (num_nodes, dim)
+        if self.pe == 'sin':            
+            pe = self.positionalencoding1d(32, num_nodes) # add to target
+            X = np.concatenate((X, pe.numpy()), axis=-1)
         y = sparse.load_npz(base+'_ys.npz').toarray()
         y = y.reshape(-1, num_nodes, y.shape[-1])[index]        
         key_val = e.split('/')[-1].split('_')[0]+''.join(list(map(str, node_mask)  ))
@@ -102,8 +126,8 @@ def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
             start_inds = np.where(node_mask.sum(axis=-1) == node_mask.sum(axis=-1).min())[0] # each distinct tree
             n = len(start_inds)
             # print(f"splitting {n} trees into {ratio[0]}-{ratio[1]}-{ratio[2]} for skeleton {i}")
-            train_ind = start_inds[int(train_frac*n)] if int(train_frac*n)<n else n
-            val_ind = start_inds[int(val_frac*n)] if int(val_frac*n)<n else n
+            train_ind = start_inds[int(train_frac*n)] if int(train_frac*n)<n else len(smiles)
+            val_ind = start_inds[int(val_frac*n)] if int(val_frac*n)<n else len(smiles)
             for j in range(train_ind):
                 train_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
                 os.path.join(input_dir, f"{i}_edge_index.npy"), j))
@@ -131,9 +155,9 @@ def load_lazy_dataloaders(args):
         setattr(args, 'gnn_datasets', indices)    
     
     train_dataset_ptrs, val_dataset_ptrs, test_dataset_ptrs, used_is = gather_ptrs(input_dir, args.gnn_datasets)        
-    dataset_train = PtrDataset(train_dataset_ptrs)
-    dataset_valid = PtrDataset(val_dataset_ptrs)
-    dataset_test = PtrDataset(test_dataset_ptrs)
+    dataset_train = PtrDataset(train_dataset_ptrs, args.pe)
+    dataset_valid = PtrDataset(val_dataset_ptrs, args.pe)
+    dataset_test = PtrDataset(test_dataset_ptrs, args.pe)
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
@@ -163,14 +187,14 @@ def load_split_dataloaders(args):
     test_dataset_ptrs = val_dataset_ptrs ; used_is['test'] = used_is['valid']
     if not (used_is['train'] == used_is['valid'] == used_is['test']):
         breakpoint()
-    dataset_train = PtrDataset(train_dataset_ptrs)
-    dataset_valid = PtrDataset(val_dataset_ptrs)
-    dataset_test = PtrDataset(test_dataset_ptrs)
+    dataset_train = PtrDataset(train_dataset_ptrs, args.pe)
+    dataset_valid = PtrDataset(val_dataset_ptrs, args.pe)
+    dataset_test = PtrDataset(test_dataset_ptrs, args.pe)
 
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
-    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
-    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
-    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
+    valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is['train'])
 
 
@@ -267,7 +291,10 @@ def main(args):
         train_dataloader, valid_dataloader, _, used_is = load_lazy_dataloaders(args)
     else:
         train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args)
-    input_dim = 2*2048+91
+    if args.pe == 'sin':
+        input_dim = 2*2048+91+32
+    else:
+        input_dim = 2*2048+91
     out_dim = 256+91
     molembedder = _fetch_molembedder(args)
     gnn = GNN(
