@@ -159,7 +159,7 @@ def get_programs(rxns, keep_prods=0, size=1):
 def init_program(prog):    
     """
     Then runs the programs, returning validity and (if prog.keep_prods) storing intermediates
-    """    
+    """       
     prog.init_rxns(bbf.rxns)
     return prog
     
@@ -178,11 +178,9 @@ def run_program(prog):
 
 
 
-def expand_program(i, a, b=None):
-    a = all_progs[a[0]][a[1]]    
+def expand_program(i, a, b=None):    
     prog = a.copy()
     if b is not None:
-        b = all_progs[b[0]][b[1]]
         prog = prog.combine(b.copy())      
         prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
     else:
@@ -198,22 +196,22 @@ def expand_programs(args, all_progs, size):
         if r.num_reactant == 1:
             A = all_progs[size-1]
             for a in range(len(A)):
-                pargs.append((i, (size-1, a)))
+                pargs.append((i, A[a]))
         else:
             for j in range(1, size-1):
                 A = all_progs[j]
                 B = all_progs[size-1-j]
                 for a in range(len(A)):
                     for b in range(len(B)):   
-                        pargs.append((i, (j, a), (size-1-j, b)))
-    globals()["all_progs"] = all_progs
-    if args.ncpu > 1:
-        with mp.Pool(args.ncpu) as p:
-            progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
-    else:
-        progs = []
-        for i, parg in enumerate(pargs):
-            progs.append(expand_program(*parg))      
+                        pargs.append((i, A[a], B[b]))
+    # TODO: fix issue
+    # if args.ncpu > 1:
+    #     with mp.Pool(args.ncpu) as p:
+    #         progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
+    # else:
+    progs = []
+    for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):
+        progs.append(expand_program(*parg))      
     all_progs[size] = progs
     return all_progs
 
@@ -237,6 +235,17 @@ def filter_programs(progs):
 
 
 
+def strategy(progs):
+    easy_prog_inds, hard_prog_inds = [], []
+    for i, p in enumerate(progs):
+        if Program.input_length(p) <= MP_MIN_COMBINATIONS:
+            easy_prog_inds.append(i)
+        else:
+            hard_prog_inds.append((Program.input_length(p), i))    
+    return easy_prog_inds, hard_prog_inds
+
+
+
 def create_run_programs(args, bbf, size=3):     
     if args.cache_dir:
         os.makedirs(args.cache_dir, exist_ok=True)
@@ -256,6 +265,12 @@ def create_run_programs(args, bbf, size=3):
             cache_fpath_pre = cache_fpath.replace(f"{d}.pkl", f"{d}_pre.pkl")
             if args.cache_dir and os.path.exists(cache_fpath_pre):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
+                # for p in all_progs[2]:
+                #     length = Program.input_length(p)
+                #     p.product_map.load()
+                #     if len(p.product_map._product_map[0]) == 0:
+                #         breakpoint()
+                # breakpoint()
             else:
                 print(f"expanding size-{d} programs")
                 expand_programs(args, all_progs, d)
@@ -263,25 +278,35 @@ def create_run_programs(args, bbf, size=3):
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
             print(f"created {len(all_progs[d])} size-{d} programs")
 
+        """
+        Strategy: use mp to init easy programs in parallel
+        Run hard programs sequentially, use mp to filter the intermediates
+        """       
+        progs = [None for _ in all_progs[d]] 
+        easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
+        print(sorted(hard_prog_inds))
+        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
         if args.ncpu > 1:
             with mp.Pool(args.ncpu) as p:
-                all_progs[d] = p.map(init_program, tqdm(all_progs[d], desc="init programs"))          
+                easy_progs = p.map(init_program, tqdm([all_progs[d][i] for i in easy_prog_inds], desc="init easy programs"))          
         else:
-            all_progs[d] = [init_program(p) for p in all_progs[d]]
+            easy_progs = [init_program(all_progs[d][i]) for i in easy_prog_inds]
+        for i, p in zip(easy_prog_inds, easy_progs):
+            progs[i] = p
+        for i in tqdm(hard_prog_inds):
+            p = all_progs[d][i]
+            progs[i] = init_program(p)            
+                  
+
         # Filter after init prunes the input space
-        all_progs[d] = filter_programs(all_progs[d])
+        all_progs[d] = filter_programs(progs)
         print(f"running {len(all_progs[d])} size-{d} programs")
 
         """
         Strategy: use mp to run easy programs in parallel
         Run hard programs sequentially, use mp among the input combinations
         """
-        easy_prog_inds, hard_prog_inds = [], []
-        for i, p in enumerate(all_progs[d]):
-            if Program.input_length(p) <= MP_MIN_COMBINATIONS:
-                easy_prog_inds.append(i)
-            else:
-                hard_prog_inds.append((Program.input_length(p), i))
+        easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
         print(sorted(hard_prog_inds))
         hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
         progs = [None for _ in all_progs[d]]
@@ -323,7 +348,7 @@ def create_run_programs(args, bbf, size=3):
     return all_progs
 
 
-def hash_program(prog, output_dir):
+def hash_program(prog, output_dir, make_dir=True):
     """
     We perform bfs search on all possible unmasks satisfying topological order.
     Each unmask can expand a reaction on the frontier.
@@ -342,10 +367,11 @@ def hash_program(prog, output_dir):
     
     while bfs:
         cur, cur_dirname = bfs.popleft()
-        os.makedirs(cur_dirname, exist_ok=True)
+        if make_dir:
+            os.makedirs(cur_dirname, exist_ok=True)
         cur_fpath = cur_dirname.parent / f"{cur_dirname.name}.json"        
         mask = np.array(list(map(int, cur)))                
-        frontier = [f for f in edges[mask[edges[:, 0]] == 1][:, 1] if not mask[f]]
+        frontier = [f for f in edges[mask[edges[:, 0]] == 1][:, 1] if not mask[f]]        
         if os.path.exists(cur_fpath):   
             data = json.load(open(cur_fpath, 'r'))          
             assert 'rxn_ids' in data
@@ -354,6 +380,13 @@ def hash_program(prog, output_dir):
                     'mask': mask.tolist(), # debug
                     'tree': prog.hash(mask, return_json=True) # debug
                     }
+            if mask.sum() == len(mask): # add bb's
+                bb_poss = {}
+                for e in prog.entries:
+                    bb_poss[e] = []
+                    for avail_reactants in prog.rxn_map[e].available_reactants:
+                        bb_poss[e].append(avail_reactants)
+                data['bbs'] = bb_poss                    
             
         # make/append to json file the continuation
         for f in frontier:
@@ -421,7 +454,7 @@ def hash_programs(all_progs, output_dir):
     """
     for d in all_progs:
         for p in all_progs[d]:
-            hash_program(p, output_dir)
+            hash_program(p, output_dir, make_dir=d<len(all_progs))
 
             
 
@@ -468,13 +501,12 @@ if __name__ == "__main__":
         building_blocks=bblocks,
         rxn_templates=rxn_templates,
         verbose=args.verbose,
-        processes=args.ncpu,
+        processes=100,
     )    
 
     # Count number of unique (uni-reaction, building block) pairs
     bbf._init_rxns_with_reactants()
     bbf.filter()
-    breakpoint()
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
@@ -484,21 +516,43 @@ if __name__ == "__main__":
         os.makedirs(args.visualize_dir, exist_ok=True)
         for stat in args.stats:
             fpath = os.path.join(args.visualize_dir, f"{stat}.png")            
-            fig = plt.Figure()
-            ax = fig.add_subplot(1,1,1)
+            fig = plt.Figure()            
             if stat == 'program-count':
+                ax = fig.add_subplot(1,1,1)
                 lengths = [len(all_progs[d]) for d in all_progs]
-                ax.plot(lengths)
+                ax.plot(list(all_progs), lengths)
                 ax.set_xlabel("depth")
                 ax.set_ylabel('number of programs')
             elif stat == 'input-length':
+                ax = fig.add_subplot(1,1,1)
                 input_lengths = [Program.avg_input_length(all_progs[d]) for d in all_progs]
                 ax.plot(input_lengths)
                 ax.set_xlabel("depth")
                 ax.set_ylabel('number of building block input sets')
-            fig.savefig(fpath)    
-    
+            elif stat == 'input-lengths':
+                input_lengths = [Program.input_length(p) for p in all_progs[args.depth]]
+                if args.depth == 2:
+                    ax = fig.add_subplot(1,2,1)
+                    ax2 = fig.add_subplot(1,2,2)                
+                    ax2.hist(input_lengths, bins=100)
+                    ax2.set_title("depth 2")
+                    ax2.set_xlabel('#inputs')                            
 
+                    input_lengths = [Program.input_length(p) for p in all_progs[1]]                    
+                    ax.hist(input_lengths)
+                    ax.set_title("depth 1")
+                    ax.set_xscale('log')
+                    ax.set_xlabel('#inputs')  
+                else:
+                    ax = fig.add_subplot(1,1,1)
+                    ax.hist(input_lengths, bins=100)
+                    ax.set_xscale('log')
+                    ax.set_xlabel('number of building block input sets')                            
+                                    
+            fig.savefig(fpath) 
+            print(fpath)   
+    
+    breakpoint()
     if args.output_dir:
         hash_programs(all_progs, args.output_dir)
 

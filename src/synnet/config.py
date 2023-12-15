@@ -8,7 +8,8 @@ MP_MIN_COMBINATIONS = 1000000
 # TODO: Remove these paths bit by bit
 
 # Intermediates
-PRODUCT_DIR = "/ssd/msun415/program_cache-bb=20000-prods=True/"
+PRODUCT_DIR = "/ssd/msun415/program_cache-bb=10000-prods=True/"
+PRODUCT_JSON = True
 
 # Pre-processed data
 DATA_PREPROCESS_DIR = "data/pre-process"

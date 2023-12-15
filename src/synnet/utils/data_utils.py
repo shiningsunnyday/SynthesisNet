@@ -11,13 +11,14 @@ import functools
 import gzip
 import itertools
 import shutil
+import uuid
 import json
 import numpy as np
 import random
 from typing import Any, Optional, Set, Tuple, Union
 import multiprocessing as mp
 mp.set_start_method('fork')
-from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR
+from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR, PRODUCT_JSON
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
 from rdkit import RDLogger
@@ -322,29 +323,56 @@ class ProductMap:
     def __init__(self, fpath, loaded=True):         
         self.fpath = fpath
         if loaded:
-            self._product_map = defaultdict(Program.make_default_dict)       
+            self._product_map = {}
             self._loaded = True
         else:
             assert os.path.exists(fpath)
+            self._product_map = None
             self._loaded = False
 
     
     def save(self):
-        assert self._loaded, "need to call load() first"        
-        pickle.dump(self._product_map, open(self.fpath, 'wb'))
+        assert self._loaded, "need to call load() first"      
+        if PRODUCT_JSON:
+            json.dump(self._product_map, open(self.fpath, 'w+'))
+        else:
+            pickle.dump(self._product_map, open(self.fpath, 'wb+'))
         self._product_map = None
         self._loaded = False
+
+    
+
+    @staticmethod
+    def str_key_to_int(dic):
+        """
+        recursively convert str int keys to int
+        """
+        if isinstance(dic, dict):
+            str_keys = [k for k in dic if k.isdigit()]
+            for k in str_keys:
+                dic[int(k)] = dic[k]
+            for k in str_keys:
+                dic.pop(k)
+            for k in dic:
+                ProductMap.str_key_to_int(dic[k])
         
 
     
     def load(self):
-        if not self._loaded:            
-            self._product_map = pickle.load(open(self.fpath, 'rb'))
+        if not self._loaded:      
+            if PRODUCT_JSON:
+                self._product_map = json.load(open(self.fpath, 'r'))       
+            else:
+                self._product_map = pickle.load(open(self.fpath, 'rb'))
+            self.str_key_to_int(self._product_map)
             self._loaded = True
     
 
     def get_num_interms(self, key):
-        assert key in self._product_map
+        if key not in self._product_map:
+            print(self.fpath, f"{key} has no interms!")
+            print(self._product_map.keys())
+            breakpoint()
         return len(self._product_map[key])
 
     
@@ -353,6 +381,10 @@ class ProductMap:
         assert isinstance(key, tuple)   
         assert len(key) == 3
         n, interm, e = key
+        if n not in self._product_map:
+            self._product_map[n] = {}
+        if interm not in self._product_map[n]:
+            self._product_map[n][interm] = {}        
         self._product_map[n][interm][e] = val
 
 
@@ -371,8 +403,16 @@ class ProductMap:
     
 
     def copy(self):
-        new_fpath = os.path.join(PRODUCT_DIR, f"{time()}.pkl")
-        shutil.copyfile(self.fpath, new_fpath)
+        ext = "json" if PRODUCT_JSON else "pkl"
+        new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+        while os.path.exists(new_fpath):
+            new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+        if not self._loaded:
+            self.load()
+        if PRODUCT_JSON:
+            json.dump(self._product_map, open(new_fpath, 'w+'))
+        else:
+            pickle.dump(self._product_map, open(new_fpath, 'wb+'))
         new_pmap = ProductMap(new_fpath, loaded=False)
         return new_pmap
 
@@ -386,9 +426,10 @@ class ProductMap:
         for n in other._product_map:
             for r in other._product_map[n]:
                 for e, v in other._product_map[n][r].items():
-                    self._product_map[n+offset][r][e+offset] = v
+                    self[(n+offset, r, e+offset)] = v
         # combine self.product_map's and correct for entries    
-        self.save()
+        # make a new file to avoid conflicts
+        self = self.copy()        
 
 
 
@@ -404,15 +445,18 @@ class Program:
             for each node n, store its intermediates
             for each intermediate, store the entry nodes
             for each entry, store the indices in .available_reactants
-            """                       
-            fpath = os.path.join(PRODUCT_DIR, f"{time()}.pkl")
+            """        
+            ext = "json" if PRODUCT_JSON else "pkl"              
+            fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+            while os.path.exists(fpath):
+                fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
             self.product_map = ProductMap(fpath)
             self.product_map.save()
             # assert 'depth' in self.rxn_tree.graph
 
 
     def copy(self):
-        other = Program(self.rxn_tree)        
+        other = Program(deepcopy(self.rxn_tree))
         other.rxn_map = deepcopy(self.rxn_map)        
         other.keep_prods = self.keep_prods
         other.product_map = self.product_map.copy()        
@@ -433,10 +477,13 @@ class Program:
     @staticmethod
     def input_length(p):
         react = []
-        for e in p.entries:
-            num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
-            react.append(num)
-        return np.prod(react)
+        if p.rxn_map:
+            for e in p.entries:
+                num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
+                react.append(num)
+            return np.prod(react)
+        else:
+            return 0
     
 
     @staticmethod
@@ -499,6 +546,11 @@ class Program:
     def init_rxns(self, rxns):
         if self.keep_prods:
             self.product_map.load()
+        count = Program.input_length(self)
+        if (count > 0):
+            if sum([len(self.product_map[(n,)]) for n in self.product_map._product_map]) == 0:
+                breakpoint()
+                # {'rxn_id': 58, 'depth': 3, 'id': 3, 'children': [{'rxn_id': 89, 'depth': 2, 'child': 'left', 'id': 1, 'children': [{'rxn_id': 70, 'depth': 1, 'child': 'left', 'id': 0}]}, {'rxn_id': 70, 'depth': 1, 'child': 'right', 'id': 2}]}
         for n in self.rxn_tree.nodes():
             if n not in self.rxn_map:                
                 rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
@@ -512,7 +564,7 @@ class Program:
                     prod_before = [[len(avail_reactants) for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries]
                     # print([[avail_reactants for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries])
 
-                    for succ in self.rxn_tree.successors(n):
+                    for succ in self.rxn_tree.successors(n):           
                         """
                         for each child of n, we can define a filter function depending on if it's the left or right child
                         left also includes uni-molecular reaction
@@ -523,23 +575,36 @@ class Program:
                             filter_func = rxn.is_reactant_second
 
                         res = []    
-                        num_interms = self.product_map.get_num_interms(succ)
+                        num_interms = self.product_map.get_num_interms(succ)        
                         bad_interms = []                
                         """
                         product_map stores the interms at n's successor
                         """
-                        for interm in self.product_map[(succ,)]:
-                            if filter_func(interm):
+                        if count >= MP_MIN_COMBINATIONS:
+                            with mp.Pool(100) as p:
+                                pass_filter = p.map(filter_func, tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms"))
+                        else:
+                            pass_filter = [filter_func(interm) for interm in tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms")]               
+                        last_interm = None
+                        for interm_pass, interm in tqdm(zip(pass_filter, self.product_map[(succ,)]), desc=f"sorting good vs bad interms"):
+                            if interm_pass:
                                 if list(self.product_map[(succ, interm)].keys()) != self.entries: # same order
                                     # make sure appear in same order
                                     appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
                                     assert sorted(appear_entries) == appear_entries                        
-                                entry_reactants = [[self.rxn_map[e].available_reactants[i][ind] for (i, ind) in enumerate(self.product_map[(succ, interm, e)])] for e in self.product_map[(succ, interm)]]
+                                entry_reactants = []
+                                for e in self.product_map[(succ, interm)]:
+                                    e_reactants = []
+                                    for (i, ind) in enumerate(self.product_map[(succ, interm, e)]):
+                                        e_reactants.append(self.rxn_map[e].available_reactants[i][ind])
+                                    entry_reactants.append(e_reactants)
                                 res.append((interm, entry_reactants))
                             else:
                                 bad_interms.append(interm)            
-                        
-                        entries = list(self.product_map[(succ, interm)].keys())                    
+                            last_interm = interm
+                        if last_interm is None:
+                            breakpoint()
+                        entries = list(self.product_map[(succ, last_interm)].keys())                    
                         for n in entries:
                             cur = self.rxn_map[n].available_reactants
                             self.rxn_map[n].available_reactants = tuple([] for _ in cur)                    
@@ -548,7 +613,7 @@ class Program:
                         for each entry n, store the available_reactants that are in entry_reactants
                         """  
                         avail_index = {n: [{}, {}] for n in entries}
-                        for _, entry_reactants in res:            
+                        for _, entry_reactants in tqdm(res, desc="storing reactants of good interms"):            
                             for entry_reactant, n in zip(entry_reactants, entries):
                                 for i, reactant in enumerate(entry_reactant):
                                     if reactant not in avail_index[n][i]:                        
@@ -567,6 +632,9 @@ class Program:
                     # change available_reactants to be valid products of previous            
                     # propagate down the tree    
         if self.keep_prods:
+            if len(self.rxn_tree) == 2:
+                if (len(self.product_map[(0,)]) == 0) ^ (Program.input_length(self) == 0):
+                    breakpoint()
             self.product_map.save()
             
 
@@ -642,8 +710,7 @@ class Program:
                         break                        
                 if good:
                     product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
-                else:
-                    breakpoint()
+                else:                  
                     break
         if good:
             return product_map[len(rxn_tree)-1]
@@ -695,6 +762,7 @@ class Program:
                 assert len(res) == count
         else:
             res = [self.run_rxns(i) for i in range(count)]
+        
         res = [(r, i) for (r, i) in zip(res, range(count)) if r is not None]
 
         # Update the reactants to only valid inputs

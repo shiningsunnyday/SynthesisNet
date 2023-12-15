@@ -12,6 +12,7 @@ import numpy as np
 np.random.seed(42)
 import pandas as pd
 import pdb
+import os
 import pickle
 
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES
@@ -56,22 +57,49 @@ def _fetch_data(name: str) -> list[str]:
 
 
 @torch.no_grad()
-def wrapper_decoder(sk, model):
+def wrapper_decoder(hash_dir, sk, model_rxn, model_bb):
     """Generate a filled-in skeleton given the input which is only filled with the target."""
-    model.eval()
+    model_rxn.eval()
+    model_bb.eval()
     while ((~sk.mask) & sk.rxns).any():
+        if sk.mask.sum():
+            hash_val = sk.hash(sk.mask)
+            fpath = os.path.join(cur_dir, f"{hash_val}.json")
+            dirpath = os.path.join(cur_dir, f"{hash_val}")
+            if os.path.exists(fpath):
+                data = json.load(open(fpath, 'r'))
+                imposs = np.bool([True for _ in range(91)])
+                imposs[data['rxn_ids']] = False
+                cur_dir = dirpath
+            else:
+                breakpoint()
+        else:
+            cur_dir = hash_dir
+            imposs = []
+            
+        breakpoint()
         assert sk.rxn_target_down
+        # prediction problem
         _, X, _ = sk.get_state()
         data = Data(edge_index=torch.tensor(sk.tree_edges, dtype=torch.int64), 
-                    x=torch.Tensor(X))        
+                    x=torch.Tensor(X))   
+        # get frontier rxns     
         frontier_rxns = (~sk.mask) & sk.rxns
-        frontier_rxns &= [n==sk.tree_root or sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))] for n in range(len(sk.tree))]
+        frontier_rxns &= [sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))] for n in range(len(sk.tree))]
         frontier_rxns = np.bool_(frontier_rxns)
-        logits = model(data)[frontier_rxns, -91:]        
-        confs, rxn_ids = logits.max(axis=-1)
-        node_id = np.arange(len(sk.tree))[frontier_rxns][confs.argmax()]        
-        rxn_id = rxn_ids[confs.argmax()]
-        sk.modify_tree(node_id, rxn_id=rxn_id)        
+        # get fronteir bbs
+        frontier_bbs = (~sk.mask) & ~sk.rxns
+        frontier_rxns &= [n==sk.tree_root or sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))] for n in range(len(sk.tree))]
+        frontier_rxns = np.bool_(frontier_rxns)        
+        if frontier_rxns.any():
+            logits = model_rxn(data)[frontier_rxns, -91:]
+            logits[:, imposs] = -float("inf") # filter out reactions
+            confs, rxn_ids = logits.max(axis=-1)
+            node_id = np.arange(len(sk.tree))[frontier_rxns][confs.argmax()]        
+            rxn_id = rxn_ids[confs.argmax()]
+            sk.modify_tree(node_id, rxn_id=rxn_id)        
+        else:
+            logits = model_rxn(data)[frontier_rxns, -91:]
 
         
     return sk
@@ -106,8 +134,11 @@ def get_args():
         default="data/assets/building-blocks/enamine_us_emb_fp_256.npy"
     )    
     parser.add_argument(
-        "--ckpt-dir", type=str, help="Model checkpoint to use"
+        "--ckpt-bb", type=str, help="Model checkpoint to use"
     )
+    parser.add_argument(
+        "--ckpt-rxn", type=str, help="Model checkpoint to use"
+    )    
     parser.add_argument(
         "--skeleton-set-file",
         type=str,
@@ -116,7 +147,8 @@ def get_args():
     )           
     parser.add_argument(
         "--hash-dir",
-        default="results/"
+        default="",
+        required=True
     )
     # Parameters
     parser.add_argument(
@@ -167,9 +199,9 @@ if __name__ == "__main__":
     # logger.info("...loading data completed.")
 
     # ... models
-    logger.info("Start loading models from checkpoints...")
-    path = Path(args.ckpt_dir)
-    gnn = load_gnn_from_ckpt(path)
+    logger.info("Start loading models from checkpoints...")  
+    rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn)
+    bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb)
     logger.info("...loading models completed.")
 
     # Decode queries, i.e. the target molecules.
@@ -189,7 +221,7 @@ if __name__ == "__main__":
             sk = lookup[smi]
             sk.clear_tree()
             sk.modify_tree(sk.tree_root, smiles=smi)
-            sk = wrapper_decoder(sk, gnn)
+            sk = wrapper_decoder(args.hash_dir, sk, rxn_gnn, bb_gnn)
             breakpoint()
 
     # else:
