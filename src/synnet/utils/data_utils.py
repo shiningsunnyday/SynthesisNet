@@ -1270,8 +1270,8 @@ class Skeleton:
         self.tree_edges = np.array(self.tree.edges).T        
         self.tree_root = len(st.chemicals)-1
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
-        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in self.tree.nodes()])                
-        self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree.nodes()))])
+        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])                
+        self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree))])
         self.bidir_edges = np.concatenate((self.tree_edges, self.tree_edges[::-1]), axis=-1)
         self.index = index
         self.reset()
@@ -1346,14 +1346,28 @@ class Skeleton:
         # check that if true, all parent of parent is true
         non_target_interms = (self.mask & ~self.rxns)
         non_target_interms[self.tree_root] = 0
-        self.rxn_target_down = not non_target_interms.any() # all interm nodes masked out, and rxns target_down
-        if self.rxn_target_down:
-            for n in np.argwhere((self.mask & self.rxns)).flatten().tolist(): # rxns
-                if self.pred(n) == self.tree_root:
-                    continue
-                parent_rxn = self.pred(self.pred(n))
-                if not (self.mask & self.rxns)[parent_rxn]:
-                    self.rxn_target_down = False
+        self.rxn_target_down = not non_target_interms.any() # all non-rxn nodes masked out, and rxns target_down
+        non_target_interms[self.leaves] = 0
+        self.rxn_target_down_bb = not non_target_interms.any() # all interm nodes masked out, and rxns target_down
+
+        for n in np.argwhere((self.mask & self.rxns)).flatten().tolist(): # check rxns
+            if self.pred(n) == self.tree_root: continue
+            parent_rxn = self.pred(self.pred(n))
+            if not (self.mask & self.rxns)[parent_rxn]:
+                self.rxn_target_down = False
+                self.rxn_target_down_bb = False
+        for n in np.argwhere((self.mask & self.leaves)).flatten().tolist():
+            if not self.mask[self.pred(n)]:
+                self.rxn_target_down_bb = False
+
+        # if list(self.tree.edges) == [(2, 6), (4, 7), (5, 8), (6, 0), (6, 1), (7, 3), (8, 4), (8, 2)]:                
+        #     good = [[5], [5,8],[5,8,7],[5,8,7,6],[5,8,7,6,1],[5,8,7,6,1,3],[5,8,7,6,3,0],[5,8,7,6,0],[5,8,6,0],[5,8,6,1],[5,8,7,3],[5,8,6],[5,8,7,6,0,1],[5,8,6,0,1],[5,8,7,6,3,0,1], [3,5,6,7,8]]
+        #     good = [sorted(lis) for lis in good]
+        #     if self.rxn_target_down_bb and not (np.argwhere(self.mask).flatten().tolist() in good):
+        #         breakpoint()
+        #     if not self.rxn_target_down_bb and (np.argwhere(self.mask).flatten().tolist() in good):
+        #         breakpoint()
+        
 
         
     
@@ -1380,7 +1394,7 @@ class Skeleton:
             print("bad node")
 
            
-    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False, target_down=False, rxn_target_down=False):
+    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False, target_down=False, rxn_target_down=False, rxn_target_down_bb=False):
         """
         Return the partial graph with self.mask determining which nodes are available
         If leaves_up is true, further zero out y at nodes where there is an un-filled child
@@ -1398,8 +1412,10 @@ class Skeleton:
         y = np.zeros((len(self.tree), 256+91))
         try:
             for n in self.tree.nodes():
-                # if there is rxn parent, whether rxn is fulfilled
+                # is target, or parent is target, or parent rxn is fulfilled
                 rxn_parent = (n == self.tree_root) or self.pred(n) == self.tree_root or (self.mask & self.rxns)[self.pred(self.pred(n))]
+                # if is rxn, then rxn_parent; if is leaf, then parent is fulfilled        
+                rxn_parent_bb = (not self.rxns[n] or rxn_parent) and (not self.leaves[n] or self.mask[self.pred(n)]) and (self.rxns[n] or self.leaves[n])
                 leaves_filled = self.mask[list(self.tree.neighbors(n))].all()
                 is_frontier = n in self.frontier_nodes
                 is_frontier_rxn = is_frontier and self.rxns[n]
@@ -1432,8 +1448,12 @@ class Skeleton:
                     if bb_frontier and is_frontier_bb:
                         self.fill_node(n, y)
                     if not rxn_frontier and not bb_frontier:
-                        if rxn_target_down:
-                            if rxn_parent:
+                        if rxn_target_down:        
+                            if rxn_target_down_bb and rxn_parent_bb:
+                                # accomodate bb's
+                                self.fill_node(n, y)
+                            elif not rxn_target_down_bb and rxn_parent:
+                                # don't accomodate bb's
                                 self.fill_node(n, y)
                         elif target_down:
                             if is_frontier:
@@ -1446,7 +1466,6 @@ class Skeleton:
             print(e)
             print(f"{self.tree.nodes[self.tree_root]['smiles']} bad")
             pass
-
         return np.atleast_2d(self.mask), X, y
     
 
@@ -1676,6 +1695,9 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         kwargs['target_down'] = True
     elif args.determine_criteria == 'rxn_target_down':
         kwargs['rxn_target_down'] = True
+    elif args.determine_criteria == 'rxn_target_down_bb':
+        kwargs['rxn_target_down'] = True
+        kwargs['rxn_target_down_bb'] = True    
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
