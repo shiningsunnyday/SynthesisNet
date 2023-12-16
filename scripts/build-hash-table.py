@@ -205,14 +205,14 @@ def expand_programs(args, all_progs, size):
                     for b in range(len(B)):   
                         pargs.append((i, A[a], B[b]))
     # TODO: fix issue
-    # if args.ncpu > 1:
-    #     with mp.Pool(args.ncpu) as p:
-    #         progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
-    # else:
-    progs = []
-    for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):
-        progs.append(expand_program(*parg))      
-    all_progs[size] = progs
+    if args.ncpu > 1:
+        with mp.Pool(args.ncpu) as p:
+            progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
+    else:
+        progs = []
+        for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):
+            progs.append(expand_program(*parg))      
+        all_progs[size] = progs
     return all_progs
 
 
@@ -265,6 +265,10 @@ def create_run_programs(args, bbf, size=3):
             cache_fpath_pre = cache_fpath.replace(f"{d}.pkl", f"{d}_pre.pkl")
             if args.cache_dir and os.path.exists(cache_fpath_pre):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
+                if args.keep_prods:
+                    for d in all_progs:
+                        for p in all_progs[d]:
+                            p.product_map.unload()
                 # for p in all_progs[2]:
                 #     length = Program.input_length(p)
                 #     p.product_map.load()
@@ -272,7 +276,7 @@ def create_run_programs(args, bbf, size=3):
                 #         breakpoint()
                 # breakpoint()
             else:
-                print(f"expanding size-{d} programs")
+                print(f"expanding size-{d} programs")                
                 expand_programs(args, all_progs, d)
                 if args.cache_dir:
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))

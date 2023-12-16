@@ -61,9 +61,10 @@ def wrapper_decoder(hash_dir, sk, model_rxn, model_bb):
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
     model_bb.eval()
-    while ((~sk.mask) & sk.rxns).any():
-        if sk.mask.sum():
-            hash_val = sk.hash(sk.mask)
+    while ((~sk.mask) & (sk.rxns | sk.leaves)).any():
+        if sk.mask.sum()>1:
+            breakpoint()
+            hash_val = sk.hash()
             fpath = os.path.join(cur_dir, f"{hash_val}.json")
             dirpath = os.path.join(cur_dir, f"{hash_val}")
             if os.path.exists(fpath):
@@ -77,29 +78,33 @@ def wrapper_decoder(hash_dir, sk, model_rxn, model_bb):
             cur_dir = hash_dir
             imposs = []
             
-        breakpoint()
-        assert sk.rxn_target_down
+        assert sk.rxn_target_down_bb
         # prediction problem
         _, X, _ = sk.get_state()
         data = Data(edge_index=torch.tensor(sk.tree_edges, dtype=torch.int64), 
                     x=torch.Tensor(X))   
         # get frontier rxns     
-        frontier_rxns = (~sk.mask) & sk.rxns
-        frontier_rxns &= [sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))] for n in range(len(sk.tree))]
+        frontier_rxns = np.array([False for _ in range(len(sk.tree))])
+        for n in np.argwhere((~sk.mask) & sk.rxns).flatten():
+            if sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))]:
+                frontier_rxns[n] = True
         frontier_rxns = np.bool_(frontier_rxns)
-        # get fronteir bbs
-        frontier_bbs = (~sk.mask) & ~sk.rxns
-        frontier_rxns &= [n==sk.tree_root or sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))] for n in range(len(sk.tree))]
-        frontier_rxns = np.bool_(frontier_rxns)        
+        # get frontier bbs
+        frontier_bbs = np.array([False for _ in range(len(sk.tree))])
+        for n in np.argwhere((~sk.mask) & (~sk.rxns) & (sk.leaves)).flatten():
+            if sk.mask[sk.pred(n)]: # parent present
+                frontier_bbs[n] = True
         if frontier_rxns.any():
             logits = model_rxn(data)[frontier_rxns, -91:]
             logits[:, imposs] = -float("inf") # filter out reactions
             confs, rxn_ids = logits.max(axis=-1)
             node_id = np.arange(len(sk.tree))[frontier_rxns][confs.argmax()]        
-            rxn_id = rxn_ids[confs.argmax()]
+            rxn_id = rxn_ids[confs.argmax()].item()
             sk.modify_tree(node_id, rxn_id=rxn_id)        
         else:
-            logits = model_rxn(data)[frontier_rxns, -91:]
+            assert frontier_bbs.any()
+            logits = model_rxn(data)[frontier_bbs, :256]
+            breakpoint()
 
         
     return sk
@@ -173,12 +178,17 @@ if __name__ == "__main__":
     # Load skeleton set
     sk_set = None
     if args.skeleton_set_file:
-        syntree_set = SyntheticTreeSet().load(args.skeleton_set_file)
+        syntree_set = SyntheticTreeSet().load(args.skeleton_set_file)                
+        # Decode
+        syntree_set = [syntree for syntree in syntree_set if len(syntree.reactions) == 2]       
+        targets = [syntree.root.smiles for syntree in syntree_set]
+    else:
 
-    # Load data ...
-    logger.info("Start loading data...")
-    # ... query molecules (i.e. molecules to decode)    
-    targets = _fetch_data(args.data)
+        # Load data ...
+        logger.info("Start loading data...")
+        # ... query molecules (i.e. molecules to decode)    
+        targets = _fetch_data(args.data)
+    
 
     # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
@@ -200,12 +210,13 @@ if __name__ == "__main__":
 
     # ... models
     logger.info("Start loading models from checkpoints...")  
-    rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn)
-    bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb)
+    rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn))
+    bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
     logger.info("...loading models completed.")
 
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
+
 
     lookup = {}
     # Compute the gold skeleton

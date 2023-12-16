@@ -340,6 +340,12 @@ class ProductMap:
         self._product_map = None
         self._loaded = False
 
+
+    def unload(self):
+        if self._loaded:
+            self._product_map = None
+            self._loaded = False        
+
     
 
     @staticmethod
@@ -1381,7 +1387,8 @@ class Skeleton:
             if 'smiles' in self.tree.nodes[n]:
                 self.tree.nodes[n]['smiles'] = ''
             elif 'rxn_id' in self.tree.nodes[n]:
-                self.tree.nodes[n]['rxn_id'] = -1
+                pass # for debug hashing
+                # self.tree.nodes[n]['rxn_id'] = -1
             else:
                 raise
         self.reset()
@@ -1643,6 +1650,35 @@ class Skeleton:
 
                 
         return _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
+
+
+    def hash(self):
+        """
+        Build rxn tree        
+        """
+        g = nx.induced_subgraph(self.tree, np.argwhere(self.rxns).flatten())
+        g = g.copy()
+        for a in g:
+            for b in g:
+                if self.pred(b) != self.tree_root and self.pred(self.pred(b)) == a:
+                    g.add_edge(a, b)
+        node_map = dict(zip(g.nodes(), range(self.rxns.sum())))
+        reverse_node_map = dict(zip(range(self.rxns.sum()), g.nodes()))
+        g = nx.relabel_nodes(g, node_map)
+        p = Program(g)
+        dists = nx.shortest_path_length(self.tree, self.tree_root)
+        max_dist = 0
+        for i in g:
+            g.nodes[i]['depth'] = dists[reverse_node_map[i]]//2
+            max_dist = max(g.nodes[i]['depth'], max_dist)            
+        for i in g:
+            g.nodes[i]['depth'] = max_dist+1-g.nodes[i]['depth']
+            if g.nodes[i]['depth'] == 1:
+                g.nodes[i]['child'] = 'left'
+
+        val = p.hash(self.mask[self.rxns])
+        return val
+
 
 
 # helper functions
