@@ -37,6 +37,7 @@ from copy import deepcopy
 
 from synnet.encoding.fingerprints import fp_2048, fp_256
 import os
+import logging
 import hashlib
 
 
@@ -461,11 +462,12 @@ class Program:
             # assert 'depth' in self.rxn_tree.graph
 
 
-    def copy(self):
+    def copy(self):        
         other = Program(deepcopy(self.rxn_tree))
         other.rxn_map = deepcopy(self.rxn_map)        
         other.keep_prods = self.keep_prods
-        other.product_map = self.product_map.copy()        
+        if self.keep_prods:
+            other.product_map = self.product_map.copy()        
         return other
 
 
@@ -544,103 +546,114 @@ class Program:
         for n in other.rxn_map:
             self.rxn_map[n+offset] = other.rxn_map[n]
         # combine rxn_map's
+        assert self.keep_prods == other.keep_prods
         if self.keep_prods:
             self.product_map.combine(other.product_map, offset=offset)
         return self
     
 
     def init_rxns(self, rxns):
+        """
+        Init rxns will look at the top node in rxn_tree which should not be in rxn_map        
+        """
+        logger = logging.getLogger('global_logger')  
+        new_nodes = [n for n in self.rxn_tree if n not in self.rxn_map]
+        assert len(new_nodes) == 1
+        new_node = new_nodes[0]
         if self.keep_prods:
-            self.product_map.load()
-        count = Program.input_length(self)
-        if (count > 0):
-            if sum([len(self.product_map[(n,)]) for n in self.product_map._product_map]) == 0:
+            # do we really need to load?            
+            # self.keep_prods specifies the length of the longest root-leave path
+            # we need to load if new_node itself or one of its dependents has depth <= self.keep_prods
+            need_load = self.rxn_tree.nodes[new_node]['depth'] <= self.keep_prods
+            for n in list(self.rxn_tree.successors(new_node)):
+                if self.keep_prods >= self.rxn_tree.nodes[n]['depth']:
+                    need_load = True
+            if need_load:
+                self.product_map.load()            
+        n = new_node               
+        rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
+        assert rxn.available_reactants is not None
+        self.rxn_map[n] = rxn
+        count = Program.input_length(self)        
+        """
+        For each of new node's successor, if its depth is <= self.keep_prods, then we can use the product map to filter the reactants of the 
+        successor's subtree's entry nodes
+        """        
+        for succ in self.rxn_tree.successors(n):           
+            """
+            for each child of n, we can define a filter function depending on if it's the left or right child
+            left also includes uni-molecular reaction
+            """
+            if self.keep_prods < self.rxn_tree.nodes[succ]['depth']: continue
+            """
+            n is a new reaction node, but we can filter the entry reactants using the interms
+            """
+            if self.rxn_tree.nodes[succ]['child'] == 'left':
+                filter_func = rxn.is_reactant_first 
+            else:
+                filter_func = rxn.is_reactant_second
+            res = []    
+            num_interms = self.product_map.get_num_interms(succ)        
+            bad_interms = []                
+            """
+            product_map stores the interms at n's successor
+            """
+            if count >= MP_MIN_COMBINATIONS:
+                with mp.Pool(100) as p:
+                    pass_filter = p.map(filter_func, tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms"))
+            else:
+                pass_filter = [filter_func(interm) for interm in tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms")]               
+            last_interm = None
+            for interm_pass, interm in tqdm(zip(pass_filter, self.product_map[(succ,)]), desc=f"sorting good vs bad interms"):
+                if interm_pass:
+                    if list(self.product_map[(succ, interm)].keys()) != self.entries: # same order
+                        # make sure appear in same order
+                        appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
+                        assert sorted(appear_entries) == appear_entries                        
+                    entry_reactants = []
+                    for e in self.product_map[(succ, interm)]:
+                        e_reactants = []
+                        for (i, ind) in enumerate(self.product_map[(succ, interm, e)]):
+                            e_reactants.append(self.rxn_map[e].available_reactants[i][ind])
+                        entry_reactants.append(e_reactants)
+                    res.append((interm, entry_reactants))
+                else:
+                    bad_interms.append(interm)            
+                last_interm = interm
+            if last_interm is None:
                 breakpoint()
-                # {'rxn_id': 58, 'depth': 3, 'id': 3, 'children': [{'rxn_id': 89, 'depth': 2, 'child': 'left', 'id': 1, 'children': [{'rxn_id': 70, 'depth': 1, 'child': 'left', 'id': 0}]}, {'rxn_id': 70, 'depth': 1, 'child': 'right', 'id': 2}]}
-        for n in self.rxn_tree.nodes():
-            if n not in self.rxn_map:                
-                rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
-                assert rxn.available_reactants is not None
-                self.rxn_map[n] = rxn
-                
-                if self.keep_prods <= self.rxn_tree.nodes[n]['depth']:
-                    """
-                    n is a new reaction node, but we can filter the entry reactants using the interms
-                    """
-                    prod_before = [[len(avail_reactants) for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries]
-                    # print([[avail_reactants for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries])
+            entries = list(self.product_map[(succ, last_interm)].keys())                    
+            for n in entries:
+                cur = self.rxn_map[n].available_reactants
+                self.rxn_map[n].available_reactants = tuple([] for _ in cur)                    
 
-                    for succ in self.rxn_tree.successors(n):           
-                        """
-                        for each child of n, we can define a filter function depending on if it's the left or right child
-                        left also includes uni-molecular reaction
-                        """
-                        if self.rxn_tree.nodes[succ]['child'] == 'left':
-                            filter_func = rxn.is_reactant_first 
-                        else:
-                            filter_func = rxn.is_reactant_second
+            """
+            for each entry n, store the available_reactants that are in entry_reactants
+            """  
+            avail_index = {n: [{}, {}] for n in entries}
+            for _, entry_reactants in tqdm(res, desc="storing reactants of good interms"):            
+                for entry_reactant, n in zip(entry_reactants, entries):
+                    for i, reactant in enumerate(entry_reactant):
+                        if reactant not in avail_index[n][i]:                        
+                            avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i]) # store the index
+                            self.rxn_map[n].available_reactants[i].append(reactant)
+            
+            # remove the bad interms
+            for interm in bad_interms:                            
+                self.product_map[tuple([succ])].pop(interm)                    
+            # print(f"{num_interms}->{num_interms-len(bad_interms)} node {n} interm prods")
+            
+            """
+            Sanity check: there exists successor with zero products iff program length is 0
+            """            
+            zero_prods = len(self.product_map[tuple([succ])]) == 0
+            if zero_prods:
+                assert Program.input_length(self) == 0
 
-                        res = []    
-                        num_interms = self.product_map.get_num_interms(succ)        
-                        bad_interms = []                
-                        """
-                        product_map stores the interms at n's successor
-                        """
-                        if count >= MP_MIN_COMBINATIONS:
-                            with mp.Pool(100) as p:
-                                pass_filter = p.map(filter_func, tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms"))
-                        else:
-                            pass_filter = [filter_func(interm) for interm in tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms")]               
-                        last_interm = None
-                        for interm_pass, interm in tqdm(zip(pass_filter, self.product_map[(succ,)]), desc=f"sorting good vs bad interms"):
-                            if interm_pass:
-                                if list(self.product_map[(succ, interm)].keys()) != self.entries: # same order
-                                    # make sure appear in same order
-                                    appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
-                                    assert sorted(appear_entries) == appear_entries                        
-                                entry_reactants = []
-                                for e in self.product_map[(succ, interm)]:
-                                    e_reactants = []
-                                    for (i, ind) in enumerate(self.product_map[(succ, interm, e)]):
-                                        e_reactants.append(self.rxn_map[e].available_reactants[i][ind])
-                                    entry_reactants.append(e_reactants)
-                                res.append((interm, entry_reactants))
-                            else:
-                                bad_interms.append(interm)            
-                            last_interm = interm
-                        if last_interm is None:
-                            breakpoint()
-                        entries = list(self.product_map[(succ, last_interm)].keys())                    
-                        for n in entries:
-                            cur = self.rxn_map[n].available_reactants
-                            self.rxn_map[n].available_reactants = tuple([] for _ in cur)                    
-
-                        """
-                        for each entry n, store the available_reactants that are in entry_reactants
-                        """  
-                        avail_index = {n: [{}, {}] for n in entries}
-                        for _, entry_reactants in tqdm(res, desc="storing reactants of good interms"):            
-                            for entry_reactant, n in zip(entry_reactants, entries):
-                                for i, reactant in enumerate(entry_reactant):
-                                    if reactant not in avail_index[n][i]:                        
-                                        avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i]) # store the index
-                                        self.rxn_map[n].available_reactants[i].append(reactant)
-                        
-                        # remove the bad interms
-                        for interm in bad_interms:                            
-                            self.product_map[tuple([succ])].pop(interm)                    
-                        # print(f"{num_interms}->{num_interms-len(bad_interms)} node {n} interm prods")
-
-                    
-                    prod_after = [[len(avail_reactants) for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries]
-                    # print(f"pruned avail reactants from {prod_before}->{prod_after} using interms")
-                    # print([[avail_reactants for avail_reactants in self.rxn_map[n].available_reactants] for n in self.entries])
-                    # change available_reactants to be valid products of previous            
-                    # propagate down the tree    
-        if self.keep_prods:
-            if len(self.rxn_tree) == 2:
-                if (len(self.product_map[(0,)]) == 0) ^ (Program.input_length(self) == 0):
-                    breakpoint()
+            
+        if self.keep_prods and need_load:
+            new_count = Program.input_length(self)
+            logger.info(f"{count}->{new_count} products")
             self.product_map.save()
             
 
@@ -762,7 +775,7 @@ class Program:
         globals()["entries"] = entries
         # globals()["all_entry_reactants"] = all_entry_reactants # debug
         if count >= MP_MIN_COMBINATIONS:
-            print(f"running {count} entry_reactants")
+            logger.info(f"running {count} entry_reactants")
             with mp.Pool(MAX_PROCESSES) as p:
                 res = p.map(self.run_rxns, tqdm(range(count), desc="executing reactions"))           
                 assert len(res) == count
@@ -791,7 +804,8 @@ class Program:
         For each entry, for each reactant index (0 or 1),
         we'd like a dict mapping reactant to index
         """
-        if self.keep_prods:
+        keep_prods = self.rxn_tree.nodes[len(self.rxn_tree)-1]['depth'] <= self.keep_prods
+        if keep_prods:
             self.product_map.load()
         for r, index in tqdm(res, desc="post-processing products"):               
             entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)
@@ -801,15 +815,18 @@ class Program:
                     if reactant not in avail_index[n][i]:                        
                         avail_index[n][i][reactant] = len(rxn_map_copy[n].available_reactants[i])
                         rxn_map_copy[n].available_reactants[i].append(reactant)
-                    if self.keep_prods:
+                    if keep_prods:
                         entry_point.append(avail_index[n][i][reactant])
-                if self.keep_prods:
+                if keep_prods:
                     self.product_map[(len(self.rxn_tree)-1, r, n)] = entry_point
-        if self.keep_prods:
+        if keep_prods:
             self.product_map.save()
         self.rxn_map = rxn_map_copy
         return count, res
                         
+
+    def logging_info(self):
+        return nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)  
 
 
 

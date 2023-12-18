@@ -6,8 +6,10 @@ from synnet.data_generation.preprocessing import (
 )
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, Program, \
 get_bool_mask
+from synnet.utils.logging import create_logger
 from synnet.utils.analysis_utils import count_bbs, count_rxns
 import pickle
+import logging
 import os
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -16,6 +18,7 @@ from networkx.readwrite import json_graph
 import multiprocessing as mp
 from tqdm import tqdm
 import numpy as np
+import pprint
 import json
 from pathlib import Path
 from collections import deque, defaultdict
@@ -48,7 +51,7 @@ def get_args():
         "--visualize-dir",
         type=str,
         default="",
-        help="Where to visualize any figures",
+        help="Where to visualize any figures or log the progress",
     )        
     parser.add_argument(
         "--cache-dir",
@@ -69,7 +72,7 @@ def get_args():
                         help='if positive, use only top-k bb/rxns as counted by skeleton-file; if -1, use all with non-zero count')
     parser.add_argument("--top-rxn", type=int, help='use only top-k bb/rxns as counted by skeleton-file; if -1, use all with non-zero count')
     parser.add_argument("--stats", type=str, nargs='+')
-    parser.add_argument("--keep-prods", default=False, action="store_true")
+    parser.add_argument("--keep-prods", type=int, default=0)
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
@@ -135,32 +138,17 @@ def get_programs(rxns, keep_prods=0, size=1):
             prog = Program(g, keep_prods=keep_prods)
             progs.append(prog)
         return {1: progs}
-    all_progs = get_programs(rxns, keep_prods=keep_prods, size=size-1)
-    for i, r in enumerate(rxns):
-        if r.num_reactant == 1:
-            A = all_progs[size-1]
-            for a in A:
-                prog = deepcopy(a)
-                prog.add_rxn(i, len(a.rxn_tree)-1)
-                progs.append(prog)
-        else:
-            for j in range(1, size-1):
-                A = all_progs[j]
-                B = all_progs[size-1-j]
-                for a in A:
-                    for b in B:                
-                        prog = deepcopy(a).combine(deepcopy(b))
-                        prog.add_rxn(i, 0, len(a.rxn_tree)-1)
-                        progs.append(prog)
-    all_progs[size] = progs
     return all_progs
 
 
 def init_program(prog):    
     """
     Then runs the programs, returning validity and (if prog.keep_prods) storing intermediates
-    """       
+    """   
+    logger = logging.getLogger('global_logger')
+    logger.info(f"begin init program {prog.logging_info()}")
     prog.init_rxns(bbf.rxns)
+    logger.info(f"done init program {prog.logging_info()}")
     return prog
     
 
@@ -169,7 +157,10 @@ def run_program(prog):
     """
     Then runs the programs, returning validity and (if prog.keep_prods) storing intermediates
     """    
+    logger = logging.getLogger('global_logger')
+    logger.info(f"begin run program {prog.logging_info()}")
     start_len, res = prog.run_rxn_tree()
+    logger.info(f"done run program {prog.logging_info()}")
     if start_len:
         print(f"{len(res)}/{start_len} pass")
         return prog
@@ -178,20 +169,30 @@ def run_program(prog):
 
 
 
-def expand_program(i, a, b=None):    
-    prog = a.copy()
+def expand_program(i, a, b=None):   
+    logger = logging.getLogger('global_logger')   
+    prog_A_info = a.logging_info()
     if b is not None:
+        prog_B_info = b.logging_info()
+        task_descr = f"joining program {prog_A_info} with {prog_B_info} with rxn_id {i}"
+    else:
+        task_descr = f"joining program {prog_A_info} with rxn_id {i}"
+    logger.info(f"begin {task_descr}")
+    prog = a.copy()
+    if b is not None:        
         prog = prog.combine(b.copy())      
         prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
-    else:
+    else:        
         prog.add_rxn(i, len(a.rxn_tree)-1)
+    logger.info(f"done {task_descr}")
     return prog
 
 
 
 def expand_programs(args, all_progs, size):
+    logger = logging.getLogger('global_logger')
     progs = []
-    pargs = []
+    pargs = []    
     for i, r in tqdm(enumerate(bbf.rxns)):
         if r.num_reactant == 1:
             A = all_progs[size-1]
@@ -205,19 +206,22 @@ def expand_programs(args, all_progs, size):
                     for b in range(len(B)):   
                         pargs.append((i, A[a], B[b]))
     # TODO: fix issue
+    logger.info(f"=====expanding {len(pargs)} programs=====")
     if args.ncpu > 1:
         with mp.Pool(args.ncpu) as p:
             progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
-    else:
+    else:        
         progs = []
         for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):
             progs.append(expand_program(*parg))      
-        all_progs[size] = progs
+    all_progs[size] = progs
     return all_progs
 
 
 
 def filter_programs(progs):
+    logger = logging.getLogger('global_logger')
+    logger.info(f"begin filtering {len(progs)} programs")
     new_progs = []
     for p in progs:
         if p is None:
@@ -230,7 +234,7 @@ def filter_programs(progs):
             break
         if good:
             new_progs.append(p)
-
+    logger.info(f"done filtering {len(progs)}->{len(new_progs)} programs")    
     return new_progs
 
 
@@ -245,8 +249,24 @@ def strategy(progs):
     return easy_prog_inds, hard_prog_inds
 
 
+def get_descr(all_progs):
+    descr = "\nLet's summarize the current status of all programs\n"
+    for d in all_progs:
+        descr += f"{len(all_progs[d])} depth-{d} programs\n"
+        avg_input_length = Program.avg_input_length(all_progs[d])
+        max_input_length = max([Program.input_length(p) for p in all_progs[d]])
+        descr += f"with average input length {avg_input_length}\n"
+        descr += f"and maximum input length {max_input_length}\n"
+    descr += "\n"
+    return descr
+
+
 
 def create_run_programs(args, bbf, size=3):     
+    if args.visualize_dir:
+        os.makedirs(args.visualize_dir, exist_ok=True)    
+    logger = create_logger('global_logger', os.path.join(args.visualize_dir, "logs.txt"))
+    logger.info('args:{}'.format(pprint.pformat(args)))
     if args.cache_dir:
         os.makedirs(args.cache_dir, exist_ok=True)
     for d in range(1, size+1):
@@ -254,7 +274,7 @@ def create_run_programs(args, bbf, size=3):
         exist = os.path.exists(cache_fpath)
         if args.cache_dir and exist:
             all_progs = pickle.load(open(cache_fpath, 'rb'))
-            print(f"loaded {len(all_progs[d])} size-{d} programs")
+            logging.info(f"loaded {len(all_progs[d])} size-{d} programs")
             all_progs[d] = filter_programs(all_progs[d])
             assert d in all_progs
             continue
@@ -265,31 +285,27 @@ def create_run_programs(args, bbf, size=3):
             cache_fpath_pre = cache_fpath.replace(f"{d}.pkl", f"{d}_pre.pkl")
             if args.cache_dir and os.path.exists(cache_fpath_pre):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
-                if args.keep_prods:
-                    for d in all_progs:
-                        for p in all_progs[d]:
-                            p.product_map.unload()
-                # for p in all_progs[2]:
-                #     length = Program.input_length(p)
-                #     p.product_map.load()
-                #     if len(p.product_map._product_map[0]) == 0:
-                #         breakpoint()
-                # breakpoint()
             else:
-                print(f"expanding size-{d} programs")                
+                logging.info(f"begin expanding size-{d} programs")                
                 expand_programs(args, all_progs, d)
+                logging.info(f"done expanding size-{d} programs")                
                 if args.cache_dir:
+                    logging.info(get_descr(all_progs))  
+                    logging.info(f"begin cache-dumping all pre-programs at {cache_fpath_pre}")                     
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
-            print(f"created {len(all_progs[d])} size-{d} programs")
+                    logging.info(f"done cache-dumping all pre-programs at {cache_fpath_pre}")                   
+            logging.info(f"created {len(all_progs[d])} size-{d} programs")
 
         """
         Strategy: use mp to init easy programs in parallel
         Run hard programs sequentially, use mp to filter the intermediates
-        """       
+        """     
+        logging.info(f"strategize how to init {len(all_progs[d])} depth-{d} programs")  
         progs = [None for _ in all_progs[d]] 
         easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
-        print(sorted(hard_prog_inds))
+        logging.info(f"parallel run easy programs {easy_prog_inds}")          
         hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
+        logging.info(f"sequentially run hard programs {hard_prog_inds}")  
         if args.ncpu > 1:
             with mp.Pool(args.ncpu) as p:
                 easy_progs = p.map(init_program, tqdm([all_progs[d][i] for i in easy_prog_inds], desc="init easy programs"))          
@@ -304,14 +320,14 @@ def create_run_programs(args, bbf, size=3):
 
         # Filter after init prunes the input space
         all_progs[d] = filter_programs(progs)
-        print(f"running {len(all_progs[d])} size-{d} programs")
+        logging.info(f"running {len(all_progs[d])} size-{d} programs")
 
         """
         Strategy: use mp to run easy programs in parallel
         Run hard programs sequentially, use mp among the input combinations
         """
         easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
-        print(sorted(hard_prog_inds))
+        logging.info(sorted(hard_prog_inds))
         hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
         progs = [None for _ in all_progs[d]]
        
@@ -325,30 +341,40 @@ def create_run_programs(args, bbf, size=3):
             else:
                 easy_progs = [run_program(all_progs[d][i]) for i in easy_prog_inds]
             if args.cache_dir:
+                logging.info(f"begin cache-dumping easy programs at {easy_done_path}")  
                 pickle.dump(easy_progs, open(easy_done_path, 'wb'))
+                logging.info(f"done cache-dumping easy programs at {easy_done_path}")  
         for i, p in zip(easy_prog_inds, easy_progs):
             progs[i] = p       
         for i in tqdm(hard_prog_inds):
-            hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
-            print(hard_path_i)
+            hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")            
             if os.path.exists(hard_path_i):
+                logging.info(f"hard program {hard_path_i} exists")
                 continue
             else:
                 p = all_progs[d][i]
                 progs[i] = run_program(p)    
                 if args.cache_dir:
+                    logging.info(f"begin cache-dumping hard program at {hard_path_i}")  
                     pickle.dump(progs[i], open(hard_path_i, 'wb'))
+                    logging.info(f"done cache-dumping hard program at {hard_path_i}")  
+               
         for i in tqdm(hard_prog_inds):
             hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
+            logging.info(f"begin loading hard program from {hard_path_i}")  
             progs[i] = pickle.load(open(hard_path_i, 'rb'))
+            logging.info(f"done loading hard program from {hard_path_i}")  
 
         
         # Filter after reaction is run
         all_progs[d] = filter_programs(progs)
-        print(f"done! {len(all_progs[d])} size-{d} programs")
+        logging.info(f"done! {len(all_progs[d])} size-{d} programs")
 
-        if args.cache_dir and not exist:
+        if args.cache_dir and not exist:   
+            logging.info(get_descr(all_progs))  
+            logging.info(f"begin cache-dumping all programs at {cache_fpath}")  
             pickle.dump(all_progs, open(cache_fpath, 'wb'))
+            logging.info(f"done cache-dumping all programs at {cache_fpath}")                           
     return all_progs
 
 
@@ -516,8 +542,7 @@ if __name__ == "__main__":
     # progs = get_programs(bbf.rxns, size=2)
     all_progs = create_run_programs(args, bbf, size=args.depth)
 
-    if args.stats:
-        os.makedirs(args.visualize_dir, exist_ok=True)
+    if args.stats:        
         for stat in args.stats:
             fpath = os.path.join(args.visualize_dir, f"{stat}.png")            
             fig = plt.Figure()            
