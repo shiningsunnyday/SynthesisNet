@@ -17,8 +17,10 @@ import numpy as np
 import random
 from typing import Any, Optional, Set, Tuple, Union
 import multiprocessing as mp
+from multiprocessing import Array
 mp.set_start_method('fork')
-from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR, PRODUCT_JSON
+from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR, PRODUCT_JSON, NUM_THREADS
+import threading
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
 from rdkit import RDLogger
@@ -552,6 +554,17 @@ class Program:
         return self
     
 
+    @staticmethod
+    def fill_reactant_indices(res, all_reactant_idxes):
+        for _, idxes in res:
+            assert len(all_reactant_idxes) == len(idxes)
+            for i in range(len(all_reactant_idxes)):
+                idx = idxes[i]
+                assert len(idx) == len(all_reactant_idxes[i])
+                for j in range(len(idx)):
+                    all_reactant_idxes[i][j][idx[j]] += 1
+    
+
     def init_rxns(self, rxns):
         """
         Init rxns will look at the top node in rxn_tree which should not be in rxn_map        
@@ -623,13 +636,19 @@ class Program:
             if last_interm is None:
                 breakpoint()
             entries = list(self.product_map[(succ, last_interm)].keys())                    
+
+            rxn_map_copy = deepcopy(self.rxn_map) # TODO: delete this, later for testing
+            
             for n in entries:
                 cur = self.rxn_map[n].available_reactants
                 self.rxn_map[n].available_reactants = tuple([] for _ in cur)                    
-
+            rxn_map_debug = deepcopy(self.rxn_map) # TODO: delete this, later for testing
+            
             """
-            for each entry n, store the available_reactants that are in entry_reactants
+            for interm, entry_reactants in res
+                for each entry n, store the available_reactants that are in entry_reactants
             """  
+            logger.info("begin storing reactants of good interms")
             avail_index = {n: [{}, {}] for n in entries}
             for _, entry_reactants in tqdm(res, desc="storing reactants of good interms"):            
                 for entry_reactant, n in zip(entry_reactants, entries):
@@ -637,12 +656,91 @@ class Program:
                         if reactant not in avail_index[n][i]:                        
                             avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i]) # store the index
                             self.rxn_map[n].available_reactants[i].append(reactant)
-            
+            logger.info("done storing reactants of good interms")            
+            if len(res):
+                """
+                smarter way using multi-threading
+                use thread takes some intermediates            
+                """
+                res_cache = deepcopy(res)
+                for i in range(len(res)):
+                    entry_reactants = res[i][1]
+                    entry_reactant_idxes = []
+                    for entry_reactant, e in zip(entry_reactants, entries):
+                        reactant_idxes = []
+                        for j, reactant in enumerate(entry_reactant):
+                            index = rxn_map_copy[e].available_reactants[j].index(reactant)
+                            reactant_idxes.append(index)
+                        entry_reactant_idxes.append(reactant_idxes)
+                    res[i] = (res[i][0], entry_reactant_idxes)
+
+                threads = []
+                elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
+                all_reactant_indices = []
+                for e in entries:
+                    zero_count = []
+                    for i in range(len(rxn_map_copy[e].available_reactants)):
+                        zero_count.append(Array('i', [0 for _ in range(len(rxn_map_copy[e].available_reactants[i]))]))
+                    all_reactant_indices.append(zero_count)
+
+                for i in range(NUM_THREADS):
+                    start = i*elems_per_thread
+                    end = (i+1)*elems_per_thread                
+                    thread = threading.Thread(target=self.fill_reactant_indices, args=(res[start:end], all_reactant_indices))
+                    threads.append(thread)
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+                             
+                # self.fill_reactant_indices(res, all_reactant_indices)
+                """
+                A simple algorithm to re-index all_reactant_indices            
+                """
+                for i in range(len(all_reactant_indices)): # per entry
+                    for j in range(len(all_reactant_indices[i])): # per reactant
+                        c = 0
+                        for k in range(len(all_reactant_indices[i][j])): # per available reactant
+                            # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                            
+                            idxes = all_reactant_indices[i][j]
+                            if idxes[k]:
+                                # add this reactant to self.rxn_map
+                                reactant = rxn_map_copy[entries[i]].available_reactants[j][k]
+                                rxn_map_debug[entries[i]].available_reactants[j].append(reactant)
+                                idxes[k] = c                                
+                                c += 1
+                            else:
+                                idxes[k] = -1
+
+                # Test                
+                for e1, e2 in zip(self.rxn_map, rxn_map_debug):
+                    assert e1 == e2
+                    if self.rxn_map[e1].available_reactants != rxn_map_debug[e2].available_reactants:
+                        breakpoint()
+
+
+            """
+            Fix product map
+            """
+            logging.info(f"begin re-indexing product map")
             # remove the bad interms
             for interm in bad_interms:                            
                 self.product_map[tuple([succ])].pop(interm)                    
             # print(f"{num_interms}->{num_interms-len(bad_interms)} node {n} interm prods")
-            
+            for interm in tqdm(self.product_map[tuple([succ])], "re-indexing product map interms"):
+                for entry in self.product_map[tuple([succ])][interm]:
+                    e = entries.index(entry)
+                    try:
+                        for i in range(len(self.product_map[tuple([succ])][interm][entry])):
+                            idx = self.product_map[tuple([succ])][interm][entry][i]                        
+                            new_idx = all_reactant_indices[e][i][idx]               
+                            assert new_idx != -1
+                            self.product_map[tuple([succ])][interm][entry][i] = new_idx
+                    except:
+                        breakpoint()
+                
+            # re-index the entry_reactant indices of self.product_map
+            logging.info(f"done re-indexing product map")
+
             """
             Sanity check: there exists successor with zero products iff program length is 0
             """            
