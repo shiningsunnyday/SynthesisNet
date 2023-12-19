@@ -5,7 +5,7 @@ import multiprocessing
 MAX_PROCESSES = min(100, multiprocessing.cpu_count()) - 1
 MP_MIN_COMBINATIONS = 100000
 
-NUM_THREADS = 10
+NUM_THREADS = 64
 
 # TODO: Remove these paths bit by bit
 

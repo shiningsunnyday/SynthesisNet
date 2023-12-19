@@ -17,7 +17,7 @@ import numpy as np
 import random
 from typing import Any, Optional, Set, Tuple, Union
 import multiprocessing as mp
-from multiprocessing import Array
+from multiprocessing import Array, Manager
 mp.set_start_method('fork')
 from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR, PRODUCT_JSON, NUM_THREADS
 import threading
@@ -566,6 +566,22 @@ class Program:
                 assert len(idx) == len(all_reactant_idxes[i])
                 for j in range(len(idx)):
                     all_reactant_idxes[i][j][idx[j]] += 1
+
+    @staticmethod
+    def fill_product_reactant_indices(res, all_reactant_idxes, product_map=None):
+        for r, index in res:
+            idxes = Program.infer_product_index(index, interm_counts, entries, rxn_map, return_idx=True)            
+            assert len(idxes) == len(all_reactant_idxes)
+            prod = {}
+            for i in range(len(all_reactant_idxes)):
+                idx = idxes[i]
+                assert len(idx) == len(all_reactant_idxes[i])
+                for j in range(len(idx)):
+                    all_reactant_idxes[i][j][idx[j]] += 1            
+                prod[entries[i]] = idxes[i]
+            if product_map is not None:           
+                if r not in product_map:
+                    product_map[r] = prod
     
 
     def init_rxns(self, rxns):
@@ -674,30 +690,39 @@ class Program:
             #             reactant_idxes.append(index)
             #         entry_reactant_idxes.append(reactant_idxes)
             #     res[i] = (res[i][0], entry_reactant_idxes)
+    
 
-            threads = []
-            elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
-            all_reactant_indices = []
-            for e in entries:
-                zero_count = []
-                for i in range(len(self.rxn_map[e].available_reactants)):
-                    zero_count.append(Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]))
-                all_reactant_indices.append(zero_count)
 
-            for i in range(NUM_THREADS):
-                start = i*elems_per_thread
-                end = (i+1)*elems_per_thread                
-                thread = threading.Thread(target=self.fill_reactant_indices, args=(res[start:end], all_reactant_indices))
-                threads.append(thread)
-                thread.start()
-            for thread in threads:
-                thread.join()
-                            
-            # self.fill_reactant_indices(res, all_reactant_indices)
+            if count >= MP_MIN_COMBINATIONS:
+                threads = []
+                elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
+                all_reactant_indices = []
+                for e in entries:
+                    zero_count = []
+                    for i in range(len(self.rxn_map[e].available_reactants)):
+                        zero_count.append(Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]))
+                    all_reactant_indices.append(zero_count)                
+                for i in range(NUM_THREADS):
+                    start = i*elems_per_thread
+                    end = (i+1)*elems_per_thread                
+                    thread = threading.Thread(target=self.fill_reactant_indices, args=(res[start:end], all_reactant_indices))
+                    threads.append(thread)
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            else:         
+                all_reactant_indices = []
+                for e in entries:
+                    zero_count = []
+                    for i in range(len(self.rxn_map[e].available_reactants)):
+                        zero_count.append([0 for _ in range(len(self.rxn_map[e].available_reactants[i]))])
+                    all_reactant_indices.append(zero_count)                                   
+                self.fill_reactant_indices(res, all_reactant_indices)
             rxn_map_copy = deepcopy(self.rxn_map)
             for n in entries:
                 cur = self.rxn_map[n].available_reactants
                 self.rxn_map[n].available_reactants = tuple([] for _ in cur)                 
+
             """
             A simple algorithm to re-index all_reactant_indices            
             """
@@ -731,15 +756,16 @@ class Program:
             for interm in bad_interms:                            
                 self.product_map[tuple([succ])].pop(interm)                    
             # print(f"{num_interms}->{num_interms-len(bad_interms)} node {n} interm prods")
-            for interm in tqdm(self.product_map[tuple([succ])], "re-indexing product map interms"):
-                for entry in self.product_map[tuple([succ])][interm]:
-                    e = entries.index(entry)
-                    for i in range(len(self.product_map[tuple([succ])][interm][entry])):
-                        idx = self.product_map[tuple([succ])][interm][entry][i]                        
-                        new_idx = all_reactant_indices[e][i][idx]               
-                        assert new_idx != -1
-                        self.product_map[tuple([succ])][interm][entry][i] = new_idx                    
-                
+            # for interm in tqdm(self.product_map[tuple([succ])], "re-indexing product map interms"):
+            
+            #     for entry in self.product_map[tuple([succ])][interm]:
+            #         e = entries.index(entry)
+            #         for i in range(len(self.product_map[tuple([succ])][interm][entry])):
+            #             idx = self.product_map[tuple([succ])][interm][entry][i]                        
+            #             new_idx = all_reactant_indices[e][i][idx]               
+            #             assert new_idx != -1
+            #             self.product_map[tuple([succ])][interm][entry][i] = new_idx                    
+            self.reindex_product_map(succ, entries, all_reactant_indices)
             # re-index the entry_reactant indices of self.product_map
             logging.info(f"done re-indexing product map")
 
@@ -758,7 +784,7 @@ class Program:
             
 
     @staticmethod
-    def infer_product_index(i, interm_counts, entries, rxn_map):
+    def infer_product_index(i, interm_counts, entries, rxn_map, return_idx=False):
         assert len(interm_counts) == len(entries)
         entry_indices = [[] for _ in entries]
         for j in range(len(interm_counts)-1,-1,-1):                        
@@ -778,12 +804,9 @@ class Program:
         entry_reactants = []
         for entry, entry_reactant_indices in zip(entries, entry_indices):
             entry_reactants.append([])
-            for j, reactant_index in enumerate(entry_reactant_indices):
-                try:
-                    reactant = rxn_map[entry].available_reactants[j][reactant_index]
-                except:
-                    breakpoint()
-                entry_reactants[-1].append(reactant)
+            for j, reactant_index in enumerate(entry_reactant_indices):                
+                reactant = rxn_map[entry].available_reactants[j][reactant_index]                
+                entry_reactants[-1].append(reactant_index if return_idx else reactant)
         return entry_reactants
 
 
@@ -840,6 +863,23 @@ class Program:
     @staticmethod
     def retrieve_entry(r, i):
         return (r, Program.infer_product_index(i, interm_counts, entries, rxn_map))
+    
+
+
+    def reindex_product_map(self, n, entries, all_reactant_indices):
+        """
+        We want to re-index self.product_map using all intermediates of node n
+        We are given all_reactant_indices, which re-indexes the reactant indices in product_map
+        """
+        for interm in tqdm(self.product_map[tuple([n])], "re-indexing product map interms"):
+            assert list(self.product_map[tuple([n])][interm]) == entries
+            for entry in self.product_map[tuple([n])][interm]:
+                e = entries.index(entry)
+                for i in range(len(self.product_map[tuple([n])][interm][entry])):
+                    idx = self.product_map[tuple([n])][interm][entry][i]                        
+                    new_idx = all_reactant_indices[e][i][idx]               
+                    assert new_idx != -1
+                    self.product_map[tuple([n])][interm][entry][i] = new_idx         
     
 
     def run_rxn_tree(self): 
@@ -909,18 +949,100 @@ class Program:
         if keep_prods:
             self.product_map.load()
         logger.info(f"begin post-processing {len(res)} products")
-        for r, index in tqdm(res, desc="post-processing products"):               
-            entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)
-            for entry_reactant, n in zip(entry_reactants, self.entries):
-                entry_point = []
-                for i, reactant in enumerate(entry_reactant):
-                    if reactant not in avail_index[n][i]:                        
-                        avail_index[n][i][reactant] = len(rxn_map_copy[n].available_reactants[i])
-                        rxn_map_copy[n].available_reactants[i].append(reactant)
-                    if keep_prods:
-                        entry_point.append(avail_index[n][i][reactant])
-                if keep_prods:
-                    self.product_map[(len(self.rxn_tree)-1, r, n)] = entry_point
+
+        
+        # rxn_map_debug = deepcopy(rxn_map_copy)
+        # product_map_debug = self.product_map.copy()
+        # product_map_debug.load()
+        # for r, index in tqdm(res, desc="post-processing products"):               
+        #     entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)            
+        #     for entry_reactant, n in zip(entry_reactants, self.entries):
+        #         entry_point = []
+        #         for i, reactant in enumerate(entry_reactant):
+        #             if reactant not in avail_index[n][i]:                        
+        #                 avail_index[n][i][reactant] = len(rxn_map_debug[n].available_reactants[i])
+        #                 rxn_map_debug[n].available_reactants[i].append(reactant)
+        #             if keep_prods:
+        #                 entry_point.append(avail_index[n][i][reactant])
+        #         if keep_prods:
+        #             product_map_debug[(len(self.rxn_tree)-1, r, n)] = entry_point
+
+        """
+        Smarter way using multi-threading
+        """
+        threads = []
+        elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
+
+        all_reactant_indices = []
+        for e in self.entries:
+            zero_count = []
+            for i in range(len(self.rxn_map[e].available_reactants)):
+                zero_count.append(Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]))
+            all_reactant_indices.append(zero_count)   
+
+        if keep_prods:
+            product_map = self.product_map._product_map
+            if count >= MP_MIN_COMBINATIONS:
+                product_map[len(rxn_tree)-1] = Manager().dict()
+            else:
+                product_map[len(rxn_tree)-1] = {}
+        else:
+            product_map = None
+
+        if count >= MP_MIN_COMBINATIONS:
+            for i in range(NUM_THREADS):
+                start = i*elems_per_thread
+                end = (i+1)*elems_per_thread                
+                thread = threading.Thread(target=self.fill_product_reactant_indices, args=(res[start:end], all_reactant_indices, product_map[len(rxn_tree)-1] if product_map is not None else None))
+                threads.append(thread)
+                thread.start()
+            for thread in threads:
+                thread.join()    
+        else:  
+            self.fill_product_reactant_indices(res, all_reactant_indices, product_map[len(rxn_tree)-1] if product_map is not None else None)
+        
+
+        """
+        A simple algorithm to re-index all_reactant_indices            
+        """
+        for i in range(len(all_reactant_indices)): # per entry
+            for j in range(len(all_reactant_indices[i])): # per reactant
+                c = 0
+                for k in range(len(all_reactant_indices[i][j])): # per available reactant
+                    # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                            
+                    idxes = all_reactant_indices[i][j]
+                    if idxes[k]:
+                        # add this reactant to self.rxn_map
+                        reactant = self.rxn_map[self.entries[i]].available_reactants[j][k]
+                        rxn_map_copy[self.entries[i]].available_reactants[j].append(reactant)
+                        idxes[k] = c                                
+                        c += 1
+                    else:
+                        idxes[k] = -1 
+
+
+        # for e1, e2 in zip(rxn_map_copy, rxn_map_debug):
+        #     assert e1 == e2
+        #     if rxn_map_copy[e1].available_reactants != rxn_map_debug[e2].available_reactants:
+        #         breakpoint()
+        
+
+
+
+
+        if keep_prods:
+            product_map[len(rxn_tree)-1] = dict(product_map[len(rxn_tree)-1])
+            self.product_map._product_map = product_map
+            logging.info(f"begin re-indexing product map")               
+            self.reindex_product_map(len(rxn_tree)-1, self.entries, all_reactant_indices)
+            # if self.product_map._product_map != product_map_debug._product_map:
+            #     breakpoint()            
+            
+        # re-index the entry_reactant indices of self.product_map
+        logging.info(f"done re-indexing product map")         
+                                           
+
+        
         logger.info(f"done post-processing {len(res)} products")
         if keep_prods:
             self.product_map.save()
