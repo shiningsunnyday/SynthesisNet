@@ -439,9 +439,8 @@ class ProductMap:
             for r in other._product_map[n]:
                 for e, v in other._product_map[n][r].items():
                     self[(n+offset, r, e+offset)] = v
-        # combine self.product_map's and correct for entries    
-        # make a new file to avoid conflicts
-        self = self.copy()        
+        # combine self.product_map's and correct for entries            
+                
 
 
 
@@ -693,7 +692,7 @@ class Program:
     
 
 
-            if count >= MP_MIN_COMBINATIONS:
+            if count >= MP_MIN_COMBINATIONS and NUM_THREADS > 1:
                 threads = []
                 elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
                 all_reactant_indices = []

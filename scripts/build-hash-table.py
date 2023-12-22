@@ -210,7 +210,7 @@ def expand_programs(args, all_progs, size):
     if args.ncpu > 1:
         with mp.Pool(args.ncpu) as p:
             progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
-    else:        
+    else:            
         progs = []
         for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):
             progs.append(expand_program(*parg))      
