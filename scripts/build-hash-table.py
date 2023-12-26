@@ -182,6 +182,7 @@ def expand_program(i, a, b=None):
     if b is not None:        
         prog = prog.combine(b.copy())      
         prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
+        prog.product_map.unload()
     else:        
         prog.add_rxn(i, len(a.rxn_tree)-1)
     logger.info(f"done {task_descr}")
@@ -190,6 +191,11 @@ def expand_program(i, a, b=None):
 
 
 def expand_programs(args, all_progs, size):
+    def prog_length(prog):
+        if len(prog) == 2:
+            return Program.input_length(prog[1])
+        else:
+            return Program.input_length(prog[1])+Program.input_length(prog[2])
     logger = logging.getLogger('global_logger')
     progs = []
     pargs = []    
@@ -207,12 +213,13 @@ def expand_programs(args, all_progs, size):
                         pargs.append((i, A[a], B[b]))
     # TODO: fix issue
     logger.info(f"=====expanding {len(pargs)} programs=====")
+    pargs = sorted(pargs, key=prog_length)[::-1] # test the biggest ones first to prevent oom
     if args.ncpu > 1:
         with mp.Pool(args.ncpu) as p:
             progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
     else:            
         progs = []
-        for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):
+        for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):       
             progs.append(expand_program(*parg))      
     all_progs[size] = progs
     return all_progs

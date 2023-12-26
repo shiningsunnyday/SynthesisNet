@@ -425,7 +425,8 @@ class ProductMap:
             json.dump(self._product_map, open(new_fpath, 'w+'))
         else:
             pickle.dump(self._product_map, open(new_fpath, 'wb+'))
-        new_pmap = ProductMap(new_fpath, loaded=False)
+        new_pmap = ProductMap(new_fpath, loaded=False)        
+        self.unload()
         return new_pmap
 
 
