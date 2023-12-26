@@ -569,7 +569,7 @@ class Program:
 
     @staticmethod
     def fill_product_reactant_indices(res, all_reactant_idxes, product_map=None):
-        for r, index in res:
+        for r, index in tqdm(res):
             idxes = Program.infer_product_index(index, interm_counts, entries, rxn_map, return_idx=True)            
             assert len(idxes) == len(all_reactant_idxes)
             prod = {}
@@ -977,19 +977,23 @@ class Program:
         for e in self.entries:
             zero_count = []
             for i in range(len(self.rxn_map[e].available_reactants)):
-                zero_count.append(Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]))
+                if NUM_THREADS > 1:
+                    arr = Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))])
+                else:
+                    arr = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]
+                zero_count.append(arr)
             all_reactant_indices.append(zero_count)   
 
         if keep_prods:
             product_map = self.product_map._product_map
-            if count >= MP_MIN_COMBINATIONS:
+            if count >= MP_MIN_COMBINATIONS and NUM_THREADS > 1:
                 product_map[len(rxn_tree)-1] = Manager().dict()
             else:
                 product_map[len(rxn_tree)-1] = {}
         else:
             product_map = None
 
-        if count >= MP_MIN_COMBINATIONS:
+        if count >= MP_MIN_COMBINATIONS and NUM_THREADS > 1:
             for i in range(NUM_THREADS):
                 start = i*elems_per_thread
                 end = (i+1)*elems_per_thread                
@@ -1024,10 +1028,7 @@ class Program:
         # for e1, e2 in zip(rxn_map_copy, rxn_map_debug):
         #     assert e1 == e2
         #     if rxn_map_copy[e1].available_reactants != rxn_map_debug[e2].available_reactants:
-        #         breakpoint()
-        
-
-
+        #         breakpoint()        
 
 
         if keep_prods:

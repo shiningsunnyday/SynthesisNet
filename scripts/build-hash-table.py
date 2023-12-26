@@ -1,4 +1,4 @@
-from synnet.config import MAX_PROCESSES, MP_MIN_COMBINATIONS, PRODUCT_DIR
+from synnet.config import MAX_PROCESSES, MP_MIN_COMBINATIONS, PRODUCT_DIR, NUM_THREADS
 from synnet.data_generation.preprocessing import (
     BuildingBlockFileHandler,
     BuildingBlockFilter,
@@ -67,6 +67,8 @@ def get_args():
     )
     # Hash table args
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
+    parser.add_argument("--mp-min-combinations", type=int, default=1000000, help="Min combinations to run mp")    
+    parser.add_argument("--num-threads", type=int, default=1, help="Number of threads")
     parser.add_argument("--depth", type=int, default=3, help="depth of enumeration")
     parser.add_argument("--top-bb", type=int, 
                         help='if positive, use only top-k bb/rxns as counted by skeleton-file; if -1, use all with non-zero count')
@@ -281,7 +283,7 @@ def create_run_programs(args, bbf, size=3):
         exist = os.path.exists(cache_fpath)
         if args.cache_dir and exist:
             all_progs = pickle.load(open(cache_fpath, 'rb'))
-            logging.info(f"loaded {len(all_progs[d])} size-{d} programs")
+            logger.info(f"loaded {len(all_progs[d])} size-{d} programs")
             all_progs[d] = filter_programs(all_progs[d])
             assert d in all_progs
             continue
@@ -293,26 +295,26 @@ def create_run_programs(args, bbf, size=3):
             if args.cache_dir and os.path.exists(cache_fpath_pre):
                 all_progs = pickle.load(open(cache_fpath_pre, 'rb'))
             else:
-                logging.info(f"begin expanding size-{d} programs")                
+                logger.info(f"begin expanding size-{d} programs")                
                 expand_programs(args, all_progs, d)
-                logging.info(f"done expanding size-{d} programs")                
+                logger.info(f"done expanding size-{d} programs")                
                 if args.cache_dir:
-                    logging.info(get_descr(all_progs))  
-                    logging.info(f"begin cache-dumping all pre-programs at {cache_fpath_pre}")                     
+                    logger.info(get_descr(all_progs))  
+                    logger.info(f"begin cache-dumping all pre-programs at {cache_fpath_pre}")                     
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
-                    logging.info(f"done cache-dumping all pre-programs at {cache_fpath_pre}")                   
-            logging.info(f"created {len(all_progs[d])} size-{d} programs")
+                    logger.info(f"done cache-dumping all pre-programs at {cache_fpath_pre}")                   
+            logger.info(f"created {len(all_progs[d])} size-{d} programs")
 
         """
         Strategy: use mp to init easy programs in parallel
         Run hard programs sequentially, use mp to filter the intermediates
-        """     
-        logging.info(f"strategize how to init {len(all_progs[d])} depth-{d} programs")  
+        """    
+        logger.info(f"strategize how to init {len(all_progs[d])} depth-{d} programs")  
         progs = [None for _ in all_progs[d]] 
         easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
-        logging.info(f"parallel run easy programs {easy_prog_inds}")          
+        logger.info(f"parallel run easy programs {easy_prog_inds}")          
         hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
-        logging.info(f"sequentially run hard programs {hard_prog_inds}")  
+        logger.info(f"sequentially run hard programs {hard_prog_inds}")  
         if args.ncpu > 1:
             with mp.Pool(args.ncpu) as p:
                 easy_progs = p.map(init_program, tqdm([all_progs[d][i] for i in easy_prog_inds], desc="init easy programs"))          
@@ -327,15 +329,16 @@ def create_run_programs(args, bbf, size=3):
 
         # Filter after init prunes the input space
         all_progs[d] = filter_programs(progs)
-        logging.info(f"running {len(all_progs[d])} size-{d} programs")
+        logger.info(f"running {len(all_progs[d])} size-{d} programs")
 
         """
         Strategy: use mp to run easy programs in parallel
         Run hard programs sequentially, use mp among the input combinations
         """
         easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
-        logging.info(sorted(hard_prog_inds))
-        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
+        logger.info(f"parallel run easy programs {easy_prog_inds}")          
+        hard_prog_inds = [i for _, i in sorted(hard_prog_inds)][::-1]
+        logger.info(f"sequentially run hard programs {hard_prog_inds}")  
         progs = [None for _ in all_progs[d]]
        
         easy_done_path = os.path.join(args.cache_dir, f"{d}_easy.pkl")
@@ -348,40 +351,40 @@ def create_run_programs(args, bbf, size=3):
             else:
                 easy_progs = [run_program(all_progs[d][i]) for i in easy_prog_inds]
             if args.cache_dir:
-                logging.info(f"begin cache-dumping easy programs at {easy_done_path}")  
+                logger.info(f"begin cache-dumping easy programs at {easy_done_path}")  
                 pickle.dump(easy_progs, open(easy_done_path, 'wb'))
-                logging.info(f"done cache-dumping easy programs at {easy_done_path}")  
+                logger.info(f"done cache-dumping easy programs at {easy_done_path}")  
         for i, p in zip(easy_prog_inds, easy_progs):
             progs[i] = p       
         for i in tqdm(hard_prog_inds):
             hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")            
             if os.path.exists(hard_path_i):
-                logging.info(f"hard program {hard_path_i} exists")
+                logger.info(f"hard program {hard_path_i} exists")
                 continue
             else:
                 p = all_progs[d][i]
                 progs[i] = run_program(p)    
                 if args.cache_dir:
-                    logging.info(f"begin cache-dumping hard program at {hard_path_i}")  
+                    logger.info(f"begin cache-dumping hard program at {hard_path_i}")  
                     pickle.dump(progs[i], open(hard_path_i, 'wb'))
-                    logging.info(f"done cache-dumping hard program at {hard_path_i}")  
+                    logger.info(f"done cache-dumping hard program at {hard_path_i}")  
                
         for i in tqdm(hard_prog_inds):
             hard_path_i = os.path.join(args.cache_dir, f"{d}_hard_{i}.pkl")
-            logging.info(f"begin loading hard program from {hard_path_i}")  
+            logger.info(f"begin loading hard program from {hard_path_i}")  
             progs[i] = pickle.load(open(hard_path_i, 'rb'))
-            logging.info(f"done loading hard program from {hard_path_i}")  
+            logger.info(f"done loading hard program from {hard_path_i}")  
 
         
         # Filter after reaction is run
         all_progs[d] = filter_programs(progs)
-        logging.info(f"done! {len(all_progs[d])} size-{d} programs")
+        logger.info(f"done! {len(all_progs[d])} size-{d} programs")
 
         if args.cache_dir and not exist:   
-            logging.info(get_descr(all_progs))  
-            logging.info(f"begin cache-dumping all programs at {cache_fpath}")  
+            logger.info(get_descr(all_progs))  
+            logger.info(f"begin cache-dumping all programs at {cache_fpath}")  
             pickle.dump(all_progs, open(cache_fpath, 'wb'))
-            logging.info(f"done cache-dumping all programs at {cache_fpath}")                           
+            logger.info(f"done cache-dumping all programs at {cache_fpath}")                           
     return all_progs
 
 
@@ -503,6 +506,10 @@ if __name__ == "__main__":
     args = get_args()
     if args.cache_dir and args.cache_dir != PRODUCT_DIR:
         breakpoint()
+    if args.mp_min_combinations != MP_MIN_COMBINATIONS:
+        breakpoint()        
+    if args.num_threads != NUM_THREADS:
+        breakpoint()                
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)    
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
 

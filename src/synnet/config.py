@@ -3,14 +3,14 @@ import multiprocessing
 
 # Multiprocessing
 MAX_PROCESSES = min(100, multiprocessing.cpu_count()) - 1
-MP_MIN_COMBINATIONS = 100000
+MP_MIN_COMBINATIONS = 1000000
 
-NUM_THREADS = 4
+NUM_THREADS = 1
 
 # TODO: Remove these paths bit by bit
 
 # Intermediates
-PRODUCT_DIR = "/ssd/msun415/program_cache-bb=10000-prods=1"
+PRODUCT_DIR = "/lfs/local/0/msun415/program_cache-bb=10000_keep-prods=2"
 PRODUCT_JSON = True
 
 # Pre-processed data
