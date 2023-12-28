@@ -224,8 +224,9 @@ def expand_programs(args, all_progs, size):
 
     all_progs[size] = []
     for j in range(num_batches):
-        if os.path.exists(f"{prefix}_{j}.pkl"):
-            progs = pickle.load(open(f"{prefix}_{j}.pkl", 'rb'))
+        if os.path.exists(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl")):
+            logger.info(f"loading {prefix}_{j}.pkl")
+            progs = pickle.load(open(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl"), 'rb'))
         else:
             pargs_batch = pargs[j*args.program_batch_size:(j+1)*args.program_batch_size]        
             logger.info(f"=====expanding {len(pargs_batch)} programs (batch {j}/{num_batches})=====")
@@ -236,7 +237,8 @@ def expand_programs(args, all_progs, size):
                 progs = []
                 for i, parg in enumerate(tqdm(pargs_batch, desc="expanding progs")):       
                     progs.append(expand_program(*parg))      
-            pickle.dump(pargs_batch, open(f"{prefix}_{j}.pkl", 'wb+'))
+            logger.info(f"dumping {prefix}_{j}.pkl")
+            pickle.dump(pargs_batch, open(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl"), 'wb+'))
         all_progs[size] += progs
     
     return all_progs
