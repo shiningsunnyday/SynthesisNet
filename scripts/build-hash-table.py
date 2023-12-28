@@ -67,6 +67,7 @@ def get_args():
     )
     # Hash table args
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
+    parser.add_argument("--program_batch_size", type=int, default=100, help="Number of programs to batch")
     parser.add_argument("--mp-min-combinations", type=int, default=1000000, help="Min combinations to run mp")    
     parser.add_argument("--num-threads", type=int, default=1, help="Number of threads")
     parser.add_argument("--depth", type=int, default=3, help="depth of enumeration")
@@ -213,17 +214,31 @@ def expand_programs(args, all_progs, size):
                 for a in range(len(A)):
                     for b in range(len(B)):   
                         pargs.append((i, A[a], B[b]))
-    # TODO: fix issue
-    logger.info(f"=====expanding {len(pargs)} programs=====")
-    pargs = sorted(pargs, key=prog_length)[::-1] # test the biggest ones first to prevent oom
-    if args.ncpu > 1:
-        with mp.Pool(args.ncpu) as p:
-            progs = p.starmap(expand_program, tqdm(pargs, desc="expanding progs"))
-    else:            
-        progs = []
-        for i, parg in enumerate(tqdm(pargs, desc="expanding progs")):       
-            progs.append(expand_program(*parg))      
-    all_progs[size] = progs
+    """
+    Create a hash of args, all_progs, size
+    Only if EVERYTHING is the same, use checkpointing
+    """            
+    arg_hash = Program.hash_json(args.__dict__)
+    num_batches = (len(pargs)+args.program_batch_size-1)//args.program_batch_size
+    prefix = f"{arg_hash}_{size}"
+
+    all_progs[size] = []
+    for j in range(num_batches):
+        if os.path.exists(f"{prefix}_{j}.pkl"):
+            progs = pickle.load(open(f"{prefix}_{j}.pkl", 'rb'))
+        else:
+            pargs_batch = pargs[j*args.program_batch_size:(j+1)*args.program_batch_size]        
+            logger.info(f"=====expanding {len(pargs_batch)} programs (batch {j}/{num_batches})=====")
+            if args.ncpu > 1:
+                with mp.Pool(args.ncpu) as p:
+                    progs = p.starmap(expand_program, tqdm(pargs_batch, desc="expanding progs"))
+            else:            
+                progs = []
+                for i, parg in enumerate(tqdm(pargs_batch, desc="expanding progs")):       
+                    progs.append(expand_program(*parg))      
+            pickle.dump(pargs_batch, open(f"{prefix}_{j}.pkl", 'wb+'))
+        all_progs[size] += progs
+    
     return all_progs
 
 

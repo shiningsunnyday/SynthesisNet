@@ -506,6 +506,11 @@ class Program:
             num_poss.append(Program.input_length(p))
         return np.mean(num_poss) if len(num_poss) else 0
 
+    
+    @staticmethod
+    def hash_json(json_data):
+        return hashlib.md5(json.dumps(json_data, sort_keys=True).encode()).hexdigest() # deterministic hashing        
+    
 
     def hash(self, mask, return_json=False):
         # used to hash the partial state defined by mask
@@ -516,16 +521,28 @@ class Program:
                 data[n] = self.rxn_tree.nodes[n]['rxn_id']
                 self.rxn_tree.nodes[n].pop('rxn_id')
         json_data = nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)
-        ans = hashlib.md5(json.dumps(json_data, sort_keys=True).encode()).hexdigest() # deterministic hashing
+        ans = self.hash_json(json_data)
         for n, r in data.items():
             self.rxn_tree.nodes[n]['rxn_id'] = r
         if return_json:
             return json_data        
         return str(ans)
 
+    
+    def hash_program(self):
+        return self.hash_json(self.output_dict)
+
 
     def output_dict(self):
-        breakpoint()
+        dic = {
+            'rxn_tree': nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1),
+            'entries': self._entries,
+            'rxn_map': {r: rxn.__dict__ for r, rxn in self.rxn_map.items()},
+            'keep_prods': self.keep_prods            
+        }
+        if self.keep_prods:
+            dic['product_map'] = self.product_map.fpath
+        return dic
     
     
 
