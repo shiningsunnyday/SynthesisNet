@@ -6,6 +6,7 @@ import logging
 import gzip
 import multiprocessing as mp
 from pathlib import Path
+import networkx as nx
 from typing import Tuple
 
 import numpy as np
@@ -19,6 +20,7 @@ from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt, load_gnn_from_ckpt
+from synnet.models.gnn import PtrDataset
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.data_utils import ReactionSet, SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet
 from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search
@@ -54,57 +56,95 @@ def _fetch_data(name: str) -> list[str]:
     else:  # Hopefully got a filename instead
         smiles = _fetch_data_from_file(name)
     return smiles
+    
 
 
 @torch.no_grad()
-def wrapper_decoder(hash_dir, sk, model_rxn, model_bb):
+def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, mol_embedder):
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
-    model_bb.eval()
+    model_bb.eval()  
+    rxn_graph, node_map, _ = sk.rxn_graph()
     while ((~sk.mask) & (sk.rxns | sk.leaves)).any():
-        if sk.mask.sum()>1:
-            breakpoint()
-            hash_val = sk.hash()
-            fpath = os.path.join(cur_dir, f"{hash_val}.json")
-            dirpath = os.path.join(cur_dir, f"{hash_val}")
-            if os.path.exists(fpath):
-                data = json.load(open(fpath, 'r'))
-                imposs = np.bool([True for _ in range(91)])
-                imposs[data['rxn_ids']] = False
-                cur_dir = dirpath
-            else:
-                breakpoint()
-        else:
-            cur_dir = hash_dir
-            imposs = []
-            
-        assert sk.rxn_target_down_bb
+        """
+        while there's reaction nodes or leaf building blocks to fill in
+            compute, for each vacant reaction node or vacant building block, the possible
+            predict on all of these
+            pick the highest confidence one
+            fill it in
+        """        
         # prediction problem
-        _, X, _ = sk.get_state()
-        data = Data(edge_index=torch.tensor(sk.tree_edges, dtype=torch.int64), 
-                    x=torch.Tensor(X))   
-        # get frontier rxns     
-        frontier_rxns = np.array([False for _ in range(len(sk.tree))])
-        for n in np.argwhere((~sk.mask) & sk.rxns).flatten():
-            if sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))]:
-                frontier_rxns[n] = True
-        frontier_rxns = np.bool_(frontier_rxns)
-        # get frontier bbs
-        frontier_bbs = np.array([False for _ in range(len(sk.tree))])
-        for n in np.argwhere((~sk.mask) & (~sk.rxns) & (sk.leaves)).flatten():
-            if sk.mask[sk.pred(n)]: # parent present
-                frontier_bbs[n] = True
-        if frontier_rxns.any():
-            logits = model_rxn(data)[frontier_rxns, -91:]
-            logits[:, imposs] = -float("inf") # filter out reactions
-            confs, rxn_ids = logits.max(axis=-1)
-            node_id = np.arange(len(sk.tree))[frontier_rxns][confs.argmax()]        
-            rxn_id = rxn_ids[confs.argmax()].item()
-            sk.modify_tree(node_id, rxn_id=rxn_id)        
-        else:
-            assert frontier_bbs.any()
-            logits = model_rxn(data)[frontier_bbs, :256]
-            breakpoint()
+        _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
+        edge_input = torch.tensor(sk.tree_edges, dtype=torch.int64)
+        pe = PtrDataset.positionalencoding1d(32, len(X))
+        x_input = np.concatenate((X, pe), axis=-1)
+        data_rxn = Data(edge_index=edge_input, x=torch.Tensor(X))
+        data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input))
+        logits_rxn = model_rxn(data_rxn)
+        logits_bb = model_bb(data_bb)
+        logits = {}
+        frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
+        for n in frontier_nodes:            
+            if sk.rxns[n]:                
+                logits[n] = logits_rxn[n]
+            else:
+                try:
+                    assert sk.leaves[n]
+                except:
+                    breakpoint()
+                logits[n] = logits_bb[n]
+        for n in logits:
+            """
+            try to build the longest sequence of predecessor rxns as possible
+            to constrain the output
+            """
+            if sk.rxns[n]:  
+                cur = node_map[n]              
+                level = 0
+                while list(rxn_graph.predecessors(cur)): # still has ancestor
+                    cur = list(rxn_graph.predecessors(cur))[0]                
+                    level += 1
+                    # everything within level dist of cur
+                    prog_graph = nx.ego_graph(rxn_graph, cur, level)
+                    breakpoint()
+                if level:
+                    # use prog_graph to hash, navigate the file system
+                    breakpoint()                
+                rxn_id = logits[n][-91:].argmax(axis=-1).item()
+                sk.modify_tree(n, rxn_id=rxn_id)
+                sk.mask = [succ for succ in sk.tree.successors(n) if not sk.leaves[succ]] 
+            else:           
+                breakpoint()     
+                bb_emb = logits[n][:-91]                
+                sk.modify_tree(n)                
+            
+
+        # # get frontier rxns     
+        # frontier_rxns = np.array([False for _ in range(len(sk.tree))])
+        # for n in np.argwhere((~sk.mask) & sk.rxns).flatten():
+        #     if sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))]:
+        #         frontier_rxns[n] = True
+        # frontier_rxns = np.bool_(frontier_rxns)
+        # # get frontier bbs
+        # frontier_bbs = np.array([False for _ in range(len(sk.tree))])
+        # for n in np.argwhere((~sk.mask) & (~sk.rxns) & (sk.leaves)).flatten():
+        #     if sk.mask[sk.pred(n)]: # parent present
+        #         frontier_bbs[n] = True
+
+        # if sk.mask.sum()>1:
+        #     hash_val = sk.hash()
+        #     fpath = os.path.join(cur_dir, f"{hash_val}.json")
+        #     dirpath = os.path.join(cur_dir, f"{hash_val}")
+        #     if os.path.exists(fpath):
+        #         data = json.load(open(fpath, 'r'))
+        #         imposs = np.bool([True for _ in range(91)])
+        #         imposs[data['rxn_ids']] = False
+        #         cur_dir = dirpath
+        #     else:
+        #         breakpoint()
+        # else:
+        #     cur_dir = hash_dir
+        #     imposs = []        
 
         
     return sk
@@ -201,12 +241,12 @@ if __name__ == "__main__":
     logger.info(f"Successfully read {args.rxns_collection_file}.")
 
     # # ... building block embedding
-    # bblocks_molembedder = (
-    #     MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-    # )
-    # bb_emb = bblocks_molembedder.get_embeddings()
-    # logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
-    # logger.info("...loading data completed.")
+    bblocks_molembedder = (
+        MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
+    )
+    bb_emb = bblocks_molembedder.get_embeddings()
+    logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
+    logger.info("...loading data completed.")
 
     # ... models
     logger.info("Start loading models from checkpoints...")  
@@ -232,7 +272,7 @@ if __name__ == "__main__":
             sk = lookup[smi]
             sk.clear_tree()
             sk.modify_tree(sk.tree_root, smiles=smi)
-            sk = wrapper_decoder(args.hash_dir, sk, rxn_gnn, bb_gnn)
+            sk = wrapper_decoder(args.hash_dir, sk, rxn_gnn, bb_gnn, bblocks_molembedder)
             breakpoint()
 
     # else:

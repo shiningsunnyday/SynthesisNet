@@ -1658,6 +1658,7 @@ class Skeleton:
     @property
     def mask(self):
         return self._mask
+
     
     def pred(self, n):
         return list(self.tree.predecessors(n))[0]
@@ -1746,8 +1747,9 @@ class Skeleton:
         """        
         X = np.zeros((len(self.tree), 2*2048+91))
         y = np.zeros((len(self.tree), 256+91))
+        
         try:
-            for n in self.tree.nodes():
+            for n in self.tree.nodes():             
                 # is target, or parent is target, or parent rxn is fulfilled
                 rxn_parent = (n == self.tree_root) or self.pred(n) == self.tree_root or (self.mask & self.rxns)[self.pred(self.pred(n))]
                 # if is rxn, then rxn_parent; if is leaf, then parent is fulfilled        
@@ -1773,7 +1775,7 @@ class Skeleton:
                         # print(self.tree.nodes[n])
                     elif 'rxn_id' in self.tree.nodes[n]:
                         assert len(list(self.tree.predecessors(n))) == 1
-                        X[n][:2048] = fp_2048(self.tree.nodes[self.pred(n)]['smiles'])
+                        # X[n][:2048] = fp_2048(self.tree.nodes[self.pred(n)]['smiles'])
                         X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])
                         X[n][2*2048:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
                     else:
@@ -1912,31 +1914,47 @@ class Skeleton:
                 
         return _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
 
-
-    def hash(self):
-        """
-        Build rxn tree        
-        """
+    def rxn_graph(self):
         g = nx.induced_subgraph(self.tree, np.argwhere(self.rxns).flatten())
         g = g.copy()
         for a in g:
             for b in g:
-                if self.pred(b) != self.tree_root and self.pred(self.pred(b)) == a:
+                if self.pred(b) == self.tree_root:
+                    continue                
+                if self.pred(self.pred(b)) == a:
+                    child = 'left'
+                    if len(list(self.tree.successors(a))) == 2:
+                        if list(self.tree.successors(a))[1] == self.pred(b):
+                            child = 'right'                            
                     g.add_edge(a, b)
+                    g.nodes[b]['child'] = child    
         node_map = dict(zip(g.nodes(), range(self.rxns.sum())))
         reverse_node_map = dict(zip(range(self.rxns.sum()), g.nodes()))
         g = nx.relabel_nodes(g, node_map)
+        return g, node_map, reverse_node_map
+    
+
+    def rxn_prog(self):
+        g, _, reverse_node_map = self.rxn_graph()
         p = Program(g)
         dists = nx.shortest_path_length(self.tree, self.tree_root)
         max_dist = 0
         for i in g:
             g.nodes[i]['depth'] = dists[reverse_node_map[i]]//2
             max_dist = max(g.nodes[i]['depth'], max_dist)            
+        root = 0
         for i in g:
             g.nodes[i]['depth'] = max_dist+1-g.nodes[i]['depth']
-            if g.nodes[i]['depth'] == 1:
-                g.nodes[i]['child'] = 'left'
+            if g.nodes[i]['depth'] > g.nodes[root]['depth']:
+                root = i                       
+        return p       
 
+
+    def hash(self):
+        """
+        Build rxn tree        
+        """
+        p = self.rxn_prog()      
         val = p.hash(self.mask[self.rxns])
         return val
 
