@@ -74,7 +74,20 @@ class PtrDataset(Dataset):
         num_nodes = self.edge_index[e].max()+1
         X = sparse.load_npz(base+'_Xs.npz').toarray()
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
-        # add 1D positional encoding (num_nodes, dim)
+        # add 1D positional encoding (num_nodes, dim)                
+        dataset_index = int(base.split('/')[-1].split('_')[0])
+        if dataset_index == 0:
+            X[[8,7,6], :2048] = 0
+        elif dataset_index == 1:
+            X[[3], :2048] = 0
+        elif dataset_index == 2:
+            X[[2], :2048] = 0
+        elif dataset_index == 3:
+            X[[5,6], :2048] = 0
+        elif dataset_index == 4:
+            X[[12,11,10,9], :2048] = 0
+        else:
+            raise NotImplementedError # did you fix the zero'ing out issue?
         if self.pe == 'sin':            
             pe = self.positionalencoding1d(32, num_nodes) # add to target
             X = np.concatenate((X, pe.numpy()), axis=-1)

@@ -238,7 +238,7 @@ def expand_programs(args, all_progs, size):
                 for i, parg in enumerate(tqdm(pargs_batch, desc="expanding progs")):       
                     progs.append(expand_program(*parg))      
             logger.info(f"dumping {prefix}_{j}.pkl")
-            pickle.dump(pargs_batch, open(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl"), 'wb+'))
+            pickle.dump(progs, open(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl"), 'wb+'))
         all_progs[size] += progs
     
     return all_progs
