@@ -36,7 +36,7 @@ import networkx as nx
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 from copy import deepcopy
-
+from filelock import FileLock
 from synnet.encoding.fingerprints import fp_2048, fp_256
 import os
 import logging
@@ -360,7 +360,7 @@ class ProductMap:
         recursively convert str int keys to int
         """
         if isinstance(dic, dict):
-            str_keys = [k for k in dic if k.isdigit()]
+            str_keys = [k for k in dic if isinstance(k, str) and k.isdigit()]
             for k in str_keys:
                 dic[int(k)] = dic[k]
             for k in str_keys:
@@ -445,6 +445,173 @@ class ProductMap:
 
 
 
+class ProductMapLink:
+    """
+    Making a product map memory-efficient by storing a dict of files
+    The following functions are available:
+        load(): load all base files into a in-memory dict
+        save(): write _product_map back into the base files
+        copy(): create a new ProductMapLink with new (copied) list of files
+        combine(): combine two ProductMapLinks, by combining base files with disjoint keys
+        __getitem__
+        __setitem__        
+    """
+    def __init__(self, fpaths):
+        self.fpaths = fpaths
+        assert isinstance(fpaths, dict)
+        self._product_map = None
+        self._loaded = False
+        for fpath in self.fpaths.values():
+            assert os.path.exists(fpath)   
+
+
+    def load(self):
+        logger = logging.getLogger('global_logger')
+        logger.info(f"begin loading product map link")        
+        if not self._loaded:    
+            self._product_map = {}
+            self._loaded = True
+            for entry_key, fpath in self.fpaths.items():
+                logger.info(f"begin loading {fpath} for entry key {entry_key}")
+                # with FileLock(f"{fpath}.lock"):
+                offset = 0
+                if isinstance(fpath, tuple):
+                    offset, fpath = fpath
+                    self.fpaths[entry_key] = fpath                         
+                self._product_map[entry_key] = (json.load if PRODUCT_JSON else pickle.load)(open(fpath, 'r' if PRODUCT_JSON else 'rb'))
+                if offset:
+                    n = entry_key
+                    for r in self._product_map[n]:
+                        entries = list(self._product_map[n][r].keys())
+                        for e in entries:
+                            assert int(e)+offset not in self[(n,r)]
+                            self[(n, r, int(e)+offset)] = self._product_map[n][r][e]                                
+                        for e in entries:
+                            self._product_map[n][r].pop(e)
+            self.str_key_to_int(self._product_map)            
+        logger.info(f"done loading product map link")
+
+    
+    def save(self):
+        logger = logging.getLogger('global_logger')
+        logger.info(f"begin saving product map")
+        assert self._loaded, "need to call load() first" 
+        for entry_key in self._product_map:
+            if entry_key in self.fpaths:
+                fpath = self.fpaths[entry_key]
+            else:
+                ext = "json" if PRODUCT_JSON else "pkl"
+                fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+                while os.path.exists(fpath):
+                    fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")                
+                self.fpaths[entry_key] = fpath
+            with FileLock(f"{fpath}.lock"):
+                with open(fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
+                    (json.dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
+        logger.info(f"done saving product map")
+        self._product_map = None
+        self._loaded = False
+
+
+    def unload(self):
+        if self._loaded:
+            self._product_map = None
+            self._loaded = False        
+
+
+    def copy(self):
+        """
+        copy _product_map into new files
+        filenames are random uuid's to avoid collision
+        """
+        ext = "json" if PRODUCT_JSON else "pkl"
+        if not self._loaded:
+            # since product map not loaded, we can copy without loading
+            new_fpaths = {}
+            for entry_key, fpath in self.fpaths.items():                
+                new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+                while os.path.exists(new_fpath):
+                    new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+                shutil.copyfile(fpath, new_fpath)
+                new_fpaths[entry_key] = new_fpath
+            new_pmap = ProductMapLink(new_fpaths)        
+        else:                        
+            new_fpaths = {}
+            for entry_key in self._product_map:
+                new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+                while os.path.exists(new_fpath):
+                    new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+                with open(new_fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
+                    (json.dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
+                new_fpaths[entry_key] = new_fpath
+            new_pmap = ProductMapLink(new_fpaths)        
+            self.unload()
+        return new_pmap    
+
+
+    def combine(self, other, offset):
+        """
+        combine two maplinks by combining the fpaths
+        unsaved work on _product_map will not be carried over
+        NOTE: when loading fpath, the innermost keys will also need to be offset                
+        """
+        assert not self._loaded
+        assert not other._loaded
+        for entry_key, fpath in other.fpaths.items():
+            self.fpaths[entry_key+offset] = (offset, fpath)
+
+
+
+    def __setitem__(self, key, val):   
+        assert self._loaded
+        assert isinstance(key, tuple)   
+        assert len(key) == 3
+        n, interm, e = key
+        if n not in self._product_map:
+            self._product_map[n] = {}
+        if interm not in self._product_map[n]:
+            self._product_map[n][interm] = {}        
+        self._product_map[n][interm][e] = val
+
+
+    def __getitem__(self, key):   
+        assert self._loaded
+        assert isinstance(key, tuple)   
+        if len(key) == 3:
+            n, interm, e = key
+            return self._product_map[n][interm][e]  
+        elif len(key) == 2:
+            n, interm = key
+            return self._product_map[n][interm]
+        elif len(key) == 1:
+            n = key[0]
+            return self._product_map[n]  
+    
+
+    @staticmethod
+    def str_key_to_int(dic):
+        """
+        recursively convert str int keys to int
+        """
+        if isinstance(dic, dict):
+            str_keys = [k for k in dic if isinstance(k, str) and k.isdigit()]
+            for k in str_keys:
+                dic[int(k)] = dic[k]
+            for k in str_keys:
+                dic.pop(k)
+            for k in dic:
+                ProductMap.str_key_to_int(dic[k])
+    
+
+    def get_num_interms(self, key):
+        if key not in self._product_map:
+            print(self.fpaths, f"{key} has no interms!")
+            print(self._product_map.keys())
+            breakpoint()
+        return len(self._product_map[key])                 
+
+
+
 class Program:
     def __init__(self, rxn_tree=None, keep_prods=0):
         self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()        
@@ -512,10 +679,12 @@ class Program:
         return hashlib.md5(json.dumps(json_data, sort_keys=True).encode()).hexdigest() # deterministic hashing        
     
 
-    def hash(self, mask, return_json=False):
+    def hash(self, mask=None, return_json=False):
         # used to hash the partial state defined by mask
         # can also return the tree data defined by mask
         data = {}
+        if mask is None:
+            mask = [True for _ in self.rxn_tree]
         for n in self.rxn_tree.nodes():
             if not mask[n]:
                 data[n] = self.rxn_tree.nodes[n]['rxn_id']
@@ -540,7 +709,7 @@ class Program:
             'rxn_map': {r: rxn.__dict__ for r, rxn in self.rxn_map.items()},
             'keep_prods': self.keep_prods            
         }
-        if self.keep_prods:
+        if self.keep_prods:            
             dic['product_map'] = self.product_map.fpath
         return dic
     
@@ -580,6 +749,8 @@ class Program:
             assert len(all_reactant_idxes) == len(idxes)
             for i in range(len(all_reactant_idxes)):
                 idx = idxes[i]
+                if len(idx) != len(all_reactant_idxes[i]):
+                    breakpoint()
                 assert len(idx) == len(all_reactant_idxes[i])
                 for j in range(len(idx)):
                     all_reactant_idxes[i][j][idx[j]] += 1
@@ -1046,8 +1217,7 @@ class Program:
         #     assert e1 == e2
         #     if rxn_map_copy[e1].available_reactants != rxn_map_debug[e2].available_reactants:
         #         breakpoint()        
-
-
+   
         if keep_prods:
             product_map[len(rxn_tree)-1] = dict(product_map[len(rxn_tree)-1])
             self.product_map._product_map = product_map
@@ -1071,6 +1241,27 @@ class Program:
 
     def logging_info(self):
         return nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)  
+
+
+    @staticmethod
+    def migrate(p):
+        ext = "json" if PRODUCT_JSON else "pkl"
+        try:
+            p.product_map.load()
+        except:
+            print(p.product_map.fpath)
+            print(nx.tree_data(p.rxn_tree, len(p.rxn_tree)-1))
+            return p
+        new_fpaths = {}
+        for entry_key in p.product_map._product_map:
+            new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
+            new_fpaths[entry_key] = new_fpath                        
+            with open(new_fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
+                (json.dump if PRODUCT_JSON else pickle.dump)(p.product_map[(entry_key,)], f)
+        pmap_link = ProductMapLink(new_fpaths)
+        p.product_map = pmap_link
+        return p
+
 
 
 

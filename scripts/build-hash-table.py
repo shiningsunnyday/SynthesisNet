@@ -4,8 +4,7 @@ from synnet.data_generation.preprocessing import (
     BuildingBlockFilter,
     ReactionTemplateFileHandler,
 )
-from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, Program, \
-get_bool_mask
+from synnet.utils.data_utils import Skeleton, Program, ProductMap, ProductMapLink
 from synnet.utils.logging import create_logger
 from synnet.utils.analysis_utils import count_bbs, count_rxns
 import pickle
@@ -181,15 +180,26 @@ def expand_program(i, a, b=None):
     else:
         task_descr = f"joining program {prog_A_info} with rxn_id {i}"
     logger.info(f"begin {task_descr}")
-    prog = a.copy()
-    if b is not None:        
-        prog = prog.combine(b.copy())      
-        prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
-        prog.product_map.unload()
-    else:        
-        prog.add_rxn(i, len(a.rxn_tree)-1)
+    if isinstance(a.product_map, ProductMap):
+        prog = a.copy()
+        if b is not None:        
+            prog = prog.combine(b.copy())      
+            prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
+            prog.product_map.unload()
+        else:        
+            prog.add_rxn(i, len(a.rxn_tree)-1)
+    else:
+        assert not a.product_map._loaded
+        prog = deepcopy(a)
+        if b is not None:
+            prog = prog.combine(b)        
+            prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
+        else:
+            prog.add_rxn(i, len(a.rxn_tree)-1)
     logger.info(f"done {task_descr}")
     return prog
+        
+
 
 
 
@@ -224,10 +234,21 @@ def expand_programs(args, all_progs, size):
 
     all_progs[size] = []
     for j in range(num_batches):
+        expand = False
         if os.path.exists(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl")):
             logger.info(f"loading {prefix}_{j}.pkl")
             progs = pickle.load(open(os.path.join(args.cache_dir, f"{prefix}_{j}.pkl"), 'rb'))
+            for p in progs:
+                if isinstance(p.product_map, ProductMap):
+                    if not os.path.exists(p.product_map.fpath):
+                        expand = True
+                else:
+                    for fpath in p.product_map.fpaths.values():
+                        if not os.path.exists(fpath):
+                            expand = True
         else:
+            expand = True
+        if expand:
             pargs_batch = pargs[j*args.program_batch_size:(j+1)*args.program_batch_size]        
             logger.info(f"=====expanding {len(pargs_batch)} programs (batch {j}/{num_batches})=====")
             if args.ncpu > 1:
@@ -295,7 +316,7 @@ def create_run_programs(args, bbf, size=3):
     logger.info('args:{}'.format(pprint.pformat(args)))
     if args.cache_dir:
         os.makedirs(args.cache_dir, exist_ok=True)
-    for d in range(1, size+1):
+    for d in range(1, size+1):      
         cache_fpath = os.path.join(args.cache_dir, f"{d}.pkl")
         exist = os.path.exists(cache_fpath)
         if args.cache_dir and exist:
@@ -303,7 +324,34 @@ def create_run_programs(args, bbf, size=3):
             logger.info(f"loaded {len(all_progs[d])} size-{d} programs")
             all_progs[d] = filter_programs(all_progs[d])
             assert d in all_progs
+            """
+            Sanity checks
+            """
+            for d in all_progs:
+                for p in all_progs[d]:
+                    if isinstance(p.product_map, ProductMap):
+                        assert os.path.exists(p.product_map.fpath)
+                    else:
+                        for fpath in p.product_map.fpaths.values():
+                            if not os.path.exists(fpath):
+                                breakpoint()
             continue
+        if args.keep_prods and d == args.keep_prods+1:            
+            """
+            Now, it's time to convert all ProductMap to ProductMapLinks
+            using product maps in all_progs[d-1] as the "base" files
+            """   
+            logger.info("begin migrating to ProductMapLink")                 
+            for depth in range(1, d):
+                logger.info(f"begin migrating depth {depth}")                 
+                if args.ncpu:
+                    with mp.Pool(args.ncpu) as p:
+                        all_progs[depth] = p.map(Program.migrate, tqdm(all_progs[depth]))
+                else:
+                    for p in tqdm(all_progs[depth]):
+                        Program.migrate(p)                
+                logger.info(f"done migrating depth {depth}")          
+            logger.info(f"done migrating depth")            
         if d == 1: 
             progs = get_programs(bbf.rxns, args.keep_prods, size=1)
             all_progs = progs
