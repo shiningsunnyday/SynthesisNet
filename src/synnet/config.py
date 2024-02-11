@@ -12,6 +12,8 @@ NUM_THREADS = 1
 # Intermediates
 PRODUCT_DIR = "/ssd/msun415/program_cache-bb=10000-prods=1_new_product_map"
 PRODUCT_JSON = True
+MAX_DEPTH = 2
+NUM_POSS = 91
 
 # Pre-processed data
 DATA_PREPROCESS_DIR = "data/pre-process"

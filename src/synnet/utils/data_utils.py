@@ -29,7 +29,7 @@ from tqdm import tqdm
 import pickle
 from time import time
 from itertools import permutations, product
-from collections import defaultdict
+from collections import defaultdict, deque
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 from networkx.algorithms import weisfeiler_lehman_graph_hash
 import networkx as nx
@@ -675,24 +675,44 @@ class Program:
 
     
     @staticmethod
+    def hash_str(s):
+        # s is bytes string
+        return hashlib.md5(s).hexdigest() # deterministic hashing 
+
+
+    @staticmethod
     def hash_json(json_data):
-        return hashlib.md5(json.dumps(json_data, sort_keys=True).encode()).hexdigest() # deterministic hashing        
+        return Program.hash_str(json.dumps(json_data, sort_keys=True).encode())    
     
 
-    def hash(self, mask=None, return_json=False):
+    def get_path(self):
+        mask = []
+        for n in range(len(self.rxn_tree)):
+            b = 'rxn_id' in self.rxn_tree.nodes[n] and self.rxn_tree.nodes[n]['rxn_id'] != -1
+            mask.append(b)
+        hash_val = self.hash(mask)
+        return f"{hash_val}.json"
+    
+
+    def hash(self, mask, return_json=False, attrs=['rxn_id', 'depth', 'child']):
         # used to hash the partial state defined by mask
         # can also return the tree data defined by mask
+        # if attrs, keep only the attrs
+        rxn_tree_copy = deepcopy(self.rxn_tree)
+        for n in self.rxn_tree:
+            node_names = list(rxn_tree_copy.nodes[n])
+            for k in node_names:
+                if k not in attrs:
+                    rxn_tree_copy.nodes[n].pop(k)
         data = {}
-        if mask is None:
-            mask = [True for _ in self.rxn_tree]
-        for n in self.rxn_tree.nodes():
+        for n in rxn_tree_copy.nodes():
             if not mask[n]:
-                data[n] = self.rxn_tree.nodes[n]['rxn_id']
-                self.rxn_tree.nodes[n].pop('rxn_id')
-        json_data = nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)
+                data[n] = rxn_tree_copy.nodes[n]['rxn_id']
+                rxn_tree_copy.nodes[n].pop('rxn_id')
+        json_data = nx.tree_data(rxn_tree_copy, len(rxn_tree_copy)-1)        
         ans = self.hash_json(json_data)
         for n, r in data.items():
-            self.rxn_tree.nodes[n]['rxn_id'] = r
+            rxn_tree_copy.nodes[n]['rxn_id'] = r
         if return_json:
             return json_data        
         return str(ans)
@@ -712,6 +732,7 @@ class Program:
         if self.keep_prods:            
             dic['product_map'] = self.product_map.fpath
         return dic
+    
     
     
 
@@ -1839,7 +1860,8 @@ class Skeleton:
             if 'smiles' in self.tree.nodes[n]:
                 self.tree.nodes[n]['smiles'] = ''
             elif 'rxn_id' in self.tree.nodes[n]:
-                pass # for debug hashing
+                self.tree.nodes[n]['rxn_id'] = -1
+                self.tree.nodes[n]['smirks'] = 'C>>' # for debug hashing
                 # self.tree.nodes[n]['rxn_id'] = -1
             else:
                 raise
@@ -1912,12 +1934,14 @@ class Skeleton:
                 y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
                 # print(self.tree.nodes[n])            
             else:
-                print("bad smiles")
+                pass
+                # print("bad smiles")
         elif 'rxn_id' in self.tree.nodes[n]:
             if self.tree.nodes[n]['rxn_id'] != -1:
                 y[n][256:] = self.one_hot(91,self.tree.nodes[n]['rxn_id'])
             else:
-                print("bad rxn_id")
+                pass
+                # print("bad rxn_id")
         else:
             print("bad node")
 
@@ -2105,12 +2129,48 @@ class Skeleton:
                 
         return _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
 
+
+    @staticmethod
+    def ego_graph(graph, cur, level):
+        # re-index first, making sure the indexing is consistent with post-order during program synthesis
+        # bottom-first, left-first                    
+        graph = nx.ego_graph(graph, cur, level)
+        relabel = dict(zip(nx.dfs_postorder_nodes(graph), range(len(graph))))
+        graph = nx.relabel_nodes(graph, relabel)         
+        dists = dict(nx.shortest_path_length(graph, source=relabel[cur]))
+        max_depth = max(dists.values())+1
+        for tgt in dists:
+            graph.nodes[tgt]['depth'] = max_depth-dists[tgt]
+        return graph
+
+
+
+    @staticmethod
+    def label_depth(g, root):
+        dq = deque()
+        dq.append(root)
+        g.nodes[root]['depth'] = 1
+        max_depth = 0
+        while len(dq):
+            cur = dq.popleft()
+            for nex in g[cur]:
+                d = g.nodes[cur]['depth']+1
+                g.nodes[nex]['depth'] = d
+                dq.append(nex)
+                max_depth = max(max_depth, d)
+        for n in g:
+            g.nodes[n]['depth'] = max_depth-g.nodes[n]['depth']+1
+
+
+
     def rxn_graph(self):
         g = nx.induced_subgraph(self.tree, np.argwhere(self.rxns).flatten())
         g = g.copy()
+        root = None
         for a in g:
             for b in g:
                 if self.pred(b) == self.tree_root:
+                    root = b
                     continue                
                 if self.pred(self.pred(b)) == a:
                     child = 'left'
@@ -2119,6 +2179,8 @@ class Skeleton:
                             child = 'right'                            
                     g.add_edge(a, b)
                     g.nodes[b]['child'] = child    
+        
+        Skeleton.label_depth(g, root)        
         node_map = dict(zip(g.nodes(), range(self.rxns.sum())))
         reverse_node_map = dict(zip(range(self.rxns.sum()), g.nodes()))
         g = nx.relabel_nodes(g, node_map)

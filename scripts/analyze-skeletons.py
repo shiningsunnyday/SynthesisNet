@@ -56,12 +56,12 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
-    syntree_collection = SyntheticTreeSet()
-    syntrees = syntree_collection.load(args.input_file)
 
     if os.path.exists(args.skeleton_file):
         skeletons = pickle.load(open(args.skeleton_file, 'rb'))
     else:
+        syntree_collection = SyntheticTreeSet()
+        syntrees = syntree_collection.load(args.input_file)        
         sts = []
         for st in syntree_collection.sts:
             if st: 

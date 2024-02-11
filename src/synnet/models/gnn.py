@@ -71,6 +71,9 @@ class PtrDataset(Dataset):
     def __getitem__(self, idx):
         base, e, index = self.ptrs[idx]
         node_mask = sparse.load_npz(base+'_node_masks.npz').toarray()[index]
+        # smi = sparse.load_npz(base+'_smiles.npz').toarray()[index]
+        # if smi == 'CCNCC1=NNC(Cc2ccccc2CS(=O)(=O)N2CCCC2COC(C)(C)C)=N1':
+        #     breakpoint()
         num_nodes = self.edge_index[e].max()+1
         X = sparse.load_npz(base+'_Xs.npz').toarray()
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]

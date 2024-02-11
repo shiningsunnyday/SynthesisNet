@@ -15,14 +15,19 @@ import pandas as pd
 import pdb
 import os
 import pickle
+from copy import deepcopy
 
-from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES
-from synnet.data_generation.preprocessing import BuildingBlockFileHandler
+from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS
+from synnet.data_generation.preprocessing import BuildingBlockFileHandler, ReactionTemplateFileHandler
+from synnet.visualize.drawers import MolDrawer, RxnDrawer
+from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
+from synnet.visualize.visualizer import SkeletonVisualizer
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt, load_gnn_from_ckpt
 from synnet.models.gnn import PtrDataset
+from synnet.models.mlp import nn_search_list
 from synnet.MolEmbedder import MolEmbedder
-from synnet.utils.data_utils import ReactionSet, SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet
+from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
 from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search
 import torch
 from torch_geometric.data import Data
@@ -56,15 +61,119 @@ def _fetch_data(name: str) -> list[str]:
     else:  # Hopefully got a filename instead
         smiles = _fetch_data_from_file(name)
     return smiles
-    
+
+
+
+def fill_in(args, sk, n, logits, bb_emb, bbs):
+    """
+    if rxn
+        detect if n is within MAX_DEPTH of root
+        if not fill in as usual
+        if yes, find LCA (MAX_DEPTH from root), then use the subtree to constrain possibilities
+    else
+        find LCA (MAX_DEPTH from n), then use it to constrain possibilities
+    """            
+    rxn_graph, node_map, _ = sk.rxn_graph()    
+    if sk.rxns[n]:  
+        cur = node_map[n]  
+        mask_imposs = [False for _ in range(NUM_POSS)]            
+        paths = []
+        if rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
+            lca = cur
+            while rxn_graph.nodes[lca]['depth'] != MAX_DEPTH:
+                ancs = list(rxn_graph.predecessors(lca))
+                if ancs: 
+                    lca = ancs[0]
+                else: 
+                    break              
+            prog_graph = Skeleton.ego_graph(rxn_graph, lca, rxn_graph.nodes[lca]['depth'])                                
+            # use prog_graph to hash, navigate the file system
+            term = rxn_graph.nodes[cur]['rxn_id']
+            for rxn_id in range(NUM_POSS):
+                rxn_graph.nodes[cur]['rxn_id'] = rxn_id
+                p = Program(rxn_graph)
+                assert rxn_graph.nodes[lca]['path'][-5:] == '.json'
+                path_stem = rxn_graph.nodes[lca]['path'][:-5]
+                path_stem = Path(path_stem).stem
+                path = os.path.join(args.hash_dir, path_stem, p.get_path())
+                mask_imposs[rxn_id] = not os.path.exists(path)
+                if os.path.exists(path):
+                    paths.append(path)
+                else:
+                    paths.append('')
+            rxn_graph.nodes[cur]['rxn_id'] = term    
+        elif rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
+            # try every reaction, and use existence of hash to filter possibilites            
+            term = rxn_graph.nodes[cur]['rxn_id']
+            for rxn_id in range(NUM_POSS):
+                rxn_graph.nodes[cur]['rxn_id'] = rxn_id
+                p = Program(rxn_graph)
+                path = os.path.join(args.hash_dir, p.get_path())
+                mask_imposs[rxn_id] = not os.path.exists(path)
+                if os.path.exists(path):
+                    paths.append(path)
+                else:
+                    paths.append('')
+            rxn_graph.nodes[cur]['rxn_id'] = term
+        if sum(mask_imposs) < NUM_POSS:
+            logits[n][-NUM_POSS:][mask_imposs] = float("-inf")
+        rxn_id = logits[n][-NUM_POSS:].argmax(axis=-1).item()              
+        sk.modify_tree(n, rxn_id=rxn_id)
+        rxn_graph.nodes[cur]['rxn_id'] = rxn_id
+        sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]                
+        # mask the intermediates so they're not considered on frontier
+        for succ in sk.tree.successors(n):
+            if not sk.leaves[succ]:
+                sk.mask = [succ]
+        sk.tree.nodes[n]['path'] = paths[rxn_id]
+        # print("path", os.path.join(args.hash_dir, p.get_path()))            
+    else:   
+        assert sk.leaves[n]
+        emb_bb = logits[n][:-NUM_POSS]
+        pred = list(sk.tree.predecessors(n))[0]
+        path = sk.tree.nodes[pred]['path']
+        exist = os.path.exists(path)
+        exist = False
+        if exist:
+            e = str(node_map[pred])
+            data = json.load(open(path))
+            succs = list(sk.tree.successors(pred))
+            second = len(succs) == 2 and n == succs[1]
+            indices = [bbs.index(smi) for smi in data['bbs'][e][second]]
+            bb_ind = nn_search_list(emb_bb, bb_emb[indices]).item()                         
+            smiles = bbs[indices[bb_ind]]
+        else:
+            bb_ind = nn_search_list(emb_bb, bb_emb).item()                   
+            smiles = bbs[bb_ind]
+        sk.modify_tree(n, smiles=smiles)    
+
+
+
+def pick_node(sk, logits):
+    """
+    implement strategies here
+    """
+    # pick frontier-rxn with highest logit if there is frontier-rxn
+    # else pick random bb
+    best_conf = float("-inf")
+    best_rxn_n = None
+    for n in logits:
+        if sk.rxns[n]:
+            conf = logits[n][-NUM_POSS:].max()
+            if conf > best_conf:
+                best_conf = conf
+                best_rxn_n = n
+    if best_rxn_n is not None:
+        return n
+    else:
+        return list(logits)[0]
 
 
 @torch.no_grad()
-def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, mol_embedder):
+def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblocks, skviz=None):
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
-    model_bb.eval()  
-    rxn_graph, node_map, _ = sk.rxn_graph()
+    model_bb.eval()      
     while ((~sk.mask) & (sk.rxns | sk.leaves)).any():
         """
         while there's reaction nodes or leaf building blocks to fill in
@@ -73,52 +182,38 @@ def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, mol_embedder):
             pick the highest confidence one
             fill it in
         """        
-        # prediction problem
+        
+        # prediction problem        
         _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
-        edge_input = torch.tensor(sk.tree_edges, dtype=torch.int64)
+        for i in range(len(X)):
+            if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
+                X[i] = 0
+        
+        edges = sk.tree_edges
+        tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
+        edge_input = torch.tensor(tree_edges, dtype=torch.int64)        
         pe = PtrDataset.positionalencoding1d(32, len(X))
-        x_input = np.concatenate((X, pe), axis=-1)
+        x_input = np.concatenate((X, pe), axis=-1)        
         data_rxn = Data(edge_index=edge_input, x=torch.Tensor(X))
         data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input))
         logits_rxn = model_rxn(data_rxn)
         logits_bb = model_bb(data_bb)
         logits = {}
         frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
-        for n in frontier_nodes:            
-            if sk.rxns[n]:                
+        for n in frontier_nodes:
+            if sk.rxns[n]:
                 logits[n] = logits_rxn[n]
-            else:
-                try:
-                    assert sk.leaves[n]
-                except:
-                    breakpoint()
-                logits[n] = logits_bb[n]
-        for n in logits:
-            """
-            try to build the longest sequence of predecessor rxns as possible
-            to constrain the output
-            """
-            if sk.rxns[n]:  
-                cur = node_map[n]              
-                level = 0
-                while list(rxn_graph.predecessors(cur)): # still has ancestor
-                    cur = list(rxn_graph.predecessors(cur))[0]                
-                    level += 1
-                    # everything within level dist of cur
-                    prog_graph = nx.ego_graph(rxn_graph, cur, level)
-                    breakpoint()
-                if level:
-                    # use prog_graph to hash, navigate the file system
-                    breakpoint()                
-                rxn_id = logits[n][-91:].argmax(axis=-1).item()
-                sk.modify_tree(n, rxn_id=rxn_id)
-                sk.mask = [succ for succ in sk.tree.successors(n) if not sk.leaves[succ]] 
-            else:           
-                breakpoint()     
-                bb_emb = logits[n][:-91]                
-                sk.modify_tree(n)                
-            
-
+            else:                
+                assert sk.leaves[n]               
+                logits[n] = logits_bb[n]        
+        n = pick_node(sk, logits)
+        fill_in(args, sk, n, logits, bb_emb, bblocks)                
+        if skviz is not None:
+            mermaid_txt = skviz.write(node_mask=sk.mask)             
+            mask_str = ''.join(map(str,sk.mask))
+            outfile = skviz.path / f"skeleton_{sk.index}_{mask_str}.md"  
+            SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)      
+            print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
         # # get frontier rxns     
         # frontier_rxns = np.array([False for _ in range(len(sk.tree))])
         # for n in np.argwhere((~sk.mask) & sk.rxns).flatten():
@@ -137,7 +232,7 @@ def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, mol_embedder):
         #     dirpath = os.path.join(cur_dir, f"{hash_val}")
         #     if os.path.exists(fpath):
         #         data = json.load(open(fpath, 'r'))
-        #         imposs = np.bool([True for _ in range(91)])
+        #         imposs = np.bool([True for _ in range(NUM_POSS)])
         #         imposs[data['rxn_ids']] = False
         #         cur_dir = dirpath
         #     else:
@@ -145,7 +240,6 @@ def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, mol_embedder):
         # else:
         #     cur_dir = hash_dir
         #     imposs = []        
-
         
     return sk
 
@@ -185,15 +279,24 @@ def get_args():
         "--ckpt-rxn", type=str, help="Model checkpoint to use"
     )    
     parser.add_argument(
+        "--syntree-set-file",
+        type=str,
+        required=True,
+        help="Input file for the ground-truth syntrees to lookup target smiles in",
+    )          
+    parser.add_argument(
         "--skeleton-set-file",
         type=str,
         required=True,
         help="Input file for the ground-truth skeletons to lookup target smiles in",
-    )           
+    )                
     parser.add_argument(
         "--hash-dir",
         default="",
         required=True
+    )
+    parser.add_argument(
+        "--out-dir"        
     )
     # Parameters
     parser.add_argument(
@@ -201,6 +304,10 @@ def get_args():
         type=str,
         default="test",
         help="Choose from ['train', 'valid', 'test', 'chembl'] or provide a file with one SMILES per line.",
+    )
+    # Visualization
+    parser.add_argument(
+        "--mermaid"        , action='store_true'
     )
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
@@ -215,13 +322,40 @@ if __name__ == "__main__":
     args = get_args()
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
 
+    # ... reaction templates
+    rxns = ReactionSet().load(args.rxns_collection_file).rxns
+    logger.info(f"Successfully read {args.rxns_collection_file}.")
+    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)    
+
     # Load skeleton set
     sk_set = None
-    if args.skeleton_set_file:
-        syntree_set = SyntheticTreeSet().load(args.skeleton_set_file)                
-        # Decode
-        syntree_set = [syntree for syntree in syntree_set if len(syntree.reactions) == 2]       
+    if args.syntree_set_file:
+        syntree_set_all = SyntheticTreeSet().load(args.syntree_set_file)                
+        skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
+        skeleton_set = SkeletonSet().load_skeletons(skeletons)        
+        syntree_set = []
+        # SKELETON_INDEX = [ind for ind in range(len(skeleton_set.sks)) if len(list(skeleton_set.skeletons)[ind].reactions)==2]
+        SKELETON_INDEX = [7]
+        # rep = set()
+        for syntree in syntree_set_all:        
+            index = skeleton_set.lookup[syntree.root.smiles][0].index    
+            if len(skeleton_set.lookup[syntree.root.smiles]) == 1:
+                if index in SKELETON_INDEX:
+                # if len(syntree.reactions) == 2:
+                #     if rxns[syntree.reactions[0].rxn_id].num_reactant == 2:
+                #         if rxns[syntree.reactions[1].rxn_id].num_reactant == 1:
+                #             breakpoint()
+                    syntree_set.append(syntree)
+                # if index in [0,1,2,3,4]:
+                #     syntree_set.append(syntree)
+        print(f"{len(syntree_set)}/{len(syntree_set_all)} syntrees")
         targets = [syntree.root.smiles for syntree in syntree_set]
+        lookup = {}
+        # Compute the gold skeleton
+        all_smiles = dict(zip([st.root.smiles for st in syntree_set], range(len(syntree_set))))
+        for i, target in enumerate(targets):
+            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)
+            lookup[target] = sk
     else:
 
         # Load data ...
@@ -236,18 +370,14 @@ if __name__ == "__main__":
     bblocks_dict = {block: i for i, block in enumerate(bblocks)}
     logger.info(f"Successfully read {args.building_blocks_file}.")
 
-    # ... reaction templates
-    rxns = ReactionSet().load(args.rxns_collection_file).rxns
-    logger.info(f"Successfully read {args.rxns_collection_file}.")
-
     # # ... building block embedding
     bblocks_molembedder = (
         MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
     )
     bb_emb = bblocks_molembedder.get_embeddings()
+    bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
     logger.info("...loading data completed.")
-
     # ... models
     logger.info("Start loading models from checkpoints...")  
     rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn))
@@ -257,23 +387,43 @@ if __name__ == "__main__":
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
 
-
-    lookup = {}
-    # Compute the gold skeleton
-    all_smiles = dict(zip([st.root.smiles for st in syntree_set], range(len(syntree_set))))
-    for target in targets:
-        index = all_smiles[target]
-        sk = Skeleton(syntree_set[index], -1)
-        lookup[target] = sk
-
     if args.ncpu == 1:
         results = []
-        for smi in targets:
-            sk = lookup[smi]
+        total_correct = 0
+        total_incorrect = {}
+        for no, smi in enumerate(targets):
+            sk = deepcopy(lookup[smi])
+            tree_id = str(np.array(sk.tree.edges))
+            if tree_id not in total_incorrect: 
+                total_incorrect[tree_id] = {}
             sk.clear_tree()
             sk.modify_tree(sk.tree_root, smiles=smi)
-            sk = wrapper_decoder(args.hash_dir, sk, rxn_gnn, bb_gnn, bblocks_molembedder)
-            breakpoint()
+            if args.mermaid:
+                skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
+            else:
+                skviz = None
+            sk = wrapper_decoder(args.hash_dir, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
+            correct = True
+            preorder = list(nx.dfs_preorder_nodes(sk.tree, source=sk.tree_root))
+            for i in preorder:                
+                if sk.rxns[i]:
+                    if sk.tree.nodes[i]['rxn_id'] != lookup[smi].tree.nodes[i]['rxn_id']:
+                        correct = False
+                        if i not in total_incorrect[tree_id]:
+                            total_incorrect[tree_id][i] = 0
+                        total_incorrect[tree_id][i] += 1
+                        break
+                elif sk.leaves[i]:
+                    if sk.tree.nodes[i]['smiles'] != lookup[smi].tree.nodes[i]['smiles']:
+                        correct = False
+                        if i not in total_incorrect[tree_id]:
+                            total_incorrect[tree_id][i] = 0
+                        total_incorrect[tree_id][i] += 1
+                        break
+            total_correct += correct
+            print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
+            print(f"{total_correct}/{no+1}")            
+        
 
     # else:
     #     for i in range(len(targets)):

@@ -268,7 +268,7 @@ class GNN(pl.LightningModule):
             if y_rxn.shape[0]:
                 ce_loss = F.cross_entropy(y_hat_rxn, y_rxn)   
                 self.log(f"train_ce_loss", ce_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-                loss += ce_loss
+                loss += ce_loss               
         if "mse" in self.loss:
             if y_bb.shape[0]:
                 mse_loss = F.mse_loss(y_hat_bb, y_bb)       
