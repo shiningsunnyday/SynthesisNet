@@ -190,9 +190,9 @@ def expand_program(i, a, b=None):
             prog.add_rxn(i, len(a.rxn_tree)-1)
     else:
         assert not a.product_map._loaded
-        prog = deepcopy(a)
+        prog = a.copy()
         if b is not None:
-            prog = prog.combine(b)        
+            prog = prog.combine(b.copy())        
             prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
         else:
             prog.add_rxn(i, len(a.rxn_tree)-1)
@@ -224,6 +224,7 @@ def expand_programs(args, all_progs, size):
                 for a in range(len(A)):
                     for b in range(len(B)):   
                         pargs.append((i, A[a], B[b]))
+            # TODO: add all the cases of only one reaction, but i is also entry
     """
     Create a hash of args, all_progs, size
     Only if EVERYTHING is the same, use checkpointing
@@ -308,6 +309,32 @@ def get_descr(all_progs):
     return descr
 
 
+def get_cache_fpaths(all_progs):
+    fpaths = []
+    for d in all_progs:
+        for p in all_progs[d]:
+            if isinstance(p.product_map, ProductMap):
+                assert os.path.exists(p.product_map.fpath)
+                fpaths.append(p.product_map.fpath)
+            else:
+                for fpath in p.product_map.fpaths.values():
+                    if not os.path.exists(fpath):
+                        breakpoint()  
+                    fpaths.append(fpath)
+    return fpaths
+
+
+def clean_cache(args, all_progs):
+    logger = logging.getLogger('global_logger')
+    fpath_set = set(get_cache_fpaths(all_progs))
+    logger.info(f"begin cleaning cache, keep {len(fpath_set)} fpaths")
+    removed = 0
+    for f in os.listdir(args.cache_dir):
+        if os.path.join(args.cache_dir, f) not in fpath_set:
+            os.remove(os.path.join(args.cache_dir, f))
+            removed += 1
+    logger.info(f"finish cleaning cache, removed {removed}")    
+
 
 def create_run_programs(args, bbf, size=3):     
     if args.visualize_dir:
@@ -327,14 +354,8 @@ def create_run_programs(args, bbf, size=3):
             """
             Sanity checks
             """
-            for d in all_progs:
-                for p in all_progs[d]:
-                    if isinstance(p.product_map, ProductMap):
-                        assert os.path.exists(p.product_map.fpath)
-                    else:
-                        for fpath in p.product_map.fpaths.values():
-                            if not os.path.exists(fpath):
-                                breakpoint()
+            for f in get_cache_fpaths(all_progs):
+                assert os.path.exists(f)
             continue
         if args.keep_prods and d == args.keep_prods+1:            
             """
@@ -445,11 +466,17 @@ def create_run_programs(args, bbf, size=3):
         all_progs[d] = filter_programs(progs)
         logger.info(f"done! {len(all_progs[d])} size-{d} programs")
 
+        # Eliminate unnecessary cache                
+        clean_cache(args, all_progs)
+
         if args.cache_dir and not exist:   
             logger.info(get_descr(all_progs))  
             logger.info(f"begin cache-dumping all programs at {cache_fpath}")  
             pickle.dump(all_progs, open(cache_fpath, 'wb'))
             logger.info(f"done cache-dumping all programs at {cache_fpath}")                           
+
+        
+
     return all_progs
 
 

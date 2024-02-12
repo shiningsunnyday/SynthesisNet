@@ -10,7 +10,8 @@ NUM_THREADS = 1
 # TODO: Remove these paths bit by bit
 
 # Intermediates
-PRODUCT_DIR = "/ssd/msun415/program_cache-bb=10000-prods=1_new_product_map"
+# PRODUCT_DIR = "/ssd/msun415/program_cache-bb=10000-prods=1_new_product_map"
+PRODUCT_DIR = "/ssd/msun415/program_cache-bb=10-prods=2/"
 PRODUCT_JSON = True
 MAX_DEPTH = 2
 NUM_POSS = 91

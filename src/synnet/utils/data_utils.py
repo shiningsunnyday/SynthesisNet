@@ -477,8 +477,11 @@ class ProductMapLink:
                 offset = 0
                 if isinstance(fpath, tuple):
                     offset, fpath = fpath
-                    self.fpaths[entry_key] = fpath                         
-                self._product_map[entry_key] = (json.load if PRODUCT_JSON else pickle.load)(open(fpath, 'r' if PRODUCT_JSON else 'rb'))
+                    self.fpaths[entry_key] = fpath  
+                try:                       
+                    self._product_map[entry_key] = (json.load if PRODUCT_JSON else pickle.load)(open(fpath, 'r' if PRODUCT_JSON else 'rb'))
+                except:
+                    print(fpath)
                 if offset:
                     n = entry_key
                     for r in self._product_map[n]:
