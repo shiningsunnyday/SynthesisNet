@@ -13,6 +13,7 @@ import numpy as np
 np.random.seed(42)
 import pandas as pd
 import pdb
+from tqdm import tqdm
 import os
 import pickle
 from copy import deepcopy
@@ -63,8 +64,19 @@ def _fetch_data(name: str) -> list[str]:
     return smiles
 
 
+def get_anc(cur, rxn_graph):
+    lca = cur
+    while rxn_graph.nodes[lca]['depth'] != MAX_DEPTH:
+        ancs = list(rxn_graph.predecessors(lca))
+        if ancs: 
+            lca = ancs[0]
+        else: 
+            break         
+    return lca         
 
-def fill_in(args, sk, n, logits, bb_emb, bbs):
+
+
+def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
     """
     if rxn
         detect if n is within MAX_DEPTH of root
@@ -73,85 +85,92 @@ def fill_in(args, sk, n, logits, bb_emb, bbs):
     else
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
     """            
-    rxn_graph, node_map, _ = sk.rxn_graph()    
+    rxn_graph, node_map, _ = sk.rxn_graph()       
+    max_depth = max([rxn_graph.nodes[n]['depth'] for n in rxn_graph])
     if sk.rxns[n]:  
         cur = node_map[n]  
         mask_imposs = [False for _ in range(NUM_POSS)]            
-        paths = []
-        if rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
-            lca = cur
-            while rxn_graph.nodes[lca]['depth'] != MAX_DEPTH:
-                ancs = list(rxn_graph.predecessors(lca))
-                if ancs: 
-                    lca = ancs[0]
-                else: 
-                    break              
-            prog_graph = Skeleton.ego_graph(rxn_graph, lca, rxn_graph.nodes[lca]['depth'])                                
-            # use prog_graph to hash, navigate the file system
-            term = rxn_graph.nodes[cur]['rxn_id']
-            for rxn_id in range(NUM_POSS):
-                rxn_graph.nodes[cur]['rxn_id'] = rxn_id
-                p = Program(rxn_graph)
-                assert rxn_graph.nodes[lca]['path'][-5:] == '.json'
-                path_stem = rxn_graph.nodes[lca]['path'][:-5]
-                path_stem = Path(path_stem).stem
-                path = os.path.join(args.hash_dir, path_stem, p.get_path())
-                mask_imposs[rxn_id] = not os.path.exists(path)
-                if os.path.exists(path):
-                    paths.append(path)
-                else:
-                    paths.append('')
-            rxn_graph.nodes[cur]['rxn_id'] = term    
-        elif rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
-            # try every reaction, and use existence of hash to filter possibilites            
-            term = rxn_graph.nodes[cur]['rxn_id']
-            for rxn_id in range(NUM_POSS):
-                rxn_graph.nodes[cur]['rxn_id'] = rxn_id
-                p = Program(rxn_graph)
-                path = os.path.join(args.hash_dir, p.get_path())
-                mask_imposs[rxn_id] = not os.path.exists(path)
-                if os.path.exists(path):
-                    paths.append(path)
-                else:
-                    paths.append('')
-            rxn_graph.nodes[cur]['rxn_id'] = term
-        if sum(mask_imposs) < NUM_POSS:
-            logits[n][-NUM_POSS:][mask_imposs] = float("-inf")
-        rxn_id = logits[n][-NUM_POSS:].argmax(axis=-1).item()              
-        sk.modify_tree(n, rxn_id=rxn_id)
-        rxn_graph.nodes[cur]['rxn_id'] = rxn_id
-        sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]                
+        paths = []    
+        if 'rxn' in args.filter_only:            
+            attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
+            if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
+                # try every reaction, and use existence of hash to filter possibilites            
+                term = rxn_graph.nodes[cur][attr_name]
+                for rxn_id in range(NUM_POSS):
+                    rxn_graph.nodes[cur][attr_name] = rxn_id
+                    p = Program(rxn_graph)
+                    path = os.path.join(args.hash_dir, p.get_path())
+                    mask_imposs[rxn_id] = not os.path.exists(path)
+                    if os.path.exists(path):
+                        paths.append(path)
+                    else:
+                        paths.append('')
+                rxn_graph.nodes[cur][attr_name] = term
+            elif rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
+                lca = get_anc(cur, rxn_graph)
+                # use prog_graph to hash, navigate the file system
+                term = rxn_graph.nodes[cur][attr_name]
+                for rxn_id in range(NUM_POSS):
+                    rxn_graph.nodes[cur][attr_name] = rxn_id
+                    p = Program(rxn_graph)
+                    if 'path' not in rxn_graph.nodes[lca]:
+                        breakpoint()
+                    if rxn_graph.nodes[lca]['path'][-5:] == '.json':                
+                        path_stem = rxn_graph.nodes[lca]['path'][:-5]                
+                        path_stem = Path(path_stem).stem
+                        path = os.path.join(args.hash_dir, path_stem, p.get_path())
+                        mask_imposs[rxn_id] = not os.path.exists(path)
+                        if os.path.exists(path):
+                            paths.append(path)
+                        else:
+                            paths.append('')                        
+                    else:
+                        mask_imposs[rxn_id] = True
+                        paths.append('')
+
+                rxn_graph.nodes[cur][attr_name] = term            
+            if sum(mask_imposs) < NUM_POSS:
+                logits[n][-NUM_POSS:][mask_imposs] = float("-inf")        
+        rxn_id = logits[n][-NUM_POSS:].argmax(axis=-1).item()     
+        # Sanity check for forcing eval
+        sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
+        sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
+        rxn_graph.nodes[cur]['rxn_id'] = rxn_id                   
         # mask the intermediates so they're not considered on frontier
         for succ in sk.tree.successors(n):
             if not sk.leaves[succ]:
                 sk.mask = [succ]
-        sk.tree.nodes[n]['path'] = paths[rxn_id]
+        if 'rxn' in args.filter_only:
+            sk.tree.nodes[n]['path'] = paths[rxn_id]
         # print("path", os.path.join(args.hash_dir, p.get_path()))            
     else:   
         assert sk.leaves[n]
         emb_bb = logits[n][:-NUM_POSS]
-        pred = list(sk.tree.predecessors(n))[0]
-        path = sk.tree.nodes[pred]['path']
-        exist = os.path.exists(path)
-        exist = False
-        if exist:
+        pred = list(sk.tree.predecessors(n))[0]           
+        if 'bb' in args.filter_only:            
+            path = sk.tree.nodes[pred]['path']     
+            exist = os.path.exists(path)
+        else:
+            exist = False
+        if exist:            
             e = str(node_map[pred])
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
             second = len(succs) == 2 and n == succs[1]
             indices = [bbs.index(smi) for smi in data['bbs'][e][second]]
-            bb_ind = nn_search_list(emb_bb, bb_emb[indices]).item()                         
+            bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
             smiles = bbs[indices[bb_ind]]
-        else:
-            bb_ind = nn_search_list(emb_bb, bb_emb).item()                   
+        else:            
+            bb_ind = nn_search_list(emb_bb, bb_emb, top_k=top_bb).item()                   
             smiles = bbs[bb_ind]
-        sk.modify_tree(n, smiles=smiles)    
+        sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
 
 
 
 def pick_node(sk, logits):
     """
-    implement strategies here
+    implement strategies here,
+    each node returned will add a beam to decoding
     """
     # pick frontier-rxn with highest logit if there is frontier-rxn
     # else pick random bb
@@ -164,84 +183,127 @@ def pick_node(sk, logits):
                 best_conf = conf
                 best_rxn_n = n
     if best_rxn_n is not None:
-        return n
+        return [n]
     else:
-        return list(logits)[0]
+        return [n for n in logits if not sk.rxns[n]]
 
 
 @torch.no_grad()
-def wrapper_decoder(hash_dir, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblocks, skviz=None):
+def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblocks, skviz=None):
+    top_k = args.top_k
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
-    model_bb.eval()      
-    while ((~sk.mask) & (sk.rxns | sk.leaves)).any():
-        """
-        while there's reaction nodes or leaf building blocks to fill in
-            compute, for each vacant reaction node or vacant building block, the possible
-            predict on all of these
-            pick the highest confidence one
-            fill it in
-        """        
-        
-        # prediction problem        
-        _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
-        for i in range(len(X)):
-            if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
-                X[i] = 0
-        
-        edges = sk.tree_edges
-        tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
-        edge_input = torch.tensor(tree_edges, dtype=torch.int64)        
-        pe = PtrDataset.positionalencoding1d(32, len(X))
-        x_input = np.concatenate((X, pe), axis=-1)        
-        data_rxn = Data(edge_index=edge_input, x=torch.Tensor(X))
-        data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input))
-        logits_rxn = model_rxn(data_rxn)
-        logits_bb = model_bb(data_bb)
-        logits = {}
-        frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
-        for n in frontier_nodes:
-            if sk.rxns[n]:
-                logits[n] = logits_rxn[n]
-            else:                
-                assert sk.leaves[n]               
-                logits[n] = logits_bb[n]        
-        n = pick_node(sk, logits)
-        fill_in(args, sk, n, logits, bb_emb, bblocks)                
-        if skviz is not None:
-            mermaid_txt = skviz.write(node_mask=sk.mask)             
-            mask_str = ''.join(map(str,sk.mask))
-            outfile = skviz.path / f"skeleton_{sk.index}_{mask_str}.md"  
-            SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)      
-            print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
-        # # get frontier rxns     
-        # frontier_rxns = np.array([False for _ in range(len(sk.tree))])
-        # for n in np.argwhere((~sk.mask) & sk.rxns).flatten():
-        #     if sk.pred(n)==sk.tree_root or sk.mask[sk.pred(sk.pred(n))]:
-        #         frontier_rxns[n] = True
-        # frontier_rxns = np.bool_(frontier_rxns)
-        # # get frontier bbs
-        # frontier_bbs = np.array([False for _ in range(len(sk.tree))])
-        # for n in np.argwhere((~sk.mask) & (~sk.rxns) & (sk.leaves)).flatten():
-        #     if sk.mask[sk.pred(n)]: # parent present
-        #         frontier_bbs[n] = True
+    model_bb.eval()
+    # Following how SynNet reports reconstruction accuracy, we decode top-3 reactants, 
+    # corresponding to the first bb chosen
+    # To make the code more general, we implement this with a stack
+    sks = [sk]    
+    final_sks = []
+    while len(sks):
+        sk = sks.pop(-1)
+        if ((~sk.mask) & (sk.rxns | sk.leaves)).any():
+            """
+            while there's reaction nodes or leaf building blocks to fill in
+                compute, for each vacant reaction node or vacant building block, the possible
+                predict on all of these
+                pick the highest confidence one
+                fill it in
+            """        
+            
+            # prediction problem        
+            _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
+            for i in range(len(X)):
+                if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
+                    X[i] = 0
+            
+            edges = sk.tree_edges
+            tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
+            edge_input = torch.tensor(tree_edges, dtype=torch.int64)        
+            pe = PtrDataset.positionalencoding1d(32, len(X))
+            x_input = np.concatenate((X, pe), axis=-1)        
+            data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input))
+            data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input))
+            logits_rxn = model_rxn(data_rxn)
+            logits_bb = model_bb(data_bb)
+            logits = {}
+            frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
+            for n in frontier_nodes:
+                if sk.rxns[n]:
+                    logits[n] = logits_rxn[n]
+                else:                
+                    assert sk.leaves[n]               
+                    logits[n] = logits_bb[n]        
+            poss_n = pick_node(sk, logits)                        
+            for n in poss_n:
+                sk_n = deepcopy(sk)
+                first_bb = sk_n.leaves[n] and (sk_n.leaves)[sk_n.mask == 1].sum() == 0
+                if top_k > 1 and first_bb: # first bb                
+                    for k in range(1, 1+top_k):
+                        sk_copy = deepcopy(sk_n)
+                        fill_in(args, sk_copy, n, logits, bb_emb, rxn_templates, bblocks, top_bb=k)
+                        sks.append(sk_copy)
+                else:
+                    fill_in(args, sk_n, n, logits, bb_emb, rxn_templates, bblocks, top_bb=1)
+                    sks.append(sk_n)
+                    if skviz is not None:
+                        mermaid_txt = skviz.write(node_mask=sk_n.mask)             
+                        mask_str = ''.join(map(str,sk_n.mask))
+                        outfile = skviz.path / f"skeleton_{sk_n.index}_{mask_str}.md"  
+                        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)      
+                        print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
+        else:
+            final_sks.append(sk)
+    print(len(final_sks), "beams")
+    return final_sks
 
-        # if sk.mask.sum()>1:
-        #     hash_val = sk.hash()
-        #     fpath = os.path.join(cur_dir, f"{hash_val}.json")
-        #     dirpath = os.path.join(cur_dir, f"{hash_val}")
-        #     if os.path.exists(fpath):
-        #         data = json.load(open(fpath, 'r'))
-        #         imposs = np.bool([True for _ in range(NUM_POSS)])
-        #         imposs[data['rxn_ids']] = False
-        #         cur_dir = dirpath
-        #     else:
-        #         breakpoint()
-        # else:
-        #     cur_dir = hash_dir
-        #     imposs = []        
-        
-    return sk
+
+def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
+    if method == 'preorder':
+        if forcing:
+            for n in sk.tree:
+                attrs = [attr for attr in list(sk.tree.nodes[n]) if '_forcing' in attr]
+                for attr in attrs:
+                    # we re-store the attributes containing predictions into 
+                    # original attributes
+                    sk.tree.nodes[n][attr[:-len('_forcing')]] = sk.tree.nodes[n][attr]
+        total_incorrect = {}
+        preorder = list(nx.dfs_preorder_nodes(sk.tree, source=sk.tree_root))
+        correct = True
+        seq_correct = []
+        for i in preorder:                
+            if sk.rxns[i]:
+                if sk.tree.nodes[i]['rxn_id'] != sk_true.tree.nodes[i]['rxn_id']:
+                    correct = False
+                    if i not in total_incorrect:
+                        total_incorrect[i] = 0
+                    total_incorrect[i] += 1                    
+                seq_correct.append(i not in total_incorrect)
+            elif sk.leaves[i]:
+                if sk.tree.nodes[i]['smiles'] != sk_true.tree.nodes[i]['smiles']:
+                    correct = False
+                    if i not in total_incorrect:
+                        total_incorrect[i] = 0
+                    total_incorrect[i] += 1   
+                seq_correct.append(i not in total_incorrect)
+        if forcing:                     
+            return seq_correct
+        else:
+            return correct, total_incorrect
+    else:
+        # compute intermediates and target
+        postorder = list(nx.dfs_postorder_nodes(sk.tree, source=sk.tree_root))
+        for i in postorder:
+            if sk.rxns[i]:
+                reactants = tuple(sk.tree.nodes[j]['smiles'] for j in list(sk.tree.successors(i)))            
+                if len(reactants) != rxns[sk.tree.nodes[i]['rxn_id']].num_reactant:
+                    return False
+                interm = rxns[sk.tree.nodes[i]['rxn_id']].run_reaction(reactants)              
+                pred = list(sk.tree.predecessors(i))[0]
+                if interm is None:
+                    return False
+                sk.tree.nodes[pred]['smiles'] = interm
+        correct = sk.tree.nodes[sk.tree_root]['smiles'] == sk_true.tree.nodes[sk_true.tree_root]['smiles']
+    return correct
 
 
 def get_args():
@@ -305,21 +367,20 @@ def get_args():
         default="test",
         help="Choose from ['train', 'valid', 'test', 'chembl'] or provide a file with one SMILES per line.",
     )
+    parser.add_argument("--top-k", default=1, type=int)
+    parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
+    parser.add_argument("--forcing-eval", action='store_true')
+    parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder'])
     # Visualization
-    parser.add_argument(
-        "--mermaid"        , action='store_true'
-    )
+    parser.add_argument("--mermaid", action='store_true')
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main(args):
     logger.info("Start.")
-
-    # Parse input args
-    args = get_args()
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
 
     # ... reaction templates
@@ -334,13 +395,32 @@ if __name__ == "__main__":
         skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
         skeleton_set = SkeletonSet().load_skeletons(skeletons)        
         syntree_set = []
-        # SKELETON_INDEX = [ind for ind in range(len(skeleton_set.sks)) if len(list(skeleton_set.skeletons)[ind].reactions)==2]
-        SKELETON_INDEX = [7]
-        # rep = set()
+        SKELETON_INDEX = []
+        for ind in range(len(skeleton_set.sks)):
+            # if len(list(skeleton_set.skeletons)[ind].reactions) == 2:            
+            sk = skeleton_set.sks[ind]
+            good = True
+            for idx in range(len(sk.tree)):
+                if sk.rxns[idx]:
+                    rxn_id = sk.tree.nodes[idx]['rxn_id']
+                    if rxns[rxn_id].num_reactant == 2:
+                        # if one is bb, one is rxn, not covered by enumeration
+                        succs = list(sk.tree.successors(idx))
+                        if sk.leaves[succs[0]] ^ sk.leaves[succs[1]]:
+                            good = False
+            if sk.rxns.sum() != 2:
+                good = False
+            if good:
+                SKELETON_INDEX.append(ind)        
+        
+        rep = set()
         for syntree in syntree_set_all:        
             index = skeleton_set.lookup[syntree.root.smiles][0].index    
             if len(skeleton_set.lookup[syntree.root.smiles]) == 1:
                 if index in SKELETON_INDEX:
+                # if index in SKELETON_INDEX and index not in rep:
+                    # rep.add(index)
+
                 # if len(syntree.reactions) == 2:
                 #     if rxns[syntree.reactions[0].rxn_id].num_reactant == 2:
                 #         if rxns[syntree.reactions[1].rxn_id].num_reactant == 1:
@@ -389,40 +469,58 @@ if __name__ == "__main__":
 
     if args.ncpu == 1:
         results = []
-        total_correct = 0
-        total_incorrect = {}
-        for no, smi in enumerate(targets):
+        total_incorrect = {} 
+        if args.forcing_eval:
+            correct_summary = {}
+        else:
+            total_correct = {}                   
+    
+        for no, smi in tqdm(enumerate(targets)):
             sk = deepcopy(lookup[smi])
             tree_id = str(np.array(sk.tree.edges))
             if tree_id not in total_incorrect: 
                 total_incorrect[tree_id] = {}
-            sk.clear_tree()
-            sk.modify_tree(sk.tree_root, smiles=smi)
+            if not args.forcing_eval and tree_id not in total_correct:
+                total_correct[tree_id] = {'correct': 0, 'total': 0}
+            if args.forcing_eval and tree_id not in correct_summary:
+                correct_summary[tree_id] = {'sum_pool_correct': 0, 'total_pool': 0}
+            sk.clear_tree(forcing=args.forcing_eval)
+            sk.modify_tree(sk.tree_root, smiles=smi)              
             if args.mermaid:
                 skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
             else:
-                skviz = None
-            sk = wrapper_decoder(args.hash_dir, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
-            correct = True
-            preorder = list(nx.dfs_preorder_nodes(sk.tree, source=sk.tree_root))
-            for i in preorder:                
-                if sk.rxns[i]:
-                    if sk.tree.nodes[i]['rxn_id'] != lookup[smi].tree.nodes[i]['rxn_id']:
-                        correct = False
-                        if i not in total_incorrect[tree_id]:
-                            total_incorrect[tree_id][i] = 0
-                        total_incorrect[tree_id][i] += 1
+                skviz = None  
+            sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                    
+            best_correct_steps = []
+            for sk in sks:
+                if args.forcing_eval:
+                    correct_steps = test_correct(sk, lookup[smi], rxns, method='preorder', forcing=True)
+                    if sum(correct_steps) >= sum(best_correct_steps):
+                        best_correct_steps = correct_steps                    
+                else:
+                    if args.test_correct_method == 'postorder':
+                        correct = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
+                    else:
+                        correct, total_incorrect[tree_id] = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
+                    if correct:
                         break
-                elif sk.leaves[i]:
-                    if sk.tree.nodes[i]['smiles'] != lookup[smi].tree.nodes[i]['smiles']:
-                        correct = False
-                        if i not in total_incorrect[tree_id]:
-                            total_incorrect[tree_id][i] = 0
-                        total_incorrect[tree_id][i] += 1
-                        break
-            total_correct += correct
-            print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
-            print(f"{total_correct}/{no+1}")            
+            if args.forcing_eval:
+                # if not correct:
+                #     # implement a procedure to check if target can be recovered another way
+                #     breakpoint()
+                correct_summary[tree_id]['sum_pool_correct'] += sum(best_correct_steps)
+                correct_summary[tree_id]['total_pool'] += len(best_correct_steps)                
+                correct_summary[tree_id]['step_by_step'] = correct_summary[tree_id]['sum_pool_correct']/correct_summary[tree_id]['total_pool']                
+            else:
+                total_correct[tree_id]['correct'] += correct
+                total_correct[tree_id]['total'] += 1
+            if args.forcing_eval:
+                summary = {k: v['step_by_step'] for (k, v) in correct_summary.items()}
+                print(f"step-by-step: {summary}")
+            else:                
+                # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
+                summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
+                print(f"total summary: {summary}")            
         
 
     # else:
@@ -466,3 +564,12 @@ if __name__ == "__main__":
     synthetic_tree_set.save(f"{output_dir}/decoded_syntrees.json.gz")
 
     logger.info("Completed.")
+
+
+
+if __name__ == "__main__":
+
+    # Parse input args
+    args = get_args()
+    breakpoint()
+    main(args)

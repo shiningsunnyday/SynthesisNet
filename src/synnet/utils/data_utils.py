@@ -691,7 +691,12 @@ class Program:
     def get_path(self):
         mask = []
         for n in range(len(self.rxn_tree)):
-            b = 'rxn_id' in self.rxn_tree.nodes[n] and self.rxn_tree.nodes[n]['rxn_id'] != -1
+            if 'rxn_id_forcing' in self.rxn_tree.nodes[n]:
+                b = self.rxn_tree.nodes[n]['rxn_id_forcing'] != -1
+            elif 'rxn_id' in self.rxn_tree.nodes[n]:
+                b = self.rxn_tree.nodes[n]['rxn_id'] != -1
+            else:
+                breakpoint()
             mask.append(b)
         hash_val = self.hash(mask)
         return f"{hash_val}.json"
@@ -736,7 +741,23 @@ class Program:
             dic['product_map'] = self.product_map.fpath
         return dic
     
-    
+
+    def combine_bi_mol(self, rxn_id, child='left'):
+        """
+        1. Add a reaction node rxn_id n
+        2. Connect it to len(rxn_tree)-1
+        3. Update child, depth
+        4. Update _entries at reactant_idx level to include n
+        """
+        assert child in ['left', 'right']
+        key = len(self.rxn_tree)
+        self.rxn_tree.add_node(key, rxn_id=rxn_id)           
+        self.rxn_tree.add_edge(key, key-1)
+        self.rxn_tree.nodes[key-1]['child'] = child
+        depth = self.rxn_tree.nodes[key-1]['depth'] +1
+        self.rxn_tree.nodes[key]['depth'] = depth
+        self._entries = self._entries + [key]        
+
     
 
     def add_rxn(self, id, left, right=None):
@@ -1840,30 +1861,37 @@ class Skeleton:
 
     
         
-    def modify_tree(self, i, smiles=None, rxn_id=-1):
+    def modify_tree(self, i, smiles=None, rxn_id=-1, suffix=''):
         """
         Fills node i with smiles or rxn_id
+        If suffix is given, add it to the attribute
         """
         if smiles is not None:
             if 'smiles' not in self.tree.nodes[i]:
                 breakpoint()
-            self.tree.nodes[i]['smiles'] = smiles
+            self.tree.nodes[i]['smiles'+suffix] = smiles
         if rxn_id != -1:
             if 'rxn_id' not in self.tree.nodes[i]:
                 breakpoint()
-            self.tree.nodes[i]['rxn_id'] = rxn_id
+            self.tree.nodes[i]['rxn_id'+suffix] = rxn_id
         self.mask = [i]
 
 
-    def clear_tree(self):
+    def clear_tree(self, forcing=False):
         """
         Clears the semantic information in the tree
         """
         for n in self.tree:
             if 'smiles' in self.tree.nodes[n]:
-                self.tree.nodes[n]['smiles'] = ''
+                if forcing:
+                    self.tree.nodes[n]['smiles_forcing'] = ''    
+                else:
+                    self.tree.nodes[n]['smiles'] = ''
             elif 'rxn_id' in self.tree.nodes[n]:
-                self.tree.nodes[n]['rxn_id'] = -1
+                if forcing:
+                    self.tree.nodes[n]['rxn_id_forcing'] = -1
+                else:
+                    self.tree.nodes[n]['rxn_id'] = -1
                 self.tree.nodes[n]['smirks'] = 'C>>' # for debug hashing
                 # self.tree.nodes[n]['rxn_id'] = -1
             else:
@@ -2153,7 +2181,7 @@ class Skeleton:
         dq = deque()
         dq.append(root)
         g.nodes[root]['depth'] = 1
-        max_depth = 0
+        max_depth = 1
         while len(dq):
             cur = dq.popleft()
             for nex in g[cur]:

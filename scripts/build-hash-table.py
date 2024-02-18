@@ -173,31 +173,57 @@ def run_program(prog):
 
 def expand_program(i, a, b=None):   
     logger = logging.getLogger('global_logger')   
-    prog_A_info = a.logging_info()
-    if b is not None:
-        prog_B_info = b.logging_info()
-        task_descr = f"joining program {prog_A_info} with {prog_B_info} with rxn_id {i}"
-    else:
-        task_descr = f"joining program {prog_A_info} with rxn_id {i}"
-    logger.info(f"begin {task_descr}")
-    if isinstance(a.product_map, ProductMap):
-        prog = a.copy()
-        if b is not None:        
-            prog = prog.combine(b.copy())      
-            prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
-            prog.product_map.unload()
-        else:        
-            prog.add_rxn(i, len(a.rxn_tree)-1)
-    else:
-        assert not a.product_map._loaded
-        prog = a.copy()
-        if b is not None:
-            prog = prog.combine(b.copy())        
-            prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
+    if a != [] and b != []:
+        prog_A_info = a.logging_info()
+        if b is None:
+            task_descr = f"joining program {prog_A_info} with rxn_id {i}"
         else:
-            prog.add_rxn(i, len(a.rxn_tree)-1)
-    logger.info(f"done {task_descr}")
-    return prog
+            prog_B_info = b.logging_info()
+            task_descr = f"joining program {prog_A_info} with {prog_B_info} with rxn_id {i}"      
+        logger.info(f"begin {task_descr}")
+        if isinstance(a.product_map, ProductMap):
+            prog = a.copy()
+            if b is None:            
+                prog.add_rxn(i, len(a.rxn_tree)-1)
+            else:
+                prog = prog.combine(b.copy())      
+                prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)
+                prog.product_map.unload()             
+        else:
+            assert not a.product_map._loaded
+            prog = a.copy()
+            if b is None:
+                prog.add_rxn(i, len(a.rxn_tree)-1)
+            else:
+                prog = prog.combine(b.copy())        
+                prog.add_rxn(i, len(a.rxn_tree)-1, len(prog.rxn_tree)-1)    
+        logger.info(f"done {task_descr}")
+    else:
+        # i is a bi-mol reaction, so i is also in _entries
+        # first: update _entries at the reactant_idx level properly
+        # then: add_rxn, updating the correct 'child'        
+        if b == []: # (i, a, []) means a is left child of i
+            prog_A_info = a.logging_info()
+            task_descr = f"joining program {prog_A_info}, [] with rxn_id {i}"
+            logger.info(f"begin {task_descr}")
+            if isinstance(a.product_map, ProductMap):
+                prog = a.copy()                
+            else:
+                assert not a.product_map._loaded
+                prog = a.copy()                
+            prog.combine_bi_mol(i, child='left')                          
+        else:
+            prog_B_info = b.logging_info()
+            task_descr = f"joining program [], {prog_B_info} with rxn_id {i}"
+            logger.info(f"begin {task_descr}")
+            if isinstance(b.product_map, ProductMap):
+                prog = b.copy()                
+            else:
+                assert not b.product_map._loaded
+                prog = b.copy()               
+            prog.combine_bi_mol(i, child='right')                    
+        logger.info(f"done {task_descr}")
+    return prog        
         
 
 
@@ -224,6 +250,11 @@ def expand_programs(args, all_progs, size):
                 for a in range(len(A)):
                     for b in range(len(B)):   
                         pargs.append((i, A[a], B[b]))
+
+            A = all_progs[size-1]
+            for a in range(len(A)):
+                pargs.append((i, A[a], [])) # a is left child
+                pargs.append((i, [], A[a])) # a is right child
             # TODO: add all the cases of only one reaction, but i is also entry
     """
     Create a hash of args, all_progs, size
