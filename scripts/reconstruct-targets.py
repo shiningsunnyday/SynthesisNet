@@ -152,7 +152,7 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
             exist = os.path.exists(path)
         else:
             exist = False
-        if exist:            
+        if exist:                     
             e = str(node_map[pred])
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
@@ -274,16 +274,12 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
             if sk.rxns[i]:
                 if sk.tree.nodes[i]['rxn_id'] != sk_true.tree.nodes[i]['rxn_id']:
                     correct = False
-                    if i not in total_incorrect:
-                        total_incorrect[i] = 0
-                    total_incorrect[i] += 1                    
+                    total_incorrect[i] = 1                    
                 seq_correct.append(i not in total_incorrect)
             elif sk.leaves[i]:
                 if sk.tree.nodes[i]['smiles'] != sk_true.tree.nodes[i]['smiles']:
                     correct = False
-                    if i not in total_incorrect:
-                        total_incorrect[i] = 0
-                    total_incorrect[i] += 1   
+                    total_incorrect[i] = 1   
                 seq_correct.append(i not in total_incorrect)
         if forcing:                     
             return seq_correct
@@ -304,6 +300,13 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
                 sk.tree.nodes[pred]['smiles'] = interm
         correct = sk.tree.nodes[sk.tree_root]['smiles'] == sk_true.tree.nodes[sk_true.tree_root]['smiles']
     return correct
+
+
+def update(dic_total, dic):
+    for k in dic:
+        if k not in dic_total:
+            dic_total[k] = 0
+        dic_total[k] += dic[k]
 
 
 def get_args():
@@ -343,7 +346,6 @@ def get_args():
     parser.add_argument(
         "--syntree-set-file",
         type=str,
-        required=True,
         help="Input file for the ground-truth syntrees to lookup target smiles in",
     )          
     parser.add_argument(
@@ -390,10 +392,10 @@ def main(args):
 
     # Load skeleton set
     sk_set = None
-    if args.syntree_set_file:
-        syntree_set_all = SyntheticTreeSet().load(args.syntree_set_file)                
+    if args.skeleton_set_file:        
         skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
         skeleton_set = SkeletonSet().load_skeletons(skeletons)        
+        syntree_set_all = [st for v in skeletons.values() for st in v]
         syntree_set = []
         SKELETON_INDEX = []
         for ind in range(len(skeleton_set.sks)):
@@ -407,16 +409,16 @@ def main(args):
                         # if one is bb, one is rxn, not covered by enumeration
                         succs = list(sk.tree.successors(idx))
                         if sk.leaves[succs[0]] ^ sk.leaves[succs[1]]:
-                            good = False
-            if sk.rxns.sum() != 2:
+                            good = False            
+            if sk.rxns.sum() > 2:
                 good = False
             if good:
                 SKELETON_INDEX.append(ind)        
-        
+        TOP_BBS = ['CC(C)NS(=O)(=O)c1ccccc1C(=O)O', 'CCNS(=O)(=O)c1cc([N+](=O)[O-])ccc1C(=O)O', 'CC(C)(C)NC(=O)c1ccccc1C(=O)O', 'O=C(O)c1ccccc1C(=O)NC12CC3CC(CC(C3)C1)C2', 'O=C(O)c1ccccc1C(=O)Nc1ccc(-c2ccccc2)cc1', 'O=C(O)c1ccccc1C(=O)Nc1ccccc1', 'O=C(O)c1ccccc1C(=O)Nc1ccccn1', 'CC(C)S(=O)(=O)c1ccccc1C(=O)O', 'O=C(O)c1ccccc1S(=O)(=O)C(F)F', 'Nc1cc(Cl)ccc1S', 'Nc1c(F)cc(Br)cc1S', 'Nc1cccnc1S', 'Nc1c(Br)cc(Br)cc1C=O', 'Nc1c(Cl)cc(Cl)cc1C=O', 'Cc1ccc(Cl)c(C=O)c1N', 'Cc1cc(Cl)cc(C=O)c1N', 'O=C1C(=O)c2ccc(Br)cc2-c2ccccc21', 'Nc1ccc(Br)cc1C=O', 'Nc1cc(Cl)cc(Cl)c1C=O', 'Nc1c(C=O)ccc(Br)c1F', 'Nc1c(Cl)cccc1C=O', 'Nc1ccc(Br)c(F)c1C=O', 'Nc1c(F)ccc(Cl)c1C=O', 'Nc1c(O)c(Br)cc(Br)c1C(=O)O', 'O=C(C(=O)c1ccc(F)cc1)c1ccc(F)cc1', 'O=C1C(Br)C2C3CC4C(C(=O)C(Br)C42)C13', 'O=C1C2OC2C(=O)C2C1C1(Cl)C(Cl)=C(Cl)C2(Cl)C1(Cl)Cl', 'Nc1c(C(=O)O)ccc(Cl)c1O', 'COc1ccc(C(=O)C(=O)c2ccc(OC)cc2)cc1', 'Nc1c(O)ccc(Cl)c1C(=O)O', 'Br.Nc1c(C(=O)O)ccc(Cl)c1O', 'O=C1CCC(=O)C1Cl', 'N#CCC(N)=O', 'O=C(C(=O)c1ccc(-c2ccccc2)cc1)c1ccc(-c2ccccc2)cc1', 'O=C1C(=O)c2ccccc2-c2ccccc21', 'Nc1c(F)cccc1C=O', 'O=C(C(=O)c1ccccc1)c1ccccc1', 'COC(=O)C1CC(=O)C(C(=O)OC)CC1=O', 'O=C1C(Br)=CC2C1C1C=CC2(Br)C1=O', 'Cc1ccc(C(=O)C(=O)c2ccccc2)cc1C', 'Nc1c(O)cccc1C(=O)O', 'Nc1cc(Cl)c(Br)cc1C(=O)O', 'Cc1cccc(C=O)c1N', 'CCOC(=O)C1CC(=O)C(C(=O)OCC)CC1=O', 'O=C1CC(C(=O)CCl)C1', 'Nc1cc(F)c([N+](=O)[O-])cc1C(=O)O', 'CCOC(=O)C(CC(C)=O)C(=O)C1CC1', 'Nc1c(Br)ccc(Br)c1C(=O)O', 'Nc1cc(F)cc(F)c1C=O', 'CCOC(=O)C(CC(C)=O)C(C)=O', 'COc1cc(N)c(C(=O)O)c(Br)c1', 'Nc1cc(O)c(C(=O)O)cc1C(=O)O', 'CCOC(=O)C(CC(=O)C1CC1)C(C)=O', 'Nc1c(Br)ccc(F)c1C(=O)O', 'CCOC(=O)C(CC(=O)C1CC1)C(=O)C1CC1', 'COC1(OC)C2(Cl)C3C(=O)C4C5C(=O)C3C1(Cl)C5(Cl)C42Cl', 'Nc1c(I)cccc1C(=O)O', 'C=CC=CCN.Cl', 'Cc1c(Cl)cc(N)c(C(=O)O)c1Cl', 'CCOC(=O)C(C(C)=O)C(C)C(C)=O', 'Cc1cc(Cl)c(N)c(C(=O)O)c1', 'Cc1cc(Br)c(N)c(C(=O)O)c1', 'C=CC(C)=CCC(=O)O', 'COc1ccc(C(=O)O)c(N)c1Br', 'Nc1cc(Br)cc(C(=O)O)c1N', 'CCC(C)C1OC2(CCC1C)CC1CC(CC=C(C)C(OC3CC(OC)C(OC4CC(OC)C(O)C(C)O4)C(C)O3)C(C)C=CC=C3COC4C(O)C(C)=CC(C(=O)O1)C34O)O2', 'Cc1c(Br)ccc(N)c1C(=O)O.Cl', 'Nc1c(F)cc(Br)cc1C(=O)O', 'COc1cc(Cl)cc(N)c1C(=O)O', 'Cl.Nc1ccc(Br)c(F)c1C(=O)O', 'COc1cc(N)c(C(=O)O)cc1Cl', 'CC(C)C1=CC2=CCC3C(C)(C(=O)O)CCCC3(C)C2CC1', 'Nc1c(Br)cc(F)cc1C(=O)O', 'Nc1cccc(I)c1C(=O)O', 'CCC=CC=CC(C)O', 'O=C1CCC2C(=O)CCC12', 'CCOC(=O)C(CC(=O)C(C)(C)C)C(C)=O', 'Nc1cc(F)cc(Cl)c1C(=O)O', 'Nc1cc(Cl)c(I)cc1C(=O)O', 'Nc1ccc(Oc2ccc(Cl)cc2)cc1C(=O)O', 'C=CC=CCBr', 'Nc1c(F)ccc(Br)c1C(=O)O', 'CSc1ccc(N)cc1Br', 'Cc1c(N)c(C(=O)O)cc(F)c1Br', 'Nc1c(C(=O)O)cc(Cl)c(Br)c1Cl', 'O=C1CCC(=O)C12CC2', 'Nc1ccc(Br)cc1C(=O)O', 'Nc1c(Br)cc(Cl)cc1C(=O)O', 'Nc1ccc(Cl)cc1C(=O)O', 'C=CC=CCCN.Cl', 'Nc1ccc(I)cc1C(=O)O', 'COc1cc(OC)c(C(=O)O)c(N)c1Cl', 'Nc1c(C(=O)O)ccc(Cl)c1F', 'Br.Nc1c(Cl)cc(Br)cc1C(=O)O', 'Nc1cc(Cl)ccc1C(=O)O', 'CC1(C)C(=O)C2C(C1=O)C2(C)C', 'Cc1ccc(Br)c(N)c1C(=O)O', 'COc1ccccc1NS(=O)(=O)c1ccc(N)c(C(=O)O)c1', 'Nc1cc(Br)c(F)cc1C(=O)O', 'CCc1cc(Br)cc(C(=O)O)c1N']
         rep = set()
         for syntree in syntree_set_all:        
             index = skeleton_set.lookup[syntree.root.smiles][0].index    
-            if len(skeleton_set.lookup[syntree.root.smiles]) == 1:
+            if len(skeleton_set.lookup[syntree.root.smiles]) == 1: # one skeleton per smiles                
                 if index in SKELETON_INDEX:
                 # if index in SKELETON_INDEX and index not in rep:
                     # rep.add(index)
@@ -427,15 +429,18 @@ def main(args):
                 #             breakpoint()
                     syntree_set.append(syntree)
                 # if index in [0,1,2,3,4]:
-                #     syntree_set.append(syntree)
-        print(f"{len(syntree_set)}/{len(syntree_set_all)} syntrees")
+                #     syntree_set.append(syntree)        
         targets = [syntree.root.smiles for syntree in syntree_set]
         lookup = {}
         # Compute the gold skeleton
         all_smiles = dict(zip([st.root.smiles for st in syntree_set], range(len(syntree_set))))
         for i, target in enumerate(targets):
             sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)
+            if not np.array([sk.tree.nodes[n]['smiles'] in TOP_BBS for n in sk.tree if sk.leaves[n]]).all():
+                continue                
             lookup[target] = sk
+        targets = list(lookup)
+        print(f"{len(targets)}/{len(syntree_set_all)} syntrees")
     else:
 
         # Load data ...
@@ -501,9 +506,11 @@ def main(args):
                     if args.test_correct_method == 'postorder':
                         correct = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
                     else:
-                        correct, total_incorrect[tree_id] = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
+                        correct, incorrect = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)                        
                     if correct:
                         break
+            if not correct:
+                update(total_incorrect[tree_id], incorrect)
             if args.forcing_eval:
                 # if not correct:
                 #     # implement a procedure to check if target can be recovered another way
@@ -520,7 +527,7 @@ def main(args):
             else:                
                 # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
                 summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
-                print(f"total summary: {summary}")            
+                print(f"total summary: {summary}, total incorrect: {total_incorrect}")            
         
 
     # else:

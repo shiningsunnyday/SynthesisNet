@@ -1,4 +1,4 @@
-from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton
+from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, ReactionSet
 from synnet.utils.analysis_utils import *
 import pickle
 import os
@@ -32,6 +32,11 @@ def get_args():
         help="If given, use the keys as skeleton classes",
     )      
     parser.add_argument(
+        "--rxns_collection_file",
+        type=str,
+        default="data/assets/reaction-templates/reactions_hb.json.gz",
+    )    
+    parser.add_argument(
         "--visualize-dir",
         type=str,
         default="results/viz/",
@@ -62,6 +67,8 @@ if __name__ == "__main__":
     else:
         syntree_collection = SyntheticTreeSet()
         syntrees = syntree_collection.load(args.input_file)        
+        rxns = ReactionSet().load(args.rxns_collection_file).rxns        
+        reorder_syntrees(syntrees, rxns) # make sure reactant order is correct        
         sts = []
         for st in syntree_collection.sts:
             if st: 
@@ -71,8 +78,7 @@ if __name__ == "__main__":
                     breakpoint()
                 sts.append(st)
             else:
-                breakpoint()
-        
+                breakpoint()        
         # use the train set to define the skeleton classes
         if args.skeleton_canonical_file:
             skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
@@ -85,8 +91,7 @@ if __name__ == "__main__":
                 if st.is_isomorphic(sk): 
                     done = True
                     skeletons[sk].append(st)
-                    break
-                    
+                    break                    
             if not done: 
                 skeletons[st] = [st]
         if args.skeleton_canonical_file:
@@ -96,9 +101,8 @@ if __name__ == "__main__":
                 skeletons[k] = skeletons[k][class_nums[k]:]
         for k, v in skeletons.items():
             print(f"count: {len(v)}") 
+        pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))    
 
-        pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))
-    breakpoint()
     count_bbs(args, skeletons)
     count_rxns(args, skeletons)
     vis_skeletons(args, skeletons)

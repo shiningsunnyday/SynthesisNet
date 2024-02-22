@@ -207,11 +207,11 @@ def expand_program(i, a, b=None):
             task_descr = f"joining program {prog_A_info}, [] with rxn_id {i}"
             logger.info(f"begin {task_descr}")
             if isinstance(a.product_map, ProductMap):
-                prog = a.copy()                
+                prog = a.copy()
             else:
                 assert not a.product_map._loaded
-                prog = a.copy()                
-            prog.combine_bi_mol(i, child='left')                          
+                prog = a.copy()
+            prog.combine_bi_mol(i, child='left')
         else:
             prog_B_info = b.logging_info()
             task_descr = f"joining program [], {prog_B_info} with rxn_id {i}"
@@ -220,13 +220,11 @@ def expand_program(i, a, b=None):
                 prog = b.copy()                
             else:
                 assert not b.product_map._loaded
-                prog = b.copy()               
-            prog.combine_bi_mol(i, child='right')                    
+                prog = b.copy()
+            prog.combine_bi_mol(i, child='right')
         logger.info(f"done {task_descr}")
-    return prog        
+    return prog
         
-
-
 
 
 def expand_programs(args, all_progs, size):
@@ -299,6 +297,10 @@ def expand_programs(args, all_progs, size):
 
 
 def filter_programs(progs):
+    """
+    We filter out all progs for which there's no possible reactant combination
+    Specifically, we filter all progs where the product of possible reactants is 0
+    """
     logger = logging.getLogger('global_logger')
     logger.info(f"begin filtering {len(progs)} programs")
     new_progs = []
@@ -307,7 +309,12 @@ def filter_programs(progs):
             continue
         good = True
         for e in p.entries:
-            if np.prod([len(reactants) for reactants in p.rxn_map[e].available_reactants]):
+            if isinstance(e, tuple):
+                r, idx = e
+                poss_reactants = len(p.rxn_map[r].available_reactants[idx])
+            else:
+                poss_reactants = np.prod([len(reactants) for reactants in p.rxn_map[e].available_reactants])
+            if poss_reactants:
                 continue
             good = False
             break
@@ -318,13 +325,13 @@ def filter_programs(progs):
 
 
 
-def strategy(progs):
+def strategy(progs, rxns):
     easy_prog_inds, hard_prog_inds = [], []
     for i, p in enumerate(progs):
-        if Program.input_length(p) <= MP_MIN_COMBINATIONS:
+        if Program.input_length(p, rxns) <= MP_MIN_COMBINATIONS:
             easy_prog_inds.append(i)
         else:
-            hard_prog_inds.append((Program.input_length(p), i))    
+            hard_prog_inds.append((Program.input_length(p, rxns), i))    
     return easy_prog_inds, hard_prog_inds
 
 
@@ -345,7 +352,8 @@ def get_cache_fpaths(all_progs):
     for d in all_progs:
         for p in all_progs[d]:
             if isinstance(p.product_map, ProductMap):
-                assert os.path.exists(p.product_map.fpath)
+                if not os.path.exists(p.product_map.fpath):
+                    breakpoint()
                 fpaths.append(p.product_map.fpath)
             else:
                 for fpath in p.product_map.fpaths.values():
@@ -360,7 +368,10 @@ def clean_cache(args, all_progs):
     fpath_set = set(get_cache_fpaths(all_progs))
     logger.info(f"begin cleaning cache, keep {len(fpath_set)} fpaths")
     removed = 0
-    for f in os.listdir(args.cache_dir):
+    pkl_paths = [f"{d}.pkl" for d in all_progs]
+    for f in os.listdir(args.cache_dir):        
+        if f in pkl_paths:
+            continue
         if os.path.join(args.cache_dir, f) not in fpath_set:
             os.remove(os.path.join(args.cache_dir, f))
             removed += 1
@@ -382,11 +393,11 @@ def create_run_programs(args, bbf, size=3):
             logger.info(f"loaded {len(all_progs[d])} size-{d} programs")
             all_progs[d] = filter_programs(all_progs[d])
             assert d in all_progs
-            """
-            Sanity checks
-            """
-            for f in get_cache_fpaths(all_progs):
-                assert os.path.exists(f)
+            # """
+            # Sanity checks
+            # """
+            # for f in get_cache_fpaths(all_progs):
+            #     assert os.path.exists(f)
             continue
         if args.keep_prods and d == args.keep_prods+1:            
             """
@@ -396,7 +407,7 @@ def create_run_programs(args, bbf, size=3):
             logger.info("begin migrating to ProductMapLink")                 
             for depth in range(1, d):
                 logger.info(f"begin migrating depth {depth}")                 
-                if args.ncpu:
+                if args.ncpu > 1:
                     with mp.Pool(args.ncpu) as p:
                         all_progs[depth] = p.map(Program.migrate, tqdm(all_progs[depth]))
                 else:
@@ -415,8 +426,7 @@ def create_run_programs(args, bbf, size=3):
                 logger.info(f"begin expanding size-{d} programs")                
                 expand_programs(args, all_progs, d)
                 logger.info(f"done expanding size-{d} programs")                
-                if args.cache_dir:
-                    logger.info(get_descr(all_progs))  
+                if args.cache_dir:  
                     logger.info(f"begin cache-dumping all pre-programs at {cache_fpath_pre}")                     
                     pickle.dump(all_progs, open(cache_fpath_pre, 'wb'))
                     logger.info(f"done cache-dumping all pre-programs at {cache_fpath_pre}")                   
@@ -428,7 +438,7 @@ def create_run_programs(args, bbf, size=3):
         """    
         logger.info(f"strategize how to init {len(all_progs[d])} depth-{d} programs")  
         progs = [None for _ in all_progs[d]] 
-        easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
+        easy_prog_inds, hard_prog_inds = strategy(all_progs[d], bbf.rxns)
         logger.info(f"parallel run easy programs {easy_prog_inds}")          
         hard_prog_inds = [i for _, i in sorted(hard_prog_inds)]
         logger.info(f"sequentially run hard programs {hard_prog_inds}")  
@@ -452,7 +462,7 @@ def create_run_programs(args, bbf, size=3):
         Strategy: use mp to run easy programs in parallel
         Run hard programs sequentially, use mp among the input combinations
         """
-        easy_prog_inds, hard_prog_inds = strategy(all_progs[d])
+        easy_prog_inds, hard_prog_inds = strategy(all_progs[d], bbf.rxns)
         logger.info(f"parallel run easy programs {easy_prog_inds}")          
         hard_prog_inds = [i for _, i in sorted(hard_prog_inds)][::-1]
         logger.info(f"sequentially run hard programs {hard_prog_inds}")  
@@ -493,7 +503,7 @@ def create_run_programs(args, bbf, size=3):
             logger.info(f"done loading hard program from {hard_path_i}")  
 
         
-        # Filter after reaction is run
+        # Filter after reaction is run          
         all_progs[d] = filter_programs(progs)
         logger.info(f"done! {len(all_progs[d])} size-{d} programs")
 
@@ -536,7 +546,7 @@ def hash_program(prog, output_dir, make_dir=True):
         mask = np.array(list(map(int, cur)))                
         frontier = [f for f in edges[mask[edges[:, 0]] == 1][:, 1] if not mask[f]]        
         if os.path.exists(cur_fpath):   
-            data = json.load(open(cur_fpath, 'r'))          
+            data = ProductMap.json_load(open(cur_fpath, 'r'))          
             assert 'rxn_ids' in data
         else:            
             data = {'rxn_ids': {},
@@ -547,8 +557,11 @@ def hash_program(prog, output_dir, make_dir=True):
                 bb_poss = {}
                 for e in prog.entries:
                     bb_poss[e] = []
-                    for avail_reactants in prog.rxn_map[e].available_reactants:
-                        bb_poss[e].append(avail_reactants)
+                    if isinstance(e, tuple):
+                        bb_poss[e].append(prog.rxn_map[e[0]].available_reactants[e[1]])
+                    else:
+                        for avail_reactants in prog.rxn_map[e].available_reactants:
+                            bb_poss[e].append(avail_reactants)
                 data['bbs'] = bb_poss                    
             
         # make/append to json file the continuation
@@ -556,7 +569,7 @@ def hash_program(prog, output_dir, make_dir=True):
             f = f.item()
             data['rxn_ids'][f] = data['rxn_ids'].get(f, []) + [tree.nodes[f]['rxn_id']]
    
-        json.dump(data, open(cur_fpath, 'w+'))
+        ProductMap.json_dump(data, open(cur_fpath, 'w+'))
         # debug
         vis_fpath = cur_dirname.parent / f"{cur_dirname.name}.png"        
         if not os.path.exists(vis_fpath):
@@ -616,8 +629,8 @@ def hash_programs(all_progs, output_dir):
     We mask out every reaction except the top, then unmask one-by-one.
     """
     for d in all_progs:
-        for p in all_progs[d]:
-            hash_program(p, output_dir, make_dir=d<len(all_progs))
+        for p in tqdm(all_progs[d], desc=f"enumerating size-{d} programs"):
+            hash_program(p, output_dir, make_dir=True)
 
             
 
@@ -678,7 +691,6 @@ if __name__ == "__main__":
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
     all_progs = create_run_programs(args, bbf, size=args.depth)
-
     if args.stats:        
         for stat in args.stats:
             fpath = os.path.join(args.visualize_dir, f"{stat}.png")            

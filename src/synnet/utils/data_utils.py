@@ -19,7 +19,7 @@ from typing import Any, Optional, Set, Tuple, Union
 import multiprocessing as mp
 from multiprocessing import Array, Manager
 mp.set_start_method('fork')
-from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR, PRODUCT_JSON, NUM_THREADS
+from synnet.config import MP_MIN_COMBINATIONS, MAX_PROCESSES, PRODUCT_DIR, PRODUCT_JSON, NUM_THREADS, DELIM
 import threading
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdChemReactions
@@ -339,7 +339,7 @@ class ProductMap:
         logger.info(f"begin saving product map")
         assert self._loaded, "need to call load() first"      
         if PRODUCT_JSON:
-            json.dump(self._product_map, open(self.fpath, 'w+'))
+            ProductMap.json_dump(self._product_map, open(self.fpath, 'w+'))
         else:
             pickle.dump(self._product_map, open(self.fpath, 'wb+'))
         logger.info(f"done saving product map")
@@ -360,23 +360,50 @@ class ProductMap:
         recursively convert str int keys to int
         """
         if isinstance(dic, dict):
-            str_keys = [k for k in dic if isinstance(k, str) and k.isdigit()]
-            for k in str_keys:
-                dic[int(k)] = dic[k]
-            for k in str_keys:
-                dic.pop(k)
+            str_keys = [int(k) if isinstance(k, str) and k.isdigit() else k for k in dic]
+            dic = dict(zip(str_keys, dic.values()))        
             for k in dic:
-                ProductMap.str_key_to_int(dic[k])
+                dic[k] = ProductMap.str_key_to_int(dic[k])
+        return dic
+
+    
+    @staticmethod
+    def json_dump(dic=None, f=None):
+        # simple wrapper that converts tuple keys into - delimited keys
+        if isinstance(dic, dict):
+            str_keys = [DELIM.join(map(str, k)) if isinstance(k, tuple) else k for k in dic]
+            dic = dict(zip(str_keys, dic.values()))
+            for k in dic:
+                dic[k] = ProductMap.json_dump(dic=dic[k])
+        if f is not None:
+            assert dic is not None
+            json.dump(dic, f)
+        return dic
+
+    
+    @staticmethod
+    def json_load(f=None, dic=None):
+        # simple wrapper that restores - delimited keys into tuple keys
+        if f is not None: # base case
+            dic = json.load(f)
+        if isinstance(dic, dict):
+            tup_keys = [tuple(map(int, (k.split(DELIM)))) if DELIM in k else k for k in dic]
+            dic = dict(zip(tup_keys, dic.values()))
+            str_keys = [int(k) if isinstance(k, str) and k.isdigit() else k for k in dic]
+            dic = dict(zip(str_keys, dic.values()))                              
+            for k in dic:
+                dic[k] = ProductMap.json_load(dic=dic[k])
+        return dic
         
 
     
     def load(self):
         if not self._loaded:      
             if PRODUCT_JSON:
-                self._product_map = json.load(open(self.fpath, 'r'))       
+                self._product_map = ProductMap.json_load(open(self.fpath, 'r'))       
             else:
                 self._product_map = pickle.load(open(self.fpath, 'rb'))
-            self.str_key_to_int(self._product_map)
+                self._product_map = self.str_key_to_int(self._product_map)
             self._loaded = True
     
 
@@ -422,7 +449,7 @@ class ProductMap:
         if not self._loaded:
             self.load()
         if PRODUCT_JSON:
-            json.dump(self._product_map, open(new_fpath, 'w+'))
+            ProductMap.json_dump(self._product_map, open(new_fpath, 'w+'))
         else:
             pickle.dump(self._product_map, open(new_fpath, 'wb+'))
         new_pmap = ProductMap(new_fpath, loaded=False)        
@@ -479,7 +506,8 @@ class ProductMapLink:
                     offset, fpath = fpath
                     self.fpaths[entry_key] = fpath  
                 try:                       
-                    self._product_map[entry_key] = (json.load if PRODUCT_JSON else pickle.load)(open(fpath, 'r' if PRODUCT_JSON else 'rb'))
+                    f = open(fpath, 'r' if PRODUCT_JSON else 'rb')
+                    self._product_map[entry_key] = (ProductMap.json_load if PRODUCT_JSON else pickle.load)(f)
                 except:
                     print(fpath)
                 if offset:
@@ -487,11 +515,14 @@ class ProductMapLink:
                     for r in self._product_map[n]:
                         entries = list(self._product_map[n][r].keys())
                         for e in entries:
-                            assert int(e)+offset not in self[(n,r)]
-                            self[(n, r, int(e)+offset)] = self._product_map[n][r][e]                                
+                            if isinstance(e, tuple):
+                                offset_key = (int(e[0])+offset, int(e[1])) 
+                            else:
+                                offset_key = int(e)+offset
+                            assert offset_key not in self[(n,r)]
+                            self[(n, r, offset_key)] = self._product_map[n][r][e]                                
                         for e in entries:
                             self._product_map[n][r].pop(e)
-            self.str_key_to_int(self._product_map)            
         logger.info(f"done loading product map link")
 
     
@@ -510,7 +541,7 @@ class ProductMapLink:
                 self.fpaths[entry_key] = fpath
             with FileLock(f"{fpath}.lock"):
                 with open(fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
-                    (json.dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
+                    (ProductMap.json_dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
         logger.info(f"done saving product map")
         self._product_map = None
         self._loaded = False
@@ -545,7 +576,7 @@ class ProductMapLink:
                 while os.path.exists(new_fpath):
                     new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
                 with open(new_fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
-                    (json.dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
+                    (ProductMap.json_dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
                 new_fpaths[entry_key] = new_fpath
             new_pmap = ProductMapLink(new_fpaths)        
             self.unload()
@@ -591,21 +622,6 @@ class ProductMapLink:
             return self._product_map[n]  
     
 
-    @staticmethod
-    def str_key_to_int(dic):
-        """
-        recursively convert str int keys to int
-        """
-        if isinstance(dic, dict):
-            str_keys = [k for k in dic if isinstance(k, str) and k.isdigit()]
-            for k in str_keys:
-                dic[int(k)] = dic[k]
-            for k in str_keys:
-                dic.pop(k)
-            for k in dic:
-                ProductMap.str_key_to_int(dic[k])
-    
-
     def get_num_interms(self, key):
         if key not in self._product_map:
             print(self.fpaths, f"{key} has no interms!")
@@ -617,8 +633,8 @@ class ProductMapLink:
 
 class Program:
     def __init__(self, rxn_tree=None, keep_prods=0):
-        self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()        
-        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []] 
+        self.rxn_tree = rxn_tree if rxn_tree is not None else nx.DiGraph()
+        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []]
         self.rxn_map = {}
         self.keep_prods = keep_prods
         if keep_prods:
@@ -641,6 +657,7 @@ class Program:
         other = Program(deepcopy(self.rxn_tree))
         other.rxn_map = deepcopy(self.rxn_map)        
         other.keep_prods = self.keep_prods
+        other._entries = self._entries
         if self.keep_prods:
             other.product_map = self.product_map.copy()        
         return other
@@ -658,11 +675,20 @@ class Program:
     
     
     @staticmethod
-    def input_length(p):
+    def input_length(p, rxns=None):
         react = []
         if p.rxn_map:
             for e in p.entries:
-                num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
+                if isinstance(e, tuple):
+                    r, idx = e
+                    if r in p.rxn_map:
+                        num = len(p.rxn_map[r].available_reactants[idx])
+                    else:
+                        assert rxns is not None
+                        rxn_id = p.rxn_tree.nodes[r]['rxn_id']
+                        num = len(rxns[rxn_id].available_reactants[idx])
+                else:
+                    num = np.prod([len(ar) for ar in p.rxn_map[e].available_reactants])
                 react.append(num)
             return np.prod(react)
         else:
@@ -751,12 +777,14 @@ class Program:
         """
         assert child in ['left', 'right']
         key = len(self.rxn_tree)
-        self.rxn_tree.add_node(key, rxn_id=rxn_id)           
+        self.rxn_tree.add_node(key, rxn_id=rxn_id)
         self.rxn_tree.add_edge(key, key-1)
         self.rxn_tree.nodes[key-1]['child'] = child
-        depth = self.rxn_tree.nodes[key-1]['depth'] +1
+        depth = self.rxn_tree.nodes[key-1]['depth'] + 1
         self.rxn_tree.nodes[key]['depth'] = depth
-        self._entries = self._entries + [key]        
+        # make this list of tuples (node, reactant idx)
+        idx = 1 if child == 'left' else 0
+        self._entries = self._entries + [(key, idx)]
 
     
 
@@ -778,7 +806,8 @@ class Program:
     def combine(self, other):    
         offset = len(self.rxn_tree)
         self.rxn_tree = nx.disjoint_union(self.rxn_tree, other.rxn_tree)
-        self._entries = [n for n in self.rxn_tree if list(self.rxn_tree.successors(n)) == []]                 
+        apply_offset = lambda e, offset: (e[0]+offset, e[1]) if isinstance(e, tuple) else e+offset
+        self._entries = self.entries + [apply_offset(e, offset) for e in other.entries]               
         for n in other.rxn_map:
             self.rxn_map[n+offset] = other.rxn_map[n]
         # combine rxn_map's
@@ -819,27 +848,33 @@ class Program:
 
     def init_rxns(self, rxns):
         """
-        Init rxns will look at the top node in rxn_tree which should not be in rxn_map        
+        Init rxns will look at the top node, n, in rxn_tree which should not be in rxn_map        
+        Then use rxns to add the reaction to self.rxn_map
+        Also, it will retrieve the products of each of n's successors
+        Then use n's reaction to filter them
+        Then re-index all the entry nodes for each successor
         """
         logger = logging.getLogger('global_logger')  
         new_nodes = [n for n in self.rxn_tree if n not in self.rxn_map]
         assert len(new_nodes) == 1
-        new_node = new_nodes[0]
-        if self.keep_prods:
-            # do we really need to load?            
-            # self.keep_prods specifies the length of the longest root-leave path
-            # we need to load if new_node itself or one of its dependents has depth <= self.keep_prods
-            need_load = self.rxn_tree.nodes[new_node]['depth'] <= self.keep_prods
-            for n in list(self.rxn_tree.successors(new_node)):
-                if self.keep_prods >= self.rxn_tree.nodes[n]['depth']:
-                    need_load = True
-            if need_load:
-                self.product_map.load()            
+        new_node = new_nodes[0]          
         n = new_node               
         rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
         assert rxn.available_reactants is not None
         self.rxn_map[n] = rxn
-        count = Program.input_length(self)        
+        count = Program.input_length(self)  
+        # if (self.rxn_tree.nodes[0]=={'rxn_id': 41, 'depth': 1, 'child': 'left'}) and (self.rxn_tree.nodes[1]=={'rxn_id': 1, 'depth': 2}):
+        #     breakpoint()
+        if self.keep_prods:
+            # do we really need to load?            
+            # self.keep_prods specifies the length of the longest root-leave path
+            # we need to load if one of new node's successors has depth <= self.keep_prods
+            need_load = False
+            for succ in list(self.rxn_tree.successors(new_node)):
+                if self.keep_prods >= self.rxn_tree.nodes[succ]['depth']:
+                    need_load = True
+            if need_load:
+                self.product_map.load()          
         """
         For each of new node's successor, if its depth is <= self.keep_prods, then we can use the product map to filter the reactants of the 
         successor's subtree's entry nodes
@@ -849,7 +884,8 @@ class Program:
             for each child of n, we can define a filter function depending on if it's the left or right child
             left also includes uni-molecular reaction
             """
-            if self.keep_prods < self.rxn_tree.nodes[succ]['depth']: continue
+            if self.keep_prods < self.rxn_tree.nodes[succ]['depth']: 
+                continue
             """
             n is a new reaction node, but we can filter the entry reactants using the interms
             """
@@ -874,7 +910,9 @@ class Program:
                     if list(self.product_map[(succ, interm)].keys()) != self.entries: # same order
                         # make sure appear in same order
                         appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
-                        assert sorted(appear_entries) == appear_entries                        
+                        if sorted(appear_entries) != appear_entries:
+                            breakpoint()
+                            
                     entry_reactants = []
                     for e in self.product_map[(succ, interm)]:
                         e_reactants = []
@@ -888,52 +926,26 @@ class Program:
                 last_interm = interm
             if last_interm is None:
                 breakpoint()
-            entries = list(self.product_map[(succ, last_interm)].keys())                    
-
-            # rxn_map_copy = deepcopy(self.rxn_map) # TODO: delete this, later for testing
-                               
-            # rxn_map_debug = deepcopy(self.rxn_map) # TODO: delete this, later for testing
-            
-            """
-            for interm, entry_reactants in res
-                for each entry n, store the available_reactants that are in entry_reactants
-            """  
-            # logger.info("begin storing reactants of good interms")
-            # avail_index = {n: [{}, {}] for n in entries}
-            # for _, entry_reactants in tqdm(res, desc="storing reactants of good interms"):            
-            #     for entry_reactant, n in zip(entry_reactants, entries):
-            #         for i, reactant in enumerate(entry_reactant):
-            #             if reactant not in avail_index[n][i]:                        
-            #                 avail_index[n][i][reactant] = len(self.rxn_map[n].available_reactants[i]) # store the index
-            #                 self.rxn_map[n].available_reactants[i].append(reactant)
-            # logger.info("done storing reactants of good interms")            
-
-            """
-            smarter way using multi-threading
-            use thread takes some intermediates            
-            """
-            # res_cache = deepcopy(res)
-            # for i in range(len(res)):
-            #     entry_reactants = res[i][1]
-            #     entry_reactant_idxes = []
-            #     for entry_reactant, e in zip(entry_reactants, entries):
-            #         reactant_idxes = []
-            #         for j, reactant in enumerate(entry_reactant):
-            #             index = rxn_map_copy[e].available_reactants[j].index(reactant)
-            #             reactant_idxes.append(index)
-            #         entry_reactant_idxes.append(reactant_idxes)
-            #     res[i] = (res[i][0], entry_reactant_idxes)
-    
-
-
+            entries = list(self.product_map[(succ, last_interm)].keys())                        
+            appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
+            if sorted(appear_entries) != appear_entries:
+                breakpoint()            
+                 
             if count >= MP_MIN_COMBINATIONS and NUM_THREADS > 1:
                 threads = []
                 elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
                 all_reactant_indices = []
                 for e in entries:
-                    zero_count = []
-                    for i in range(len(self.rxn_map[e].available_reactants)):
-                        zero_count.append(Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]))
+                    zero_count = []               
+                    if isinstance(e, tuple):
+                        zero_array = [0 for _ in range(len(self.rxn_map[e[0]].available_reactants[e[1]]))]
+                        arr = Array('i', zero_array)            
+                        zero_count.append(arr)
+                    else:
+                        for i in range(len(self.rxn_map[e].available_reactants)):
+                            zero_array = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]            
+                            arr = Array('i', zero_array)            
+                            zero_count.append(arr)                        
                     all_reactant_indices.append(zero_count)                
                 for i in range(NUM_THREADS):
                     start = i*elems_per_thread
@@ -947,40 +959,61 @@ class Program:
                 all_reactant_indices = []
                 for e in entries:
                     zero_count = []
-                    for i in range(len(self.rxn_map[e].available_reactants)):
-                        zero_count.append([0 for _ in range(len(self.rxn_map[e].available_reactants[i]))])
+                    if isinstance(e, tuple):
+                        zero_array = [0 for _ in range(len(self.rxn_map[e[0]].available_reactants[e[1]]))]
+                        if NUM_THREADS > 1:
+                            arr = Array('i', zero_array)
+                        else:
+                            arr = zero_array                
+                        zero_count.append(arr)
+                    else:
+                        for i in range(len(self.rxn_map[e].available_reactants)):
+                            zero_array = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]
+                            if NUM_THREADS > 1:
+                                arr = Array('i', zero_array)
+                            else:
+                                arr = zero_array
+                            zero_count.append(arr)
                     all_reactant_indices.append(zero_count)                                   
                 self.fill_reactant_indices(res, all_reactant_indices)
             rxn_map_copy = deepcopy(self.rxn_map)
             for n in entries:
+                idx = -1
+                if isinstance(n, tuple):
+                    n, idx = n                
                 cur = self.rxn_map[n].available_reactants
-                self.rxn_map[n].available_reactants = tuple([] for _ in cur)                 
+                available_reactants = []
+                for i, reactants in enumerate(cur):
+                    if idx > -1 and i != idx:
+                        available_reactants.append(reactants)
+                    else:
+                        available_reactants.append([])                
+                self.rxn_map[n].available_reactants = tuple(available_reactants)                 
 
             """
             A simple algorithm to re-index all_reactant_indices            
             """
-            for i in range(len(all_reactant_indices)): # per entry
-                for j in range(len(all_reactant_indices[i])): # per reactant
+            assert len(entries) == len(all_reactant_indices)
+            for i, e in enumerate(entries): # per entry
+                if isinstance(e, tuple):
+                    assert len(all_reactant_indices[i]) == 1
+                    e, idx = e
+                    reactant_indices = [idx]
+                else:
+                    reactant_indices = range(len(all_reactant_indices[i]))                
+                for idx, j in enumerate(reactant_indices): # per reactant
                     c = 0
-                    for k in range(len(all_reactant_indices[i][j])): # per available reactant
+                    idxes = all_reactant_indices[i][idx]
+                    for k in range(len(idxes)): # per available reactant
                         # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                            
-                        idxes = all_reactant_indices[i][j]
                         if idxes[k]:
                             # add this reactant to self.rxn_map
-                            reactant = rxn_map_copy[entries[i]].available_reactants[j][k]
-                            self.rxn_map[entries[i]].available_reactants[j].append(reactant)
+                            reactant = rxn_map_copy[e].available_reactants[j][k]
+                            self.rxn_map[e].available_reactants[j].append(reactant)
                             idxes[k] = c                                
                             c += 1
                         else:
                             idxes[k] = -1
-
-            # # Test                
-            # for e1, e2 in zip(self.rxn_map, rxn_map_debug):
-            #     assert e1 == e2
-            #     if self.rxn_map[e1].available_reactants != rxn_map_debug[e2].available_reactants:
-            #         breakpoint()
-
-
             """
             Fix product map
             """
@@ -988,16 +1021,7 @@ class Program:
             # remove the bad interms
             for interm in bad_interms:                            
                 self.product_map[tuple([succ])].pop(interm)                    
-            # print(f"{num_interms}->{num_interms-len(bad_interms)} node {n} interm prods")
-            # for interm in tqdm(self.product_map[tuple([succ])], "re-indexing product map interms"):
-            
-            #     for entry in self.product_map[tuple([succ])][interm]:
-            #         e = entries.index(entry)
-            #         for i in range(len(self.product_map[tuple([succ])][interm][entry])):
-            #             idx = self.product_map[tuple([succ])][interm][entry][i]                        
-            #             new_idx = all_reactant_indices[e][i][idx]               
-            #             assert new_idx != -1
-            #             self.product_map[tuple([succ])][interm][entry][i] = new_idx                    
+          
             self.reindex_product_map(succ, entries, all_reactant_indices)
             # re-index the entry_reactant indices of self.product_map
             logging.info(f"done re-indexing product map")
@@ -1008,7 +1032,6 @@ class Program:
             zero_prods = len(self.product_map[tuple([succ])]) == 0
             if zero_prods:
                 assert Program.input_length(self) == 0
-
             
         if self.keep_prods and need_load:
             new_count = Program.input_length(self)
@@ -1018,28 +1041,47 @@ class Program:
 
     @staticmethod
     def infer_product_index(i, interm_counts, entries, rxn_map, return_idx=False):
+        # For example:
+        # [[8,4],[8]] has 2 entry points
+        # entries[0] has 8 choices for reactant1 and 4 for reactant2
+        # index can be 0 to 32*8-1
+        # the trick is to use the intermediate counts [32,8]
+        # then repeat for (index//8, [8,4]) and (index%8, [8])        
+        # I comment the code with index 42 as an example
         assert len(interm_counts) == len(entries)
         entry_indices = [[] for _ in entries]
-        for j in range(len(interm_counts)-1,-1,-1):                        
-            num_reactants = len(rxn_map[entries[j]].available_reactants)
-            reactant_indices = [0 for _ in range(num_reactants)]
-            reactant_i = i%interm_counts[j]
-            for k in range(num_reactants-1,-1,-1):
-                num_reactants_i = len(rxn_map[entries[j]].available_reactants[k])
-                reactant_indices[k] = reactant_i%num_reactants_i
-                reactant_i //= num_reactants_i
+        for j in range(len(interm_counts)-1,-1,-1):                     
+            if isinstance(entries[j], tuple):
+                num_reactants = 1
+                r, idx = entries[j]
+                entry = r
+                reverse_reactant_idxes = [idx]
+            else:
+                num_reactants = len(rxn_map[entries[j]].available_reactants)
+                entry = entries[j]
+                reverse_reactant_idxes = range(num_reactants-1,-1,-1) # [0], [1, 0]
+            reactant_indices = [None, None]
+            reactant_i = i%interm_counts[j] # 2, 5
+            for k in reverse_reactant_idxes: # [0], [1, 0]
+                num_reactants_i = len(rxn_map[entry].available_reactants[k]) # 8, 4 8
+                reactant_indices[k] = reactant_i % num_reactants_i # 2, 1 0
+                reactant_i //= num_reactants_i # 0, 1 0
             assert reactant_i == 0
-            entry_indices[j] = reactant_indices
-            i //= interm_counts[j]
-
+            entry_indices[j] = reactant_indices # [2, -1] [1, 0]
+            i //= interm_counts[j] # 5 0
         assert i == 0        
-
         entry_reactants = []
         for entry, entry_reactant_indices in zip(entries, entry_indices):
             entry_reactants.append([])
-            for j, reactant_index in enumerate(entry_reactant_indices):                
-                reactant = rxn_map[entry].available_reactants[j][reactant_index]                
-                entry_reactants[-1].append(reactant_index if return_idx else reactant)
+            for j, reactant_index in enumerate(entry_reactant_indices):
+                if reactant_index is not None:
+                    if isinstance(entry, tuple):
+                        r, idx = entry
+                        assert j == idx
+                        reactant = rxn_map[r].available_reactants[j][reactant_index]
+                    else:
+                        reactant = rxn_map[entry].available_reactants[j][reactant_index]
+                    entry_reactants[-1].append(reactant_index if return_idx else reactant)
         return entry_reactants
 
 
@@ -1048,15 +1090,8 @@ class Program:
         """
         Use the index and rxn_map to infer the reactant combination
         index refers to position in product(product(reactants))
-        for example:
-        [[8,4],[8]] has 2 entry points
-        entries[0] has 8 choices for reactant1 and 4 for reactant2
-        index can be 0 to 32*8-1
-        the trick is to use the intermediate counts [32,8]
-        then repeat for (index//8, [8,4]) and (index%8, [8])
         """        
         entry_reactants = Program.infer_product_index(i, interm_counts, entries, rxn_map)       
-        
         good = True
         product_map = {}
         for node in nx.dfs_postorder_nodes(rxn_tree, len(rxn_tree)-1):
@@ -1064,6 +1099,26 @@ class Program:
                 entry = entries.index(node)
                 prod = rxn_map[node].run_reaction(tuple(entry_reactants[entry]))
                 product_map[node] = prod
+            elif node in [e[0] for e in entries if isinstance(e, tuple)]: # tuple
+                entry = [e[0] if isinstance(e, tuple) else -1 for e in entries].index(node)
+                _, reactant_index = entries[entry]
+                reactant = entry_reactants[entry]
+                succ = list(rxn_tree.successors(node))
+                assert len(reactant) == 1                
+                assert len(succ) == 1
+                reactant = reactant[0]
+                succ = succ[0]
+                prod = product_map[succ]
+                reactants = [prod, reactant] if reactant_index == 1 else [reactant, prod]
+                good = True
+                if not rxn_map[node].is_reactant_first(reactants[0]):
+                    good = False
+                if not rxn_map[node].is_reactant_second(reactants[1]):
+                    good = False                    
+                if good:
+                    product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
+                else:
+                    break
             else:
                 reactants = []
                 succ = list(rxn_tree.successors(node))
@@ -1108,11 +1163,11 @@ class Program:
             assert list(self.product_map[tuple([n])][interm]) == entries
             for entry in self.product_map[tuple([n])][interm]:
                 e = entries.index(entry)
-                for i in range(len(self.product_map[tuple([n])][interm][entry])):
+                for i in range(len(self.product_map[tuple([n])][interm][entry])):                    
                     idx = self.product_map[tuple([n])][interm][entry][i]                        
                     new_idx = all_reactant_indices[e][i][idx]               
                     assert new_idx != -1
-                    self.product_map[tuple([n])][interm][entry][i] = new_idx         
+                    self.product_map[tuple([n])][interm][entry][i] = new_idx       
     
 
     def run_rxn_tree(self): 
@@ -1125,11 +1180,13 @@ class Program:
         # all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
         logger = logging.getLogger('global_logger')  
         prods = []
-        for n in self.entries:
-            prods.append([])
-            for i in range(len(self.rxn_map[n].available_reactants)):
-                prods[-1].append(len(self.rxn_map[n].available_reactants[i]))            
-            prods[-1] = np.prod(prods[-1])
+        for n in self.entries:            
+            if isinstance(n, tuple):
+                r, idx = n
+                poss_reactants = len(self.rxn_map[r].available_reactants[idx])
+            else:                
+                poss_reactants = np.prod([len(reactants) for reactants in self.rxn_map[n].available_reactants])
+            prods.append(poss_reactants)            
         
         res = []
         if len(prods):
@@ -1157,21 +1214,20 @@ class Program:
             res = [self.run_rxns(i) for i in range(count)]
         
         res = [(r, i) for (r, i) in zip(res, range(count)) if r is not None]
-
         # Update the reactants to only valid inputs
-
         rxn_map_copy = deepcopy(self.rxn_map)
-        for n in self.entries:
+        for n in self.entries:                    
+            idx = -1
+            if isinstance(n, tuple):
+                n, idx = n        
             cur = rxn_map_copy[n].available_reactants
-            rxn_map_copy[n].available_reactants = tuple([] for _ in cur)
-
-        avail_index = {n: [{}, {}] for n in self.entries}  # sets of possible first and second reactants per entry
-
-        # if len(res) >= MP_MIN_COMBINATIONS:
-        #     with mp.Pool(MAX_PROCESSES) as p:
-        #         res = p.starmap(self.retrieve_entry, res)   
-        # else:
-        #     res = [self.retrieve_entry(r, i) for r, i in res]
+            available_reactants = []
+            for i, reactants in enumerate(cur):
+                if idx > -1 and i != idx:
+                    available_reactants.append(reactants)
+                else:
+                    available_reactants.append([])
+            rxn_map_copy[n].available_reactants = tuple(available_reactants)
 
         """
         The following re-labels the available reactants of each entry
@@ -1181,6 +1237,10 @@ class Program:
         keep_prods = self.rxn_tree.nodes[len(self.rxn_tree)-1]['depth'] <= self.keep_prods
         if keep_prods:
             self.product_map.load()
+            for e in self.product_map._product_map:
+                for interm in self.product_map._product_map[e]:
+                    if list(self.product_map._product_map[e][interm]) == [(1, 1), 0]:
+                        breakpoint()              
         logger.info(f"begin post-processing {len(res)} products")
 
         
@@ -1209,12 +1269,21 @@ class Program:
         all_reactant_indices = []
         for e in self.entries:
             zero_count = []
-            for i in range(len(self.rxn_map[e].available_reactants)):
+            if isinstance(e, tuple):
+                zero_array = [0 for _ in range(len(self.rxn_map[e[0]].available_reactants[e[1]]))]
                 if NUM_THREADS > 1:
-                    arr = Array('i', [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))])
+                    arr = Array('i', zero_array)
                 else:
-                    arr = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]
+                    arr = zero_array                
                 zero_count.append(arr)
+            else:
+                for i in range(len(self.rxn_map[e].available_reactants)):
+                    zero_array = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]
+                    if NUM_THREADS > 1:
+                        arr = Array('i', zero_array)
+                    else:
+                        arr = zero_array
+                    zero_count.append(arr)
             all_reactant_indices.append(zero_count)   
 
         if keep_prods:
@@ -1230,28 +1299,43 @@ class Program:
             for i in range(NUM_THREADS):
                 start = i*elems_per_thread
                 end = (i+1)*elems_per_thread                
-                thread = threading.Thread(target=self.fill_product_reactant_indices, args=(res[start:end], all_reactant_indices, product_map[len(rxn_tree)-1] if product_map is not None else None))
+                thread = threading.Thread(target=self.fill_product_reactant_indices, 
+                                          args=(res[start:end], 
+                                          all_reactant_indices, 
+                                          product_map[len(rxn_tree)-1] if product_map is not None else None))
                 threads.append(thread)
                 thread.start()
             for thread in threads:
                 thread.join()    
         else:  
             self.fill_product_reactant_indices(res, all_reactant_indices, product_map[len(rxn_tree)-1] if product_map is not None else None)
-        
+
+        if keep_prods: # sanity check
+            for e in product_map:
+                for interm in product_map[e]:
+                    if list(product_map[e][interm]) == [(1, 1), 0]:
+                        breakpoint()
 
         """
         A simple algorithm to re-index all_reactant_indices            
         """
         for i in range(len(all_reactant_indices)): # per entry
-            for j in range(len(all_reactant_indices[i])): # per reactant
+            entry = self.entries[i]
+            if isinstance(entry, tuple):
+                assert len(all_reactant_indices[i]) == 1
+                entry, idx = entry
+                reactant_indices = [idx]
+            else:
+                reactant_indices = range(len(all_reactant_indices[i]))
+            for idx, j in enumerate(reactant_indices): # per reactant
                 c = 0
-                for k in range(len(all_reactant_indices[i][j])): # per available reactant
-                    # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                            
-                    idxes = all_reactant_indices[i][j]
+                idxes = all_reactant_indices[i][idx]
+                for k in range(len(idxes)): # per available reactant
+                    # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                                                
                     if idxes[k]:
                         # add this reactant to self.rxn_map
-                        reactant = self.rxn_map[self.entries[i]].available_reactants[j][k]
-                        rxn_map_copy[self.entries[i]].available_reactants[j].append(reactant)
+                        reactant = self.rxn_map[entry].available_reactants[j][k]
+                        rxn_map_copy[entry].available_reactants[j].append(reactant)
                         idxes[k] = c                                
                         c += 1
                     else:
@@ -1278,6 +1362,10 @@ class Program:
         
         logger.info(f"done post-processing {len(res)} products")
         if keep_prods:
+            for e in self.product_map._product_map:
+                for interm in self.product_map._product_map[e]:
+                    if list(self.product_map._product_map[e][interm]) == [(1, 1), 0]:
+                        breakpoint()            
             self.product_map.save()
             
         self.rxn_map = rxn_map_copy
@@ -1302,7 +1390,7 @@ class Program:
             new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
             new_fpaths[entry_key] = new_fpath                        
             with open(new_fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
-                (json.dump if PRODUCT_JSON else pickle.dump)(p.product_map[(entry_key,)], f)
+                (ProductMap.json_dump if PRODUCT_JSON else pickle.dump)(p.product_map[(entry_key,)], f)
         pmap_link = ProductMapLink(new_fpaths)
         p.product_map = pmap_link
         return p
@@ -1824,16 +1912,22 @@ class Skeleton:
         """
         whole_tree = nx.DiGraph()
         for i in tree.nodes():
-            whole_tree.add_node(i, smiles=st.chemicals[i].smiles)
+            whole_tree.add_node(i, smiles=st.chemicals[i].smiles)            
         for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
+            if len(smile_set[r.parent]) > 1:
+                breakpoint()
             p = smile_set[r.parent][0]         
             whole_tree.add_node(j, rxn_id=r.rxn_id)
             whole_tree.add_edge(p, j)
-            inds = []
-            for c in r.child:
-                inds.append(smile_set[c][0])
-                smile_set[c].pop(0)
-            for i in inds:
+            inds = []                        # 
+            # for c in r.child: # TODO: use edges instead
+            #     inds.append(smile_set[c][0])
+            #     smile_set[c].pop(0)
+            for edge in st.edges:
+                if edge[0] == p:
+                    inds.append(edge[1])   
+            for child, i in enumerate(inds):
+                whole_tree.nodes[i]['child'] = ['left', 'right'][child]
                 assert tree.has_edge(p, i)
                 whole_tree.add_edge(j, i)
 
@@ -2204,10 +2298,7 @@ class Skeleton:
                     root = b
                     continue                
                 if self.pred(self.pred(b)) == a:
-                    child = 'left'
-                    if len(list(self.tree.successors(a))) == 2:
-                        if list(self.tree.successors(a))[1] == self.pred(b):
-                            child = 'right'                            
+                    child = self.tree.nodes[self.pred(b)]['child']                        
                     g.add_edge(a, b)
                     g.nodes[b]['child'] = child    
         
