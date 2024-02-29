@@ -107,7 +107,7 @@ def get_parg(syntree, min_r_set, index, args):
             sk.mask = fill_in
             pargs.append([i, sk, args, min_r_set, [sk.tree_root] + fill_in])    
     else:
-        for i in range(2**(len(sk.tree)-len(min_r_set))):
+        for i in range(2**(len(sk.tree)-len(min_r_set))-1):
             sk.reset(min_r_set)
             zero_mask_inds = np.where(sk.mask == 0)[0]
             bool_mask = get_bool_mask(i)
@@ -135,6 +135,9 @@ def main():
         # if index == 2:
         #     breakpoint()
         # figure out "a" minimal resolving set   
+        if kth_largest[index] >= 20:
+            continue
+        print(f"class {index} which is {kth_largest[index]+1}th most represented")
         sk = Skeleton(st, index)
         edge_index = np.array(sk.tree.edges).T           
         pargs = []
@@ -154,11 +157,11 @@ def main():
         else:
             min_r_set = [sk.tree_root]
         
-        # with Pool(args.ncpu) as p:
-        #     pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
-        pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
+        with Pool(args.ncpu) as p:
+            pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
+        # pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
-        print(f"mapping {len(pargs)} for class {index} which is {kth_largest[index]+1}th most represented")
+        print(f"mapping {len(pargs)}")
         if args.num_trees_per_batch == -1:
             batch_size = 1
         else:

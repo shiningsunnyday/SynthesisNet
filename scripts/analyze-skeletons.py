@@ -39,7 +39,7 @@ def get_args():
     parser.add_argument(
         "--visualize-dir",
         type=str,
-        default="results/viz/",
+        default="",
         help="Input file for the skeletons of syntree-file",
     )
     # Visualization args
@@ -103,8 +103,10 @@ if __name__ == "__main__":
             print(f"count: {len(v)}") 
         pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))    
 
-    count_bbs(args, skeletons)
-    count_rxns(args, skeletons)
-    vis_skeletons(args, skeletons)
-    count_skeletons(args, skeletons)
-    
+    if args.visualize_dir:
+        os.makedirs(args.visualize_dir, exist_ok=True)
+        count_bbs(args, skeletons)
+        count_rxns(args, skeletons)
+        vis_skeletons(args, skeletons)
+        count_skeletons(args, skeletons)
+        

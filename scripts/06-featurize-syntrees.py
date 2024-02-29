@@ -93,7 +93,7 @@ def featurize_data(
     steps = []
     unsuccessfuls = []
     it = tqdm(syntree_collection) if verbose else syntree_collection
-    for i, syntree in enumerate(it):
+    for i, syntree in tqdm(enumerate(it)):
         try:
             state, step = syntree_featurizer.featurize(syntree, sk_set)
         except Exception as e:

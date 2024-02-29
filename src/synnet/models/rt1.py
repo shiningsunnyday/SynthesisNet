@@ -61,7 +61,7 @@ if __name__ == "__main__":
     logger.info(f"Set up dataloaders.")
 
     # Fetch Molembedder and init BallTree
-    molembedder = _fetch_molembedder()
+    molembedder = _fetch_molembedder(args)
     sk_dim = 0
     if args.skeleton_dir:        
         sk_dim = 256
@@ -81,7 +81,7 @@ if __name__ == "__main__":
         num_dropout_layers=1,
         task="regression",
         loss="mse",
-        valid_loss="faiss-knn",
+        valid_loss="nn_accuracy",
         optimizer="adam",
         learning_rate=3e-4,
         val_freq=1,
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     # Create trainer
     trainer = pl.Trainer(
         accelerator='gpu',
-        devices=[0],
+        devices=[1],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],

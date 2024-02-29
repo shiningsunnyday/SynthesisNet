@@ -92,13 +92,18 @@ def main(args):
         node_mask = np.concatenate(res, axis=0)                            
         with mp.Pool(50) as p:
             res = p.starmap(load_npy, [(input_dir,f"{i}_{ind}","smiles") for ind in tqdm(range(index), desc="loading smiles")])                         
-        smiles = np.concatenate(res, axis=0)           
-        breakpoint()
-        start_inds = [0]
-        for j, s in enumerate(smiles):
-            if s == smiles[start_inds[-1]]:
-                continue
-            start_inds.append(j)
+        smiles = np.concatenate(res, axis=0)   
+
+        # mask to node_mask.sum() < len(node_mask)
+        assert node_mask.shape[0]*node_mask.shape[1] == y.shape[0]
+        node_mask.sum(axis=-1) == node_mask.shape[1]
+
+        start_inds = []
+        prev_sum = node_mask[0].sum()
+        for j, nm in enumerate(node_mask):
+            assert nm.sum() >= prev_sum
+            if nm.sum() == prev_sum:            
+                start_inds.append(j)
         for j in range(len(start_inds)-1):
             if (start_inds[j+1]-start_inds[j]) != (start_inds[1]-start_inds[0]):
                 breakpoint()

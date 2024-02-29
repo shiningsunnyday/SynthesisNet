@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # Create trainer
     trainer = pl.Trainer(
         accelerator='gpu',
-        devices=[0],
+        devices=[1],
         max_epochs=max_epochs,
         callbacks=[checkpoint_callback, tqdm_callback],
         logger=[tb_logger, csv_logger],

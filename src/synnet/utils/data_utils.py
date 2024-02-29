@@ -1915,8 +1915,15 @@ class Skeleton:
             whole_tree.add_node(i, smiles=st.chemicals[i].smiles)            
         for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
             if len(smile_set[r.parent]) > 1:
-                breakpoint()
-            p = smile_set[r.parent][0]         
+                c_ind = -1
+                for ind in smile_set[r.parent]:
+                    if st.chemicals[ind].child == r.rxn_id:
+                        if c_ind != -1:
+                            breakpoint()
+                        c_ind = ind                
+            else:
+                c_ind = 0
+            p = smile_set[r.parent][c_ind]
             whole_tree.add_node(j, rxn_id=r.rxn_id)
             whole_tree.add_edge(p, j)
             inds = []                        # 

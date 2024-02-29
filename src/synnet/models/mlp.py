@@ -46,7 +46,7 @@ class MLP(pl.LightningModule):
         self.ncpu = ncpu
         self.val_freq = val_freq
         self.molembedder = molembedder
-        self.X = np.load(X) if (X is not None) else molembedder.embeddings
+        self.X = torch.Tensor(np.load(X)) if (X is not None) else (molembedder.embeddings if molembedder is not None else None)
         # self.nn = NearestNeighbors(n_neighbors=1)
         # self.nn.fit(molembedder.embeddings)
         modules = []
@@ -97,7 +97,6 @@ class MLP(pl.LightningModule):
         """The complete validation loop."""
         if self.trainer.current_epoch % self.val_freq != 0:
             return None
-        breakpoint()
         x, y = batch
         y_hat = self.layers(x)
         if self.valid_loss == "cross_entropy":
@@ -110,8 +109,8 @@ class MLP(pl.LightningModule):
             # NOTE: Very slow!
             # Performing the knn-search can easily take a couple of minutes,
             # even for small datasets.
-            y = nn_search_list(y.detach().cpu().numpy(), self.X)
-            y_hat = nn_search_list(y_hat.detach().cpu().numpy(), self.X)
+            y = nn_search_list(y.detach().cpu(), self.X)
+            y_hat = nn_search_list(y_hat.detach().cpu(), self.X)
             accuracy = (y_hat == y).sum() / len(y)
             loss = 1 - accuracy
         elif self.valid_loss == "faiss-knn":
@@ -232,7 +231,7 @@ class GNN(pl.LightningModule):
         self.ncpu = ncpu
         self.val_freq = val_freq
         self.molembedder = molembedder
-        self.X = np.load(X) if (X is not None) else molembedder.embeddings
+        self.X = torch.Tensor(np.load(X)) if (X is not None) else molembedder.embeddings
         self.valid_steps_y = []
         self.valid_steps_y_hat = []
         self.model = GNNModel(**model_kwargs)

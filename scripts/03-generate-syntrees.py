@@ -35,6 +35,7 @@ def get_args():
         default="data/pre-process/building-blocks/enamine-us-smiles.csv.gz",  # TODO: change
         help="Input file with SMILES strings (First row `SMILES`, then one per line).",
     )
+    parser.add_argument("--top-bbs-file", help='if given, consider only these bbs')
     parser.add_argument(
         "--rxn-templates-file",
         type=str,
@@ -55,7 +56,7 @@ def get_args():
     )
     # Parameters
     parser.add_argument(
-        "--number-syntrees", type=int, default=100, help="Number of SynTrees to generate."
+        "--number-syntrees", type=int, default=600000, help="Number of SynTrees to generate."
     )
 
     # Processing
@@ -93,7 +94,7 @@ def generate() -> Tuple[dict[int, str], list[Union[SyntheticTree, None]]]:
     for i in myrange:
         st, e = wraps_syntreegenerator_generate(stgen)
         outcomes[i] = e.__class__.__name__ if e is not None else "success"
-        syntrees.append(st)
+        syntrees.append(st)    
 
     return outcomes, syntrees
 
@@ -106,7 +107,11 @@ if __name__ == "__main__":
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
 
     # Load assets
-    bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
+    # building blocks
+    if args.top_bbs_file:
+        bblocks = [l.rstrip('\n') for l in open(args.top_bbs_file).readlines()]
+    else:
+        bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)            
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
     logger.info("Loaded building block & rxn-template assets.")
 

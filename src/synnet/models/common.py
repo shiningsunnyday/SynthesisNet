@@ -124,7 +124,7 @@ def load_gnn_from_ckpt(ckpt_file: str):
     return model
 
 
-def find_best_model_ckpt(path: str) -> Union[Path, None]:
+def find_best_model_ckpt(path: str, version=None) -> Union[Path, None]:
     """Find checkpoint with lowest val_loss.
 
     Poor man's regex:
@@ -133,13 +133,19 @@ def find_best_model_ckpt(path: str) -> Union[Path, None]:
     """
     ckpts = Path(path).rglob("*.ckpt")
     best_model_ckpt = None
-    lowest_loss = 10_000  # ~ math.inf
+    lowest_loss = 10_000  # ~ math.inf    
     for file in ckpts:
-        stem = file.stem
-        val_loss = float(stem.split("val_loss=")[-1])
-        if val_loss < lowest_loss:
-            best_model_ckpt = file
-            lowest_loss = val_loss
+        if version is not None:
+            if str(file).find(f"version_{version}") != -1:
+                return file
+        else:
+            stem = file.stem
+            val_loss = float(stem.split("val_loss=")[-1])
+            if val_loss < lowest_loss:
+                best_model_ckpt = file
+                lowest_loss = val_loss
+    if version is None:
+        raise AssertionError(f"{path} {version} has no ckpt")
     return best_model_ckpt
 
 

@@ -637,7 +637,6 @@ def hash_programs(all_progs, output_dir):
 
 
 if __name__ == "__main__":
-
     # Parse input args
     args = get_args()
     if args.cache_dir and args.cache_dir != PRODUCT_DIR:
@@ -648,7 +647,6 @@ if __name__ == "__main__":
         breakpoint()                
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)    
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
-
     if os.path.exists(args.skeleton_file):
         # Use to filter building blocks
         skeletons = pickle.load(open(args.skeleton_file, 'rb'))            
@@ -658,8 +656,13 @@ if __name__ == "__main__":
                 for bblock in bblocks:
                     bb_counts[bblock]
             bblocks = sorted(bb_counts.keys(), key=lambda x:-bb_counts[x])                       
-            if args.top_bb != -1:
-                bblocks = bblocks[:args.top_bb]                            
+            if args.top_bb != -1:                
+                bblocks = bblocks[:args.top_bb]
+                bb_path = os.path.join(args.visualize_dir, f'bblocks-top-{args.top_bb}.txt')
+                with open(bb_path, 'w+') as f:
+                    for bb in bblocks:
+                        f.write(f"{bb}\n")
+                breakpoint()
             print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")                
         if args.top_rxn:            
             rxn_counts = count_rxns(args, skeletons, rxn_templates, vis=False)
@@ -690,6 +693,7 @@ if __name__ == "__main__":
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
+    breakpoint()
     all_progs = create_run_programs(args, bbf, size=args.depth)
     if args.stats:        
         for stat in args.stats:

@@ -105,9 +105,9 @@ if __name__ == "__main__":
             continue
 
         # Filter 2: Is root molecule "pharmaceutically interesting?"
-        keep_tree = interesting_mol_filter.filter(st)
-        if not keep_tree:
-            continue
+        # keep_tree = interesting_mol_filter.filter(st)
+        # if not keep_tree:
+        #     continue
 
         # We passed all filters. This tree ascended to our dataset
         syntrees.append(st)

@@ -90,7 +90,7 @@ if __name__ == "__main__":
         valid_loss="nn_accuracy", # mse
         optimizer="adam",
         learning_rate=3e-4,
-        val_freq=10,
+        val_freq=1,
         molembedder=molembedder,
         ncpu=args.ncpu,
         X=args.mol_embedder_file if args.mol_embedder_file else None

@@ -28,9 +28,10 @@ from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt, load_
 from synnet.models.gnn import PtrDataset
 from synnet.models.mlp import nn_search_list
 from synnet.MolEmbedder import MolEmbedder
-from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
+from synnet.utils.data_utils import Reaction, ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
 from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search
 import torch
+import rdkit.Chem as Chem
 from torch_geometric.data import Data
 
 logger = logging.getLogger(__name__)
@@ -152,7 +153,7 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
             exist = os.path.exists(path)
         else:
             exist = False
-        if exist:                     
+        if exist:                    
             e = str(node_map[pred])
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
@@ -209,7 +210,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 pick the highest confidence one
                 fill it in
             """        
-            
+            print(f"decode step {sk.mask}")
             # prediction problem        
             _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
             for i in range(len(X)):
@@ -290,15 +291,20 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
         postorder = list(nx.dfs_postorder_nodes(sk.tree, source=sk.tree_root))
         for i in postorder:
             if sk.rxns[i]:
-                reactants = tuple(sk.tree.nodes[j]['smiles'] for j in list(sk.tree.successors(i)))            
+                succ = list(sk.tree.successors(i))
+                if sk.tree.nodes[succ[0]]['child'] == 'right':
+                    succ = succ[::-1]
+                reactants = tuple(sk.tree.nodes[j]['smiles'] for j in succ)
                 if len(reactants) != rxns[sk.tree.nodes[i]['rxn_id']].num_reactant:
                     return False
-                interm = rxns[sk.tree.nodes[i]['rxn_id']].run_reaction(reactants)              
+                interm = Reaction(sk.tree.nodes[i]['smirks']).run_reaction(reactants)              
                 pred = list(sk.tree.predecessors(i))[0]
                 if interm is None:
                     return False
                 sk.tree.nodes[pred]['smiles'] = interm
-        correct = sk.tree.nodes[sk.tree_root]['smiles'] == sk_true.tree.nodes[sk_true.tree_root]['smiles']
+        smi1 = Chem.CanonSmiles(sk.tree.nodes[sk.tree_root]['smiles'])
+        smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
+        correct = smi1 == smi2
     return correct
 
 
@@ -369,16 +375,86 @@ def get_args():
         default="test",
         help="Choose from ['train', 'valid', 'test', 'chembl'] or provide a file with one SMILES per line.",
     )
+    parser.add_argument("--top-bbs-file", help='if given, consider only these bbs')
     parser.add_argument("--top-k", default=1, type=int)
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder'])
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
+    parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
+
+def get_metrics(targets, all_sks):
+    assert len(targets) == len(all_sks)
+    total_incorrect = {} 
+    if args.forcing_eval:
+        correct_summary = {}
+    else:
+        total_correct = {}                     
+        
+    for smi, sks in zip(targets, all_sks):
+        tree_id = str(np.array(sks[0].tree.edges))
+        if tree_id not in total_incorrect: 
+            total_incorrect[tree_id] = {}
+        if not args.forcing_eval and tree_id not in total_correct:
+            total_correct[tree_id] = {'correct': 0, 'total': 0, 'all': []}
+        if args.forcing_eval and tree_id not in correct_summary:
+            correct_summary[tree_id] = {'sum_pool_correct': 0, 'total_pool': 0}            
+        if args.forcing_eval:            
+            best_correct_steps = []            
+            for sk in sks:
+                correct_steps = test_correct(sk, lookup[smi], rxns, method='preorder', forcing=True)
+                if sum(correct_steps) >= sum(best_correct_steps):
+                    best_correct_steps = correct_steps                    
+            correct_summary[tree_id]['sum_pool_correct'] += sum(best_correct_steps)
+            correct_summary[tree_id]['total_pool'] += len(best_correct_steps)                
+            correct_summary[tree_id]['step_by_step'] = correct_summary[tree_id]['sum_pool_correct']/correct_summary[tree_id]['total_pool']                              
+            summary = {k: v['step_by_step'] for (k, v) in correct_summary.items()}
+            print(f"step-by-step: {summary}")                
+        else:
+            correct = False
+            for sk in sks:
+                if args.test_correct_method == 'postorder':
+                    correct = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
+                else:
+                    correct, incorrect = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)                        
+                if correct:
+                    break
+            if args.test_correct_method == 'preorder':
+                if not correct:
+                    update(total_incorrect[tree_id], incorrect)
+            total_correct[tree_id]['correct'] += correct
+            total_correct[tree_id]['total'] += 1
+            total_correct[tree_id]['all'] += [correct]
+            # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
+            summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
+            if args.test_correct_method == 'preorder':
+                print(f"total summary: {summary}, total incorrect: {total_incorrect}")     
+            else:
+                print(f"total summary: {summary}")
+    if args.forcing_eval:
+        return correct_summary
+    else:
+        return total_correct, total_incorrect
+
+
+
+def decode(smi):
+    sk = deepcopy(lookup[smi])    
+    sk.clear_tree(forcing=args.forcing_eval)
+    sk.modify_tree(sk.tree_root, smiles=smi)              
+    if args.mermaid:
+        skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
+    else:
+        skviz = None
+    print(f"begin decoding {smi}")
+    sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                                
+    print(f"done decoding {smi}")
+    return sks
 
 
 def main(args):
@@ -390,6 +466,12 @@ def main(args):
     logger.info(f"Successfully read {args.rxns_collection_file}.")
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)    
 
+    # building blocks
+    if args.top_bbs_file:
+        TOP_BBS = set([l.rstrip('\n') for l in open(args.top_bbs_file).readlines()])
+    else:
+        TOP_BBS = BuildingBlockFileHandler().load(args.building_blocks_file)    
+
     # Load skeleton set
     sk_set = None
     if args.skeleton_set_file:        
@@ -399,50 +481,35 @@ def main(args):
         syntree_set = []
         SKELETON_INDEX = []
         for ind in range(len(skeleton_set.sks)):
-            # if len(list(skeleton_set.skeletons)[ind].reactions) == 2:            
-            sk = skeleton_set.sks[ind]
-            good = True
-            for idx in range(len(sk.tree)):
-                if sk.rxns[idx]:
-                    rxn_id = sk.tree.nodes[idx]['rxn_id']
-                    if rxns[rxn_id].num_reactant == 2:
-                        # if one is bb, one is rxn, not covered by enumeration
-                        succs = list(sk.tree.successors(idx))
-                        if sk.leaves[succs[0]] ^ sk.leaves[succs[1]]:
-                            good = False            
-            if sk.rxns.sum() > 2:
-                good = False
-            if good:
-                SKELETON_INDEX.append(ind)        
-        TOP_BBS = ['CC(C)NS(=O)(=O)c1ccccc1C(=O)O', 'CCNS(=O)(=O)c1cc([N+](=O)[O-])ccc1C(=O)O', 'CC(C)(C)NC(=O)c1ccccc1C(=O)O', 'O=C(O)c1ccccc1C(=O)NC12CC3CC(CC(C3)C1)C2', 'O=C(O)c1ccccc1C(=O)Nc1ccc(-c2ccccc2)cc1', 'O=C(O)c1ccccc1C(=O)Nc1ccccc1', 'O=C(O)c1ccccc1C(=O)Nc1ccccn1', 'CC(C)S(=O)(=O)c1ccccc1C(=O)O', 'O=C(O)c1ccccc1S(=O)(=O)C(F)F', 'Nc1cc(Cl)ccc1S', 'Nc1c(F)cc(Br)cc1S', 'Nc1cccnc1S', 'Nc1c(Br)cc(Br)cc1C=O', 'Nc1c(Cl)cc(Cl)cc1C=O', 'Cc1ccc(Cl)c(C=O)c1N', 'Cc1cc(Cl)cc(C=O)c1N', 'O=C1C(=O)c2ccc(Br)cc2-c2ccccc21', 'Nc1ccc(Br)cc1C=O', 'Nc1cc(Cl)cc(Cl)c1C=O', 'Nc1c(C=O)ccc(Br)c1F', 'Nc1c(Cl)cccc1C=O', 'Nc1ccc(Br)c(F)c1C=O', 'Nc1c(F)ccc(Cl)c1C=O', 'Nc1c(O)c(Br)cc(Br)c1C(=O)O', 'O=C(C(=O)c1ccc(F)cc1)c1ccc(F)cc1', 'O=C1C(Br)C2C3CC4C(C(=O)C(Br)C42)C13', 'O=C1C2OC2C(=O)C2C1C1(Cl)C(Cl)=C(Cl)C2(Cl)C1(Cl)Cl', 'Nc1c(C(=O)O)ccc(Cl)c1O', 'COc1ccc(C(=O)C(=O)c2ccc(OC)cc2)cc1', 'Nc1c(O)ccc(Cl)c1C(=O)O', 'Br.Nc1c(C(=O)O)ccc(Cl)c1O', 'O=C1CCC(=O)C1Cl', 'N#CCC(N)=O', 'O=C(C(=O)c1ccc(-c2ccccc2)cc1)c1ccc(-c2ccccc2)cc1', 'O=C1C(=O)c2ccccc2-c2ccccc21', 'Nc1c(F)cccc1C=O', 'O=C(C(=O)c1ccccc1)c1ccccc1', 'COC(=O)C1CC(=O)C(C(=O)OC)CC1=O', 'O=C1C(Br)=CC2C1C1C=CC2(Br)C1=O', 'Cc1ccc(C(=O)C(=O)c2ccccc2)cc1C', 'Nc1c(O)cccc1C(=O)O', 'Nc1cc(Cl)c(Br)cc1C(=O)O', 'Cc1cccc(C=O)c1N', 'CCOC(=O)C1CC(=O)C(C(=O)OCC)CC1=O', 'O=C1CC(C(=O)CCl)C1', 'Nc1cc(F)c([N+](=O)[O-])cc1C(=O)O', 'CCOC(=O)C(CC(C)=O)C(=O)C1CC1', 'Nc1c(Br)ccc(Br)c1C(=O)O', 'Nc1cc(F)cc(F)c1C=O', 'CCOC(=O)C(CC(C)=O)C(C)=O', 'COc1cc(N)c(C(=O)O)c(Br)c1', 'Nc1cc(O)c(C(=O)O)cc1C(=O)O', 'CCOC(=O)C(CC(=O)C1CC1)C(C)=O', 'Nc1c(Br)ccc(F)c1C(=O)O', 'CCOC(=O)C(CC(=O)C1CC1)C(=O)C1CC1', 'COC1(OC)C2(Cl)C3C(=O)C4C5C(=O)C3C1(Cl)C5(Cl)C42Cl', 'Nc1c(I)cccc1C(=O)O', 'C=CC=CCN.Cl', 'Cc1c(Cl)cc(N)c(C(=O)O)c1Cl', 'CCOC(=O)C(C(C)=O)C(C)C(C)=O', 'Cc1cc(Cl)c(N)c(C(=O)O)c1', 'Cc1cc(Br)c(N)c(C(=O)O)c1', 'C=CC(C)=CCC(=O)O', 'COc1ccc(C(=O)O)c(N)c1Br', 'Nc1cc(Br)cc(C(=O)O)c1N', 'CCC(C)C1OC2(CCC1C)CC1CC(CC=C(C)C(OC3CC(OC)C(OC4CC(OC)C(O)C(C)O4)C(C)O3)C(C)C=CC=C3COC4C(O)C(C)=CC(C(=O)O1)C34O)O2', 'Cc1c(Br)ccc(N)c1C(=O)O.Cl', 'Nc1c(F)cc(Br)cc1C(=O)O', 'COc1cc(Cl)cc(N)c1C(=O)O', 'Cl.Nc1ccc(Br)c(F)c1C(=O)O', 'COc1cc(N)c(C(=O)O)cc1Cl', 'CC(C)C1=CC2=CCC3C(C)(C(=O)O)CCCC3(C)C2CC1', 'Nc1c(Br)cc(F)cc1C(=O)O', 'Nc1cccc(I)c1C(=O)O', 'CCC=CC=CC(C)O', 'O=C1CCC2C(=O)CCC12', 'CCOC(=O)C(CC(=O)C(C)(C)C)C(C)=O', 'Nc1cc(F)cc(Cl)c1C(=O)O', 'Nc1cc(Cl)c(I)cc1C(=O)O', 'Nc1ccc(Oc2ccc(Cl)cc2)cc1C(=O)O', 'C=CC=CCBr', 'Nc1c(F)ccc(Br)c1C(=O)O', 'CSc1ccc(N)cc1Br', 'Cc1c(N)c(C(=O)O)cc(F)c1Br', 'Nc1c(C(=O)O)cc(Cl)c(Br)c1Cl', 'O=C1CCC(=O)C12CC2', 'Nc1ccc(Br)cc1C(=O)O', 'Nc1c(Br)cc(Cl)cc1C(=O)O', 'Nc1ccc(Cl)cc1C(=O)O', 'C=CC=CCCN.Cl', 'Nc1ccc(I)cc1C(=O)O', 'COc1cc(OC)c(C(=O)O)c(N)c1Cl', 'Nc1c(C(=O)O)ccc(Cl)c1F', 'Br.Nc1c(Cl)cc(Br)cc1C(=O)O', 'Nc1cc(Cl)ccc1C(=O)O', 'CC1(C)C(=O)C2C(C1=O)C2(C)C', 'Cc1ccc(Br)c(N)c1C(=O)O', 'COc1ccccc1NS(=O)(=O)c1ccc(N)c(C(=O)O)c1', 'Nc1cc(Br)c(F)cc1C(=O)O', 'CCc1cc(Br)cc(C(=O)O)c1N']
-        rep = set()
+            sk = skeleton_set.sks[ind]      
+            SKELETON_INDEX.append(ind)        
+        if args.one_per_class:
+            rep = set()
         for syntree in syntree_set_all:        
             index = skeleton_set.lookup[syntree.root.smiles][0].index    
             if len(skeleton_set.lookup[syntree.root.smiles]) == 1: # one skeleton per smiles                
                 if index in SKELETON_INDEX:
-                # if index in SKELETON_INDEX and index not in rep:
-                    # rep.add(index)
-
-                # if len(syntree.reactions) == 2:
-                #     if rxns[syntree.reactions[0].rxn_id].num_reactant == 2:
-                #         if rxns[syntree.reactions[1].rxn_id].num_reactant == 1:
-                #             breakpoint()
-                    syntree_set.append(syntree)
-                # if index in [0,1,2,3,4]:
-                #     syntree_set.append(syntree)        
+                    if args.one_per_class:
+                        if index not in rep:
+                            rep.add(index)
+                            syntree_set.append(syntree)
+                    else:
+                        syntree_set.append(syntree)       
         targets = [syntree.root.smiles for syntree in syntree_set]
         lookup = {}
         # Compute the gold skeleton
-        all_smiles = dict(zip([st.root.smiles for st in syntree_set], range(len(syntree_set))))
         for i, target in enumerate(targets):
-            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)
-            if not np.array([sk.tree.nodes[n]['smiles'] in TOP_BBS for n in sk.tree if sk.leaves[n]]).all():
-                continue                
-            lookup[target] = sk
+            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index) 
+            good = True     
+            for n in sk.tree:
+                if sk.leaves[n]:
+                    if sk.tree.nodes[n]['smiles'] not in TOP_BBS:
+                        good = False
+            if good:
+                lookup[target] = sk
         targets = list(lookup)
         print(f"{len(targets)}/{len(syntree_set_all)} syntrees")
     else:
-
         # Load data ...
         logger.info("Start loading data...")
         # ... query molecules (i.e. molecules to decode)    
@@ -472,62 +539,26 @@ def main(args):
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
 
+    # Set some global vars for mp
+    for var_name in ['args', 'lookup', 'rxn_gnn', 'bb_gnn', 'bb_emb', 'rxn_templates', 'bblocks', 'rxns']:
+        globals()[var_name] = locals()[var_name]
+    # targets = targets[:10]
     if args.ncpu == 1:
         results = []
-        total_incorrect = {} 
-        if args.forcing_eval:
-            correct_summary = {}
-        else:
-            total_correct = {}                   
-    
+        all_sks = []
         for no, smi in tqdm(enumerate(targets)):
-            sk = deepcopy(lookup[smi])
-            tree_id = str(np.array(sk.tree.edges))
-            if tree_id not in total_incorrect: 
-                total_incorrect[tree_id] = {}
-            if not args.forcing_eval and tree_id not in total_correct:
-                total_correct[tree_id] = {'correct': 0, 'total': 0}
-            if args.forcing_eval and tree_id not in correct_summary:
-                correct_summary[tree_id] = {'sum_pool_correct': 0, 'total_pool': 0}
-            sk.clear_tree(forcing=args.forcing_eval)
-            sk.modify_tree(sk.tree_root, smiles=smi)              
-            if args.mermaid:
-                skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
-            else:
-                skviz = None  
-            sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                    
-            best_correct_steps = []
-            for sk in sks:
-                if args.forcing_eval:
-                    correct_steps = test_correct(sk, lookup[smi], rxns, method='preorder', forcing=True)
-                    if sum(correct_steps) >= sum(best_correct_steps):
-                        best_correct_steps = correct_steps                    
-                else:
-                    if args.test_correct_method == 'postorder':
-                        correct = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
-                    else:
-                        correct, incorrect = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)                        
-                    if correct:
-                        break
-            if not correct:
-                update(total_incorrect[tree_id], incorrect)
-            if args.forcing_eval:
-                # if not correct:
-                #     # implement a procedure to check if target can be recovered another way
-                #     breakpoint()
-                correct_summary[tree_id]['sum_pool_correct'] += sum(best_correct_steps)
-                correct_summary[tree_id]['total_pool'] += len(best_correct_steps)                
-                correct_summary[tree_id]['step_by_step'] = correct_summary[tree_id]['sum_pool_correct']/correct_summary[tree_id]['total_pool']                
-            else:
-                total_correct[tree_id]['correct'] += correct
-                total_correct[tree_id]['total'] += 1
-            if args.forcing_eval:
-                summary = {k: v['step_by_step'] for (k, v) in correct_summary.items()}
-                print(f"step-by-step: {summary}")
-            else:                
-                # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
-                summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
-                print(f"total summary: {summary}, total incorrect: {total_incorrect}")            
+            sks = decode(smi)
+            all_sks.append(sks)
+    else:
+        with mp.Pool(args.ncpu) as p:
+            all_sks = p.map(decode, targets)        
+    
+    if args.forcing_eval:
+        correct_summary = get_metrics(targets, all_sks)
+    else:
+        total_correct, total_incorrect = get_metrics(targets, all_sks)
+    breakpoint()
+
         
 
     # else:

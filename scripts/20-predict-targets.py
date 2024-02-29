@@ -12,6 +12,7 @@ np.random.seed(42)
 import pandas as pd
 import pdb
 import pickle
+from tqdm import tqdm
 
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
@@ -32,9 +33,14 @@ def _fetch_data_chembl(name: str) -> list[str]:
 
 
 def _fetch_data_from_file(name: str) -> list[str]:
-    with open(name, "rt") as f:
-        smis_query = [line.strip() for line in f]
-    return smis_query
+    if '.json.gz' in name:
+        syntree_collection = SyntheticTreeSet().load(name)
+        smiles = [syntree.root.smiles for syntree in syntree_collection]        
+        return smiles
+    else:
+        with open(name, "rt") as f:
+            smis_query = [line.strip() for line in f]
+        return smis_query
 
 
 def _fetch_data(name: str) -> list[str]:
@@ -74,7 +80,6 @@ def wrapper_decoder(smiles: str, sk_coords=None) -> Tuple[str, float, SyntheticT
             max_step=15,
         )
     except Exception as e:
-        pdb.post_mortem()
         logger.error(e, exc_info=e)
         action = -1
 
@@ -109,6 +114,7 @@ def get_args():
     parser.add_argument(
         "--ckpt-dir", type=str, help="Directory with checkpoints for {act,rt1,rxn,rt2}-model."
     )
+    parser.add_argument("--ckpt-versions", type=int, help="If given, use ckpt versions in ckpt-dir", nargs='+')
     parser.add_argument(
         "--skeleton-set-file",
         type=str,
@@ -171,34 +177,50 @@ if __name__ == "__main__":
     # ... models
     logger.info("Start loading models from checkpoints...")
     path = Path(args.ckpt_dir)
-    ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
+    if args.ckpt_versions:
+        versions = args.ckpt_versions
+    else:
+        versions = [None, None, None, None]
+    ckpt_files = []
+    for model, version in zip("act rt1 rxn rt2".split(), versions):
+        ckpt_file = find_best_model_ckpt(path / model, version)
+        ckpt_files.append(ckpt_file)
+    print(ckpt_files)
     act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file) for file in ckpt_files]
     logger.info("...loading models completed.")
 
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
 
-    targets = np.random.choice(targets, 1000)
+    # targets = np.random.choice(targets, 1000)
     if args.ncpu == 1:
         results = []
         for smi in targets:
-            index = sk_set.lookup[smi].index
-            sk_coords = sk_set.coords[index:index+1]
-            results.append(wrapper_decoder(smi, sk_coords))
+            if args.skeleton_set_file:
+                index = sk_set.lookup[smi].index
+                sk_coords = sk_set.coords[index:index+1]
+                results.append(wrapper_decoder(smi, sk_coords))
+            else:
+                results.append(wrapper_decoder(smi))
     else:
-        for i in range(len(targets)):
-            smi = targets[i]
-            index = sk_set.lookup[smi].index
-            sk_coords = sk_set.coords[index:index+1]            
-            targets[i] = (targets[i], sk_coords)
-        with mp.Pool(processes=args.ncpu) as pool:
-            logger.info(f"Starting MP with ncpu={args.ncpu}")
-            results = pool.starmap(wrapper_decoder, targets)
+        if args.skeleton_set_file:
+            for i in range(len(targets)):
+                smi = targets[i]
+                index = sk_set.lookup[smi].index
+                sk_coords = sk_set.coords[index:index+1]            
+                targets[i] = (targets[i], sk_coords)
+            with mp.Pool(processes=args.ncpu) as pool:
+                logger.info(f"Starting MP with ncpu={args.ncpu}")
+                results = pool.starmap(wrapper_decoder, tqdm(targets))
+        else:
+            with mp.Pool(processes=args.ncpu) as pool:
+                logger.info(f"Starting MP with ncpu={args.ncpu}")
+                results = pool.map(wrapper_decoder, tqdm(targets))
     logger.info("Finished decoding.")
 
     # Print some results from the prediction
     # Note: If a syntree cannot be decoded within `max_depth` steps (15),
-    #       we will count it as unsuccessful. The similarity will be 0.
+    #       we will count it as unsuccessful. The similarity will be 0.    
     decoded = [smi for smi, _, _ in results]
     similarities = [sim for _, sim, _ in results]
     trees = [tree for _, _, tree in results]

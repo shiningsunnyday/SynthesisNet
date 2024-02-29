@@ -33,19 +33,51 @@ from sklearn.model_selection import train_test_split
 logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
-
+# all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
+# keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, pe=None, **kwargs):
         super().__init__(**kwargs)
         self.ptrs = ptrs
         self.edge_index = {}
+        self.graphs = {}
+        self.interms_map = {}
+        self.rxns = {}
         self.pe = pe
         for ptr in ptrs:
             _, e, _ = ptr
             if e in self.edge_index:
                 continue
             edges = np.load(e)
-            self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)
+            self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)            
+            self.graphs[e] = nx.DiGraph(list(tuple(x) for x in edges.T))
+            root = -1
+            for pred in self.graphs[e]:
+                if not list(self.graphs[e].predecessors(pred)):
+                    root = pred
+            self.interms_map[e] = [False for _ in self.graphs[e]]
+            self.rxns[e] = [False for _ in self.graphs[e]]
+            for n in nx.dfs_preorder_nodes(self.graphs[e], root):
+                if n == root:
+                    self.interms_map[e][n] = True
+                else:
+                    p = list(self.graphs[e].predecessors(n))[0]
+                    if self.rxns[e][p]:
+                        if list(self.graphs[e].successors(n)):
+                            self.interms_map[e][n] = True
+                        self.rxns[e][n] = False
+                    if self.interms_map[e][p]:
+                        self.interms_map[e][n] = False
+                        self.rxns[e][n] = True
+            self.interms_map[e][root] = False
+        # for e in self.interms_map:
+        #     dataset_index = int(e.split('/')[-1].split('_')[0])
+        #     sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
+        #     mask = (~(sk.rxns | sk.leaves))
+        #     mask[sk.tree_root] = False
+        #     assert (mask == (self.interms_map[e])).all()            
+                    
+
 
 
     @staticmethod
@@ -77,20 +109,10 @@ class PtrDataset(Dataset):
         num_nodes = self.edge_index[e].max()+1
         X = sparse.load_npz(base+'_Xs.npz').toarray()
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
-        # add 1D positional encoding (num_nodes, dim)                
-        dataset_index = int(base.split('/')[-1].split('_')[0])
-        if dataset_index == 0:
-            X[[8,7,6], :2048] = 0
-        elif dataset_index == 1:
-            X[[3], :2048] = 0
-        elif dataset_index == 2:
-            X[[2], :2048] = 0
-        elif dataset_index == 3:
-            X[[5,6], :2048] = 0
-        elif dataset_index == 4:
-            X[[12,11,10,9], :2048] = 0
-        else:
-            raise NotImplementedError # did you fix the zero'ing out issue?
+        # add 1D positional encoding (num_nodes, dim)                        
+        # interm nodes :2048 feats are 0
+        # simulate scenario of retrosynthesis where interms aren't known        
+        X[np.nonzero(self.interms_map[e])[0], :2048] = 0
         if self.pe == 'sin':            
             pe = self.positionalencoding1d(32, num_nodes) # add to target
             X = np.concatenate((X, pe.numpy()), axis=-1)
@@ -124,6 +146,9 @@ def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
         if i not in include_is:
             i += 1
             continue
+        # if i not in keys:
+        #     i += 1
+        #     continue
         does_exist = os.path.exists(os.path.join(input_dir, f"{i}_edge_index.npy"))        
         if not does_exist:
             i += 1
@@ -133,12 +158,13 @@ def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
         while os.path.exists(os.path.join(input_dir, f"{i}_{index}_node_masks.npz")):
             # y = np.load(os.path.join(input_dir, f"{i}_{index}_ys.npy"))
             node_mask = sparse.load_npz(os.path.join(input_dir, f"{i}_{index}_node_masks.npz"))
-            smiles = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))
-            start_inds = [0]
-            for j, s in enumerate(smiles):
-                if s == smiles[start_inds[-1]]:
-                    continue
-                start_inds.append(j)               
+            smiles = np.load(os.path.join(input_dir, f"{i}_{index}_smiles.npy"))  
+            start_inds = []
+            prev_sum = node_mask[0].sum()
+            for j, nm in enumerate(node_mask):
+                assert nm.sum() >= prev_sum
+                if nm.sum() == prev_sum:            
+                    start_inds.append(j)                           
             start_inds = np.where(node_mask.sum(axis=-1) == node_mask.sum(axis=-1).min())[0] # each distinct tree
             n = len(start_inds)
             # print(f"splitting {n} trees into {ratio[0]}-{ratio[1]}-{ratio[2]} for skeleton {i}")
@@ -189,10 +215,13 @@ def load_split_dataloaders(args):
         input_dir[split] = Path(args.gnn_input_feats).parent / (Path(args.gnn_input_feats).name+f'_{split}')        
 
     if not args.gnn_datasets:
-        files = os.listdir(input_dir)        
-        indices = [f.split('_')[0] for f in files]
-        indices = list(map(int, set(indices)))
-        indices = sorted(indices)
+        all_indices = []
+        for split in ['train', 'valid', 'test']:
+            files = os.listdir(input_dir[split])        
+            indices = [f.split('_')[0] for f in files]
+            all_indices += list(map(int, set(indices)))
+        all_indices = list(map(int, set(all_indices)))
+        indices = sorted(all_indices)
         print(f"gnn-datasets has been set to {indices}")
         setattr(args, 'gnn_datasets', indices)    
 

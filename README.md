@@ -143,6 +143,14 @@ python scripts/20-predict-targets.py \
     --output-dir "results/demo-inference/"
 ```
 
+python scripts/20-predict-targets.py \
+    --building-blocks-file $BUILDING_BLOCKS_FILE \
+    --rxns-collection-file $RXN_COLLECTION_FILE \
+    --embeddings-knn-file $EMBEDDINGS_KNN_FILE \
+    --data "data/pre-process/syntrees/top_1000/synthetic-trees-filtered-test.json.gz" \
+    --ckpt-dir "results/logs/" \
+    --output-dir "results/top-1000-inference/"
+
 This script will feed a list of ten molecules to SynNet.
 
 #### Synthesizable Molecular Design

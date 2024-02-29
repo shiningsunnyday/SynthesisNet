@@ -222,8 +222,7 @@ class SynTreeGenerator:
         # Init
         logger.debug(f"Starting synthetic tree generation with {max_depth=} ")
         syntree = SyntheticTree()
-        recent_mol = self._sample_molecule()  # root of the current tree
-
+        recent_mol = self._sample_molecule()  # root of the current tree        
         for i in range(max_depth):
             logger.debug(f"Iteration {i}")
 
