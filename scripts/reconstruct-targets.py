@@ -142,15 +142,19 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
             if not sk.leaves[succ]:
                 sk.mask = [succ]
         if 'rxn' in args.filter_only:
-            sk.tree.nodes[n]['path'] = paths[rxn_id]
+            if len(paths):
+                sk.tree.nodes[n]['path'] = paths[rxn_id]
         # print("path", os.path.join(args.hash_dir, p.get_path()))            
     else:   
         assert sk.leaves[n]
         emb_bb = logits[n][:-NUM_POSS]
         pred = list(sk.tree.predecessors(n))[0]           
         if 'bb' in args.filter_only:            
-            path = sk.tree.nodes[pred]['path']     
-            exist = os.path.exists(path)
+            if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
+                exist = False
+            else:
+                path = sk.tree.nodes[pred]['path']     
+                exist = os.path.exists(path)
         else:
             exist = False
         if exist:                    
@@ -158,7 +162,7 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
             second = len(succs) == 2 and n == succs[1]
-            indices = [bbs.index(smi) for smi in data['bbs'][e][second]]
+            indices = [bbs.index(smi) for smi in data['bbs'][e][int(second)]]
             bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
             smiles = bbs[indices[bb_ind]]
         else:            
@@ -210,7 +214,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 pick the highest confidence one
                 fill it in
             """        
-            print(f"decode step {sk.mask}")
+            # print(f"decode step {sk.mask}")
             # prediction problem        
             _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
             for i in range(len(X)):
@@ -254,7 +258,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                         print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
         else:
             final_sks.append(sk)
-    print(len(final_sks), "beams")
+    # print(len(final_sks), "beams")
     return final_sks
 
 
@@ -451,7 +455,7 @@ def decode(smi):
         skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
     else:
         skviz = None
-    print(f"begin decoding {smi}")
+    # print(f"begin decoding {smi}")
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                                
     print(f"done decoding {smi}")
     return sks
@@ -498,8 +502,11 @@ def main(args):
         targets = [syntree.root.smiles for syntree in syntree_set]
         lookup = {}
         # Compute the gold skeleton
-        for i, target in enumerate(targets):
-            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index) 
+        for i, target in enumerate(targets):            
+            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)             
+            smile_set = [c.smiles for c in syntree_set[i].chemicals]
+            if len(set(smile_set)) != len(smile_set):
+                continue
             good = True     
             for n in sk.tree:
                 if sk.leaves[n]:
@@ -550,8 +557,13 @@ def main(args):
             sks = decode(smi)
             all_sks.append(sks)
     else:
-        with mp.Pool(args.ncpu) as p:
-            all_sks = p.map(decode, targets)        
+        batch_size = 1000
+        all_sks = []
+        for batch in range((len(targets)+batch_size-1)//batch_size):
+            with mp.Pool(args.ncpu) as p:
+                sks_batch = p.map(decode, tqdm(targets[batch_size*batch:batch_size*batch+batch_size]))
+                get_metrics(targets[batch_size*batch:batch_size*batch+batch_size], sks_batch)
+            all_sks += sks_batch
     
     if args.forcing_eval:
         correct_summary = get_metrics(targets, all_sks)

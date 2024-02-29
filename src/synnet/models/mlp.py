@@ -403,7 +403,13 @@ class GNN(pl.LightningModule):
 
 def nn_search_list(y, X, top_k=1):
     def cosine_neighbors(x, y):
-        sims = ((x @ y.T)/(torch.norm(x, dim=-1)[None].T @ torch.norm(y, dim=-1)[None]))
+        y_T = y.T
+        norm = torch.norm(x, dim=-1)[None]        
+        if len(norm.shape) == 2:
+            norm_T = norm.T
+        else:
+            norm_T = norm
+        sims = ((x @ y_T)/(norm_T @ torch.norm(y, dim=-1)[None]))
         return torch.kthvalue(sims, sims.shape[-1]+1-top_k, axis=-1, keepdims=True).indices
     # ind_2 = molembedder.kdtree.query(y, k=1, return_distance=False)  # (n_samples, 1)
     ind_3 = cosine_neighbors(y, X)
