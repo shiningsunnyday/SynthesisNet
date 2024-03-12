@@ -385,7 +385,11 @@ class ProductMap:
     def json_load(f=None, dic=None):
         # simple wrapper that restores - delimited keys into tuple keys
         if f is not None: # base case
-            dic = json.load(f)
+            try:
+                dic = json.load(f)
+            except:
+                print(f)
+                raise
         if isinstance(dic, dict):
             tup_keys = [tuple(map(int, (k.split(DELIM)))) if DELIM in k else k for k in dic]
             dic = dict(zip(tup_keys, dic.values()))
