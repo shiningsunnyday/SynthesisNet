@@ -18,7 +18,7 @@ import os
 import pickle
 from copy import deepcopy
 
-from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS
+from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler, ReactionTemplateFileHandler
 from synnet.visualize.drawers import MolDrawer, RxnDrawer
 from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
@@ -73,11 +73,64 @@ def get_anc(cur, rxn_graph):
             lca = ancs[0]
         else: 
             break         
-    return lca         
+    return lca     
 
 
+def filter_imposs(args, rxn_graph, sk, cur, n):
+    max_depth = max([rxn_graph.nodes[n]['depth'] for n in rxn_graph])
+    paths = []
+    mask_imposs = [False for _ in range(NUM_POSS)]            
+    # use sk to filter out reaction type
+    bi_mol = len(list(sk.tree.successors(n))) == 2
+    for i in range(NUM_POSS):
+        if bi_mol != (rxns[i].num_reactant == 2):
+            mask_imposs[i] = True         
+    if 'rxn' not in args.filter_only:
+        return mask_imposs, None
+    rxn_imposs = deepcopy(mask_imposs)    
+    attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
+    if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
+        # try every reaction, and use existence of hash to filter possibilites            
+        term = rxn_graph.nodes[cur][attr_name]
+        for rxn_id in range(NUM_POSS):
+            rxn_graph.nodes[cur][attr_name] = rxn_id
+            p = Program(rxn_graph)
+            path = os.path.join(args.hash_dir, p.get_path())
+            mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
+            if os.path.exists(path):
+                paths.append(path)
+            else:
+                paths.append('')
+        rxn_graph.nodes[cur][attr_name] = term
+    elif rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
+        lca = get_anc(cur, rxn_graph)
+        # use prog_graph to hash, navigate the file system
+        term = rxn_graph.nodes[cur][attr_name]
+        for rxn_id in range(NUM_POSS):
+            rxn_graph.nodes[cur][attr_name] = rxn_id
+            p = Program(rxn_graph)
+            if 'path' not in rxn_graph.nodes[lca]:
+                breakpoint()
+            if rxn_graph.nodes[lca]['path'][-5:] == '.json': # prev lca exist              
+                path_stem = rxn_graph.nodes[lca]['path'][:-5]                
+                path_stem = Path(path_stem).stem
+                path = os.path.join(args.hash_dir, path_stem, p.get_path())
+                mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
+                if os.path.exists(path):
+                    paths.append(path)
+                else:
+                    paths.append('')                        
+            else:
+                mask_imposs[rxn_id] = True
+                paths.append('')
 
-def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
+        rxn_graph.nodes[cur][attr_name] = term     
+    if sum(mask_imposs) == NUM_POSS:
+        mask_imposs = rxn_imposs
+    return mask_imposs, paths
+
+
+def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
     """
     if rxn
         detect if n is within MAX_DEPTH of root
@@ -87,52 +140,12 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
     """            
     rxn_graph, node_map, _ = sk.rxn_graph()       
-    max_depth = max([rxn_graph.nodes[n]['depth'] for n in rxn_graph])
     if sk.rxns[n]:  
-        cur = node_map[n]  
-        mask_imposs = [False for _ in range(NUM_POSS)]            
-        paths = []    
-        if 'rxn' in args.filter_only:            
-            attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
-            if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
-                # try every reaction, and use existence of hash to filter possibilites            
-                term = rxn_graph.nodes[cur][attr_name]
-                for rxn_id in range(NUM_POSS):
-                    rxn_graph.nodes[cur][attr_name] = rxn_id
-                    p = Program(rxn_graph)
-                    path = os.path.join(args.hash_dir, p.get_path())
-                    mask_imposs[rxn_id] = not os.path.exists(path)
-                    if os.path.exists(path):
-                        paths.append(path)
-                    else:
-                        paths.append('')
-                rxn_graph.nodes[cur][attr_name] = term
-            elif rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
-                lca = get_anc(cur, rxn_graph)
-                # use prog_graph to hash, navigate the file system
-                term = rxn_graph.nodes[cur][attr_name]
-                for rxn_id in range(NUM_POSS):
-                    rxn_graph.nodes[cur][attr_name] = rxn_id
-                    p = Program(rxn_graph)
-                    if 'path' not in rxn_graph.nodes[lca]:
-                        breakpoint()
-                    if rxn_graph.nodes[lca]['path'][-5:] == '.json':                
-                        path_stem = rxn_graph.nodes[lca]['path'][:-5]                
-                        path_stem = Path(path_stem).stem
-                        path = os.path.join(args.hash_dir, path_stem, p.get_path())
-                        mask_imposs[rxn_id] = not os.path.exists(path)
-                        if os.path.exists(path):
-                            paths.append(path)
-                        else:
-                            paths.append('')                        
-                    else:
-                        mask_imposs[rxn_id] = True
-                        paths.append('')
-
-                rxn_graph.nodes[cur][attr_name] = term            
-            if sum(mask_imposs) < NUM_POSS:
-                logits[n][-NUM_POSS:][mask_imposs] = float("-inf")        
-        rxn_id = logits[n][-NUM_POSS:].argmax(axis=-1).item()     
+        cur = node_map[n]          
+        mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
+        assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
+        logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
+        rxn_id = logits_n[-NUM_POSS:].argmax(axis=-1).item()     
         # Sanity check for forcing eval
         sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
         sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
@@ -147,7 +160,7 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
         # print("path", os.path.join(args.hash_dir, p.get_path()))            
     else:   
         assert sk.leaves[n]
-        emb_bb = logits[n][:-NUM_POSS]
+        emb_bb = logits_n[:-NUM_POSS]
         pred = list(sk.tree.predecessors(n))[0]           
         if 'bb' in args.filter_only:            
             if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
@@ -157,22 +170,37 @@ def fill_in(args, sk, n, logits, bb_emb, rxn_templates, bbs, top_bb=1):
                 exist = os.path.exists(path)
         else:
             exist = False
+        failed = False
         if exist:                    
             e = str(node_map[pred])
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
             second = len(succs) == 2 and n == succs[1]
-            indices = [bbs.index(smi) for smi in data['bbs'][e][int(second)]]
-            bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
-            smiles = bbs[indices[bb_ind]]
-        else:            
-            bb_ind = nn_search_list(emb_bb, bb_emb, top_k=top_bb).item()                   
+            if e in data['bbs']:
+                bbs_child = data['bbs'][e][int(second)]
+            else:
+                bbs_child = data['bbs'][f"{e}{DELIM}{int(second)}"]
+                assert len(bbs_child) == 1
+                bbs_child = bbs_child[0]
+            indices = [bbs.index(smi) for smi in bbs_child]
+            if len(indices) >= top_bb:
+                bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
+                smiles = bbs[indices[bb_ind]]
+            else:
+                failed = True
+        if not exist or failed:
+            bb_ind = nn_search_list(emb_bb, bb_emb, top_k=top_bb).item()
             smiles = bbs[bb_ind]
         sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
 
 
 
-def pick_node(sk, logits):
+def dist(emb, bb_emb):
+    dists = (emb-bb_emb).abs().sum(axis=-1)
+    return dists.min()
+
+
+def pick_node(sk, logits, bb_emb):
     """
     implement strategies here,
     each node returned will add a beam to decoding
@@ -190,7 +218,10 @@ def pick_node(sk, logits):
     if best_rxn_n is not None:
         return [n]
     else:
-        return [n for n in logits if not sk.rxns[n]]
+        dists = [dist(logits[n][:-NUM_POSS], bb_emb) for n in logits]
+        n = list(logits)[np.argmin(dists)]
+        return [n]
+        # return [n for n in logits if not sk.rxns[n]]
 
 
 @torch.no_grad()
@@ -238,17 +269,18 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 else:                
                     assert sk.leaves[n]               
                     logits[n] = logits_bb[n]        
-            poss_n = pick_node(sk, logits)                        
+            poss_n = pick_node(sk, logits, bb_emb)
             for n in poss_n:
+                logits_n = logits[n].clone()
                 sk_n = deepcopy(sk)
                 first_bb = sk_n.leaves[n] and (sk_n.leaves)[sk_n.mask == 1].sum() == 0
                 if top_k > 1 and first_bb: # first bb                
                     for k in range(1, 1+top_k):
                         sk_copy = deepcopy(sk_n)
-                        fill_in(args, sk_copy, n, logits, bb_emb, rxn_templates, bblocks, top_bb=k)
+                        fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k)
                         sks.append(sk_copy)
                 else:
-                    fill_in(args, sk_n, n, logits, bb_emb, rxn_templates, bblocks, top_bb=1)
+                    fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1)
                     sks.append(sk_n)
                     if skviz is not None:
                         mermaid_txt = skviz.write(node_mask=sk_n.mask)             
@@ -381,6 +413,7 @@ def get_args():
     )
     parser.add_argument("--top-bbs-file", help='if given, consider only these bbs')
     parser.add_argument("--top-k", default=1, type=int)
+    parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder'])
@@ -456,12 +489,28 @@ def decode(smi):
     else:
         skviz = None
     # print(f"begin decoding {smi}")
-    sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                                
+    try:
+        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                                
+    except Exception as e:
+        logger.error(f"{smi} {e}")
+
     print(f"done decoding {smi}")
     return sks
 
 
+def format_metrics(metrics):
+    res = ""
+    for k, v in metrics.items():
+        res += k + '\n'
+        res += json.dumps(v) + '\n'
+        res += '\n'
+    return res
+
+
+
 def main(args):
+    handler = logging.FileHandler(os.path.join(args.out_dir, "log.txt"))
+    logger.addHandler(handler)
     logger.info("Start.")
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
 
@@ -534,6 +583,7 @@ def main(args):
         MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
     )
     bb_emb = bblocks_molembedder.get_embeddings()
+    
     bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
     logger.info("...loading data completed.")
@@ -549,28 +599,35 @@ def main(args):
     # Set some global vars for mp
     for var_name in ['args', 'lookup', 'rxn_gnn', 'bb_gnn', 'bb_emb', 'rxn_templates', 'bblocks', 'rxns']:
         globals()[var_name] = locals()[var_name]
-    # targets = targets[:10]
-    if args.ncpu == 1:
-        results = []
-        all_sks = []
-        for no, smi in tqdm(enumerate(targets)):
-            sks = decode(smi)
-            all_sks.append(sks)
-    else:
-        batch_size = 1000
-        all_sks = []
-        for batch in range((len(targets)+batch_size-1)//batch_size):
+    # targets = targets[:10]     
+    batch_size = args.batch_size        
+    # decode('CC(Nc1ccc(I)cc1-c1nc(-c2cc(F)ccc2N=C=O)n[nH]1)c1ccc(N)c(O)c1')
+    # decode('CC(C)(N=C=O)C1=Cc2cc(Br)c(C(=O)O)c(N)c2O1')
+    all_sks = []
+    all_targets = []
+    for batch in range((len(targets)+batch_size-1)//batch_size):
+        target_batch = targets[batch_size*batch:batch_size*batch+batch_size]
+        if args.ncpu == 1:
+            sks_batch = []
+            for _, smi in tqdm(enumerate(target_batch)):            
+                sks = decode(smi)
+                sks_batch.append(sks)              
+        else:
             with mp.Pool(args.ncpu) as p:
-                sks_batch = p.map(decode, tqdm(targets[batch_size*batch:batch_size*batch+batch_size]))
-                get_metrics(targets[batch_size*batch:batch_size*batch+batch_size], sks_batch)
-            all_sks += sks_batch
+                sks_batch = p.map(decode, tqdm(target_batch))        
+        all_targets += target_batch
+        all_sks += sks_batch     
+        batch_correct, batch_incorrect = get_metrics(all_targets, all_sks)        
+        logger.info(f"batch {batch} correct: {format_metrics(batch_correct)}")
+        logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
     
     if args.forcing_eval:
         correct_summary = get_metrics(targets, all_sks)
+        logger.info(f"correct summary: {correct_summary}")
     else:
         total_correct, total_incorrect = get_metrics(targets, all_sks)
-    breakpoint()
-
+        logger.info(f"total correct: {format_metrics(total_correct)}")
+        logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
         
 
     # else:

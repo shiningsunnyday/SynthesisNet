@@ -634,7 +634,7 @@ def hash_program(prog, output_dir, make_dir=True):
     """
     We perform bfs search on all possible unmasks satisfying topological order.
     Each unmask can expand a reaction on the frontier.
-    Each unmask is an int (binary mask over the nodes 0...len(prog)-1)
+    Each unmask is an int (binary mask over the nodes 0...len(prog.rxn_tree)-1)
     """
     tree = prog.rxn_tree
     if sorted(list(tree.nodes())) != list(tree.nodes()):
@@ -652,6 +652,8 @@ def hash_program(prog, output_dir, make_dir=True):
         if make_dir:
             os.makedirs(cur_dirname, exist_ok=True)
         cur_fpath = cur_dirname.parent / f"{cur_dirname.name}.json"        
+        # if cur_dirname.name == "7848891a8df1e8a0c1e0d95248466e01":
+        #     breakpoint()
         mask = np.array(list(map(int, cur)))                
         frontier = [f for f in edges[mask[edges[:, 0]] == 1][:, 1] if not mask[f]]        
         if os.path.exists(cur_fpath):   
@@ -662,15 +664,17 @@ def hash_program(prog, output_dir, make_dir=True):
                     'mask': mask.tolist(), # debug
                     'tree': prog.hash(mask, return_json=True) # debug
                     }
-            if mask.sum() == len(mask): # add bb's
-                bb_poss = {}
-                for e in prog.entries:
+            
+            bb_poss = {}
+            for e in prog.entries:               
+                if mask[(e[0] if isinstance(e, tuple) else e)]:
                     bb_poss[e] = []
                     if isinstance(e, tuple):
                         bb_poss[e].append(prog.rxn_map[e[0]].available_reactants[e[1]])
                     else:
                         for avail_reactants in prog.rxn_map[e].available_reactants:
                             bb_poss[e].append(avail_reactants)
+            if bb_poss:
                 data['bbs'] = bb_poss                    
             
         # make/append to json file the continuation
