@@ -16,6 +16,7 @@ def get_args():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=str, default="data/featurized/Xy", help="Directory with X,y data.")
+    parser.add_argument("--results-log", default="results/logs/")
     parser.add_argument("--skeleton-dir", type=str, help="Directory with X,y data.")    
 
     # for training gnn

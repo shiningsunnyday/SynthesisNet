@@ -363,21 +363,21 @@ def main(args):
     )
 
     # Set up Trainer
-    save_dir = Path("results/logs/") / MODEL_ID
+    save_dir = Path(args.results_log) / MODEL_ID
     save_dir.mkdir(exist_ok=True, parents=True)
 
     tb_logger = pl_loggers.TensorBoardLogger(save_dir, name="")
     csv_logger = pl_loggers.CSVLogger(tb_logger.log_dir, name="", version="")
     logger.info(f"Log dir set to: {tb_logger.log_dir}")
-    val_loss_key = args.gnn_valid_loss
+    val_loss_key = f"val_{args.gnn_valid_loss}"
     checkpoint_callback = ModelCheckpoint(
         monitor=val_loss_key,
         dirpath=tb_logger.log_dir,
         filename="ckpts.{epoch}-{"+val_loss_key+":.2f}",
         save_weights_only=False,
     )
-    earlystop_callback = EarlyStopping(monitor="val_loss", patience=3)
-    tqdm_callback = TQDMProgressBar(refresh_rate=int(len(train_dataloader) * 0.05))
+    # earlystop_callback = EarlyStopping(monitor="val_loss", patience=3)
+    # tqdm_callback = TQDMProgressBar(refresh_rate=int(len(train_dataloader) * 0.05))
 
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
@@ -395,6 +395,7 @@ def main(args):
         logger=[tb_logger, csv_logger],
         fast_dev_run=args.fast_dev_run,
         use_distributed_sampler=False,
+        enable_progress_bar=False,
         **gpu_kwargs
     )
 
