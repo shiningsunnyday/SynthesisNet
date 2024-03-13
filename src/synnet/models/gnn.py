@@ -1,6 +1,6 @@
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet
 from synnet.models.mlp import GNN
-from synnet.models.rt1 import _fetch_molembedder
+# from synnet.models.rt1 import _fetch_molembedder
 
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
@@ -32,6 +32,7 @@ from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
+
 
 # all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
 # keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
@@ -341,7 +342,7 @@ def main(args):
     else:
         input_dim = 2*2048+91
     out_dim = 256+91
-    molembedder = _fetch_molembedder(args)
+    # molembedder = _fetch_molembedder(args)
     gnn = GNN(
         c_in=input_dim,
         c_out=out_dim,
@@ -355,7 +356,7 @@ def main(args):
         optimizer="adam",
         learning_rate=args.lr,
         val_freq=1,
-        molembedder=molembedder,
+        # molembedder=molembedder,
         ncpu=args.ncpu,
         X=args.mol_embedder_file,
         datasets=used_is
@@ -368,13 +369,13 @@ def main(args):
     tb_logger = pl_loggers.TensorBoardLogger(save_dir, name="")
     csv_logger = pl_loggers.CSVLogger(tb_logger.log_dir, name="", version="")
     logger.info(f"Log dir set to: {tb_logger.log_dir}")
-
-    # checkpoint_callback = ModelCheckpoint(
-    #     monitor="val_loss",
-    #     dirpath=tb_logger.log_dir,
-    #     filename="ckpts.{epoch}-{val_loss:.2f}",
-    #     save_weights_only=False,
-    # )
+    val_loss_key = args.gnn_valid_loss
+    checkpoint_callback = ModelCheckpoint(
+        monitor=val_loss_key,
+        dirpath=tb_logger.log_dir,
+        filename="ckpts.{epoch}-{"+val_loss_key+":.2f}",
+        save_weights_only=False,
+    )
     earlystop_callback = EarlyStopping(monitor="val_loss", patience=3)
     tqdm_callback = TQDMProgressBar(refresh_rate=int(len(train_dataloader) * 0.05))
 
@@ -388,8 +389,9 @@ def main(args):
     trainer = pl.Trainer(        
         max_epochs=max_epochs,
         callbacks=[
-            # checkpoint_callback, 
-            tqdm_callback],
+            checkpoint_callback, 
+            # tqdm_callback
+        ],
         logger=[tb_logger, csv_logger],
         fast_dev_run=args.fast_dev_run,
         use_distributed_sampler=False,
