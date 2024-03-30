@@ -1894,57 +1894,69 @@ class SyntheticTree:
         
 
 class Skeleton:
-    def __init__(self, st, index):
+
+    def __init__(self, st, index, whole_tree=None, zss_tree=None):
         """
         st: example of SyntheticTree with the skeleton
         This is a dual use class. It also remembers st for later use.
-        """   
-        tree = nx.DiGraph(st.edges)
-        n = len(st.chemicals)
-        smile_set = dict() 
-        for c, ind in zip([c.smiles for c in st.chemicals], range(n)):
-            smile_set[c] = smile_set.get(c, []) + [ind]                          
-        
-        nodes = [ZSSNode(node) for node in tree.nodes()]
-        for a, b in tree.edges:
-            nodes[a].addkid(nodes[b])        
-        self.zss_tree = nodes[-1]
-
         """
-        Build the synthetic tree using the representative st
-        With helper functions to modify this
-        """
-        whole_tree = nx.DiGraph()
-        for i in tree.nodes():
-            whole_tree.add_node(i, smiles=st.chemicals[i].smiles)            
-        for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
-            if len(smile_set[r.parent]) > 1:
-                c_ind = -1
-                for ind in smile_set[r.parent]:
-                    if st.chemicals[ind].child == r.rxn_id:
-                        if c_ind != -1:
-                            breakpoint()
-                        c_ind = ind                
-            else:
-                c_ind = 0
-            p = smile_set[r.parent][c_ind]
-            whole_tree.add_node(j, rxn_id=r.rxn_id)
-            whole_tree.add_edge(p, j)
-            inds = []                        # 
-            # for c in r.child: # TODO: use edges instead
-            #     inds.append(smile_set[c][0])
-            #     smile_set[c].pop(0)
-            for edge in st.edges:
-                if edge[0] == p:
-                    inds.append(edge[1])   
-            for child, i in enumerate(inds):
-                whole_tree.nodes[i]['child'] = ['left', 'right'][child]
-                assert tree.has_edge(p, i)
-                whole_tree.add_edge(j, i)
 
-        self.tree = whole_tree            
-        self.tree_edges = np.array(self.tree.edges).T        
-        self.tree_root = len(st.chemicals)-1
+        if st is not None:
+            tree = nx.DiGraph(st.edges)
+            n = len(st.chemicals)
+            smile_set = dict()
+            for c, ind in zip([c.smiles for c in st.chemicals], range(n)):
+                smile_set[c] = smile_set.get(c, []) + [ind]
+
+            nodes = [ZSSNode(node) for node in tree.nodes()]
+            for a, b in tree.edges:
+                nodes[a].addkid(nodes[b])
+            self.zss_tree = nodes[-1]
+
+            """
+            Build the synthetic tree using the representative st
+            With helper functions to modify this
+            """
+            whole_tree = nx.DiGraph()
+            for i in tree.nodes():
+                whole_tree.add_node(i, smiles=st.chemicals[i].smiles)
+            for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
+                if len(smile_set[r.parent]) > 1:
+                    c_ind = -1
+                    for ind in smile_set[r.parent]:
+                        if st.chemicals[ind].child == r.rxn_id:
+                            if c_ind != -1:
+                                breakpoint()
+                            c_ind = ind
+                else:
+                    c_ind = 0
+                p = smile_set[r.parent][c_ind]
+                whole_tree.add_node(j, rxn_id=r.rxn_id)
+                whole_tree.add_edge(p, j)
+                inds = []                        #
+                # for c in r.child: # TODO: use edges instead
+                #     inds.append(smile_set[c][0])
+                #     smile_set[c].pop(0)
+                for edge in st.edges:
+                    if edge[0] == p:
+                        inds.append(edge[1])
+                for child, i in enumerate(inds):
+                    whole_tree.nodes[i]['child'] = ['left', 'right'][child]
+                    assert tree.has_edge(p, i)
+                    whole_tree.add_edge(j, i)
+
+            self.tree = whole_tree
+            self.tree_root = len(st.chemicals) - 1
+
+        else:
+            assert (st is None)
+            assert (zss_tree is not None) and (whole_tree is not None)
+
+            self.zss_tree = zss_tree
+            self.tree = whole_tree
+            self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)
+
+        self.tree_edges = np.array(self.tree.edges).T
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
         self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])                
         self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree))])
