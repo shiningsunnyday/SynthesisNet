@@ -123,7 +123,7 @@ class PtrDataset(Dataset):
         data = (
             torch.tensor(self.edge_index[e], dtype=torch.int64),
             np.array([key_val for _ in node_mask]), # index
-            torch.tensor(X, dtype=torch.float32),
+            torch.tensor(X, dtype=torch.float32), # 2048+91
             torch.tensor(y, dtype=torch.float32),
         )
         return Data(edge_index=data[0], key=data[1], x=data[2], y=data[3])

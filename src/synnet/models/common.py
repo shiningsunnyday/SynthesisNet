@@ -125,7 +125,7 @@ def load_gnn_from_ckpt(ckpt_file: str):
     return model
 
 
-def find_best_model_ckpt(path: str, version=None) -> Union[Path, None]:
+def find_best_model_ckpt(path: str, version=None, key="val_loss") -> Union[Path, None]:
     """Find checkpoint with lowest val_loss.
 
     Poor man's regex:
@@ -141,7 +141,7 @@ def find_best_model_ckpt(path: str, version=None) -> Union[Path, None]:
                 return file
         else:
             stem = file.stem
-            val_loss = float(stem.split("val_loss=")[-1])
+            val_loss = float(stem.split(f"{key}=")[-1])
             if val_loss < lowest_loss:
                 best_model_ckpt = file
                 lowest_loss = val_loss

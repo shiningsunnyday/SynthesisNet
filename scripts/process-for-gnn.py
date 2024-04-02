@@ -128,6 +128,8 @@ def main():
     for index, st in tqdm(enumerate(skeletons)):
         if len(list(skeletons[st])) == 0:
             continue
+        if kth_largest[index] < 20:
+            continue
         # if len(skeletons[st]) < 100:
         #     continue
         # if index < 3:
@@ -135,8 +137,6 @@ def main():
         # if index == 2:
         #     breakpoint()
         # figure out "a" minimal resolving set   
-        if kth_largest[index] >= 20:
-            continue
         print(f"class {index} which is {kth_largest[index]+1}th most represented")
         sk = Skeleton(st, index)
         edge_index = np.array(sk.tree.edges).T           

@@ -2,6 +2,7 @@
 Generate synthetic trees for a set of specified query molecules. Multiprocessing.
 """  # TODO: Clean up + dont hardcode file paths
 import json
+import yaml
 import logging
 import gzip
 import multiprocessing as mp
@@ -182,6 +183,8 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
                 bbs_child = data['bbs'][f"{e}{DELIM}{int(second)}"]
                 assert len(bbs_child) == 1
                 bbs_child = bbs_child[0]
+            if args.forcing_eval:
+                assert sk.tree.nodes[n]['smiles'] in bbs_child
             indices = [bbs.index(smi) for smi in bbs_child]
             if len(indices) >= top_bb:
                 bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
@@ -255,10 +258,18 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             edges = sk.tree_edges
             tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
             edge_input = torch.tensor(tree_edges, dtype=torch.int64)        
-            pe = PtrDataset.positionalencoding1d(32, len(X))
-            x_input = np.concatenate((X, pe), axis=-1)        
-            data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input))
-            data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input))
+            if model_rxn.layers[0].in_channels != X.shape[1]:
+                pe = PtrDataset.positionalencoding1d(32, len(X))
+                x_input_rxn = np.concatenate((X, pe), axis=-1)
+            else:
+                x_input_rxn = X
+            if model_bb.layers[0].in_channels != X.shape[1]:
+                pe = PtrDataset.positionalencoding1d(32, len(X))
+                x_input_bb = np.concatenate((X, pe), axis=-1)            
+            else:
+                x_input_bb = X
+            data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
+            data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
             logits_rxn = model_rxn(data_rxn)
             logits_bb = model_bb(data_bb)
             logits = {}
@@ -322,7 +333,7 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
             return seq_correct
         else:
             return correct, total_incorrect
-    else:
+    elif method == 'postorder':
         # compute intermediates and target
         postorder = list(nx.dfs_postorder_nodes(sk.tree, source=sk.tree_root))
         for i in postorder:
@@ -341,6 +352,9 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
         smi1 = Chem.CanonSmiles(sk.tree.nodes[sk.tree_root]['smiles'])
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
         correct = smi1 == smi2
+    else:
+        assert method == 'reconstruct'
+        breakpoint()
     return correct
 
 
@@ -416,7 +430,7 @@ def get_args():
     parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
     parser.add_argument("--forcing-eval", action='store_true')
-    parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder'])
+    parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
@@ -455,19 +469,23 @@ def get_metrics(targets, all_sks):
         else:
             correct = False
             for sk in sks:
+                match = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
                 if args.test_correct_method == 'postorder':
-                    correct = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)
+                    correct = match
+                elif args.test_correct_method == 'preorder':
+                    correct, incorrect = match                        
+                    if not correct:
+                        update(total_incorrect[tree_id], incorrect)                    
                 else:
-                    correct, incorrect = test_correct(sk, lookup[smi], rxns, method=args.test_correct_method)                        
+                    assert args.test_correct_method == 'reconstruct'
+                    sim = match
                 if correct:
                     break
-            if args.test_correct_method == 'preorder':
-                if not correct:
-                    update(total_incorrect[tree_id], incorrect)
             total_correct[tree_id]['correct'] += correct
             total_correct[tree_id]['total'] += 1
             total_correct[tree_id]['all'] += [correct]
             # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
+            breakpoint()
             summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
             if args.test_correct_method == 'preorder':
                 print(f"total summary: {summary}, total incorrect: {total_incorrect}")     
@@ -489,13 +507,17 @@ def decode(smi):
     else:
         skviz = None
     # print(f"begin decoding {smi}")
+    if 'rxn_models' in globals():
+        rxn_gnn = rxn_models[sk.index]
+    if 'bb_models' in globals():
+        bb_gnn = bb_models[sk.index]
     try:
-        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)                                                
+        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
+        print(f"done decoding {smi}")
+        return sks
     except Exception as e:
+        pdb.post_mortem()
         logger.error(f"{smi} {e}")
-
-    print(f"done decoding {smi}")
-    return sks
 
 
 def format_metrics(metrics):
@@ -507,12 +529,48 @@ def format_metrics(metrics):
     return res
 
 
+def load_from_dir(dir, constraint):
+    models = {}
+    for version in os.listdir(dir):        
+        hparams_filepath = os.path.join(dir, version, 'hparams.yaml')        
+        hparams_file = yaml.safe_load(open(hparams_filepath))      
+        match = True
+        for k in constraint:
+            if str(constraint[k]) != str(hparams_file[k]):
+                match = False
+        if match:       
+            fpaths = list(Path(os.path.join(dir, version)).glob("*.ckpt"))
+            if len(fpaths) != 1:
+                print(f"{version} has {len(fpaths)} ckpts")
+                continue
+            models[int(hparams_file['datasets'])] = load_gnn_from_ckpt(fpaths[0])
+    return models
+    
+
+
 
 def main(args):
     handler = logging.FileHandler(os.path.join(args.out_dir, "log.txt"))
     logger.addHandler(handler)
     logger.info("Start.")
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
+    # ... models
+    logger.info("Start loading models from checkpoints...")  
+    if os.path.isdir(args.ckpt_rxn):
+        constraint = {'valid_loss': 'accuracy_loss'}
+        rxn_models = load_from_dir(args.ckpt_rxn, constraint)
+        globals()['rxn_models'] = rxn_models
+    else:
+        rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn))
+        globals()['rxn_gnn'] = rxn_gnn
+    if os.path.isdir(args.ckpt_bb):
+        constraint = {'valid_loss': 'nn_accuracy_loss'}
+        bb_models = load_from_dir(args.ckpt_bb, constraint)
+        globals()['bb_models'] = bb_models
+    else:
+        bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
+        globals()['bb_gnn'] = bb_gnn
+    logger.info("...loading models completed.")    
 
     # ... reaction templates
     rxns = ReactionSet().load(args.rxns_collection_file).rxns
@@ -529,13 +587,16 @@ def main(args):
     sk_set = None
     if args.skeleton_set_file:        
         skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
-        skeleton_set = SkeletonSet().load_skeletons(skeletons)        
+        skeleton_set = SkeletonSet().load_skeletons(skeletons)                
         syntree_set_all = [st for v in skeletons.values() for st in v]
         syntree_set = []
         SKELETON_INDEX = []
         for ind in range(len(skeleton_set.sks)):
             sk = skeleton_set.sks[ind]      
-            SKELETON_INDEX.append(ind)        
+            if 'rxn_models' in globals() and 'bb_models' in globals():
+                if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
+                    SKELETON_INDEX.append(ind)                
+        print(f"SKELETON INDEX: {SKELETON_INDEX}")
         if args.one_per_class:
             rep = set()
         for syntree in syntree_set_all:        
@@ -587,18 +648,13 @@ def main(args):
     bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
     logger.info("...loading data completed.")
-    # ... models
-    logger.info("Start loading models from checkpoints...")  
-    rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn))
-    bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
-    logger.info("...loading models completed.")
 
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
 
     # Set some global vars for mp
-    for var_name in ['args', 'lookup', 'rxn_gnn', 'bb_gnn', 'bb_emb', 'rxn_templates', 'bblocks', 'rxns']:
-        globals()[var_name] = locals()[var_name]
+    for var_name in ['args', 'lookup', 'bb_emb', 'rxn_templates', 'bblocks', 'rxns']:
+        globals()[var_name] = locals()[var_name]    
     # targets = targets[:10]     
     batch_size = args.batch_size        
     # decode('CC(Nc1ccc(I)cc1-c1nc(-c2cc(F)ccc2N=C=O)n[nH]1)c1ccc(N)c(O)c1')
