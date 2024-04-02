@@ -242,7 +242,7 @@ def expand_programs(args, all_progs, size):
     if os.path.exists(parg_path):
         pargs = pickle.load(open(parg_path, 'rb'))
     else:
-        pargs = []    
+        pargs = []
         for i, r in tqdm(enumerate(bbf.rxns)):
             if r.num_reactant == 1:
                 A = all_progs[size-1]
@@ -447,6 +447,7 @@ def load_and_filter(args, all_progs, d):
     logger.info(f"loaded {len(all_progs[d])} size-{d} programs")
     all_progs[d] = filter_programs(all_progs[d])
     assert d in all_progs
+    return all_progs
     # """
     # Sanity checks
     # """
@@ -775,7 +776,6 @@ if __name__ == "__main__":
                 with open(bb_path, 'w+') as f:
                     for bb in bblocks:
                         f.write(f"{bb}\n")
-                breakpoint()
             print(f"top bb have counts: {[bb_counts[x] for x in bblocks]}")                
         if args.top_rxn:            
             rxn_counts = count_rxns(args, skeletons, rxn_templates, vis=False)
