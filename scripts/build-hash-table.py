@@ -270,7 +270,7 @@ def expand_programs(args, all_progs, size):
     """                
     num_batches = (len(pargs)+args.expand_batch_size-1)//args.expand_batch_size
     logger.info(f"{num_batches} batches to expand")    
-    if args.step is None or (args.step == 'expand' and args.batch != -1):
+    if args.step is None or (args.step == 'expand' and args.batch == -1):
         batch_iter = range(num_batches)
     else:        
         assert args.step == 'expand'
@@ -366,13 +366,16 @@ def get_cache_fpaths(all_progs):
     for d in all_progs:
         for p in all_progs[d]:
             if isinstance(p.product_map, ProductMap):
-                if not os.path.exists(p.product_map.fpath):
-                    breakpoint()
-                fpaths.append(p.product_map.fpath)
+                fpath = p.product_map.fpath
+                if not os.path.exists(fpath):
+                    print(fpath)
+                    raise
+                fpaths.append(fpath)
             else:
                 for fpath in p.product_map.fpaths.values():
                     if not os.path.exists(fpath):
-                        breakpoint()  
+                        print(fpath)
+                        raise
                     fpaths.append(fpath)
     return fpaths
 
@@ -382,9 +385,8 @@ def clean_cache(args, all_progs):
     fpath_set = set(get_cache_fpaths(all_progs))    
     logger.info(f"begin cleaning cache, keep {len(fpath_set)} fpaths")
     removed = 0
-    pkl_paths = [f"{d}.pkl" for d in all_progs]
     for f in os.listdir(args.cache_dir):        
-        if f in pkl_paths:
+        if '.pkl' in f:
             continue
         if os.path.join(args.cache_dir, f) not in fpath_set:
             os.remove(os.path.join(args.cache_dir, f))
@@ -449,7 +451,9 @@ def load_and_filter(args, all_progs, d):
     # Sanity checks
     # """
     # for f in get_cache_fpaths(all_progs):
-    #     assert os.path.exists(f)   
+    #     assert os.path.exists(f)
+    return all_progs
+
 
 
 def init_and_filter(args, all_progs, d):
@@ -491,8 +495,8 @@ def run_or_init_batch(prefix, d_progs, inds, easy_prog_inds, hard_prog_inds):
     logger = logging.getLogger('global_logger')   
     easy_prog_inds_batch = [ind for ind in inds if ind in easy_prog_inds]
     hard_prog_inds_batch = [ind for ind in inds if ind in hard_prog_inds]
-    if 'run' in prefix and len(hard_prog_inds_batch) == 0:
-        raise
+    # if 'run' in prefix and len(hard_prog_inds_batch) == 0:
+    #     raise
     batch_path = os.path.join(args.cache_dir, f"{prefix}.pkl")
     easy_batch_path = os.path.join(args.cache_dir, f"{prefix}_easy.pkl")
     hard_batch_path = os.path.join(args.cache_dir, f"{prefix}_hard.pkl")
@@ -605,7 +609,7 @@ def create_run_programs(args, bbf, size=3):
             elif d == args.d:
                 assert not exist
         if args.cache_dir and exist:
-            load_and_filter(args, all_progs, d)
+            all_progs = load_and_filter(args, all_progs, d)
             continue
         if args.step is None or args.step == 'migrate':
             if args.step == 'migrate':
@@ -802,7 +806,6 @@ if __name__ == "__main__":
 
     # Run programs      
     # progs = get_programs(bbf.rxns, size=2)
-    breakpoint()
     all_progs = create_run_programs(args, bbf, size=args.depth)
     if args.step is None:
         if args.visualize_dir:

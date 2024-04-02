@@ -228,6 +228,9 @@ def load_split_dataloaders(args):
 
     train_dataset_ptrs, _, _, used_is['train'] = gather_ptrs(input_dir['train'], args.gnn_datasets, [1,0,0])
     _, val_dataset_ptrs, _, used_is['valid'] = gather_ptrs(input_dir['valid'], args.gnn_datasets, [0,1,0])
+    if len(val_dataset_ptrs) == 0:
+        val_dataset_ptrs = train_dataset_ptrs
+
     # _, _, test_dataset_ptrs, used_is['test'] = gather_ptrs(input_dir['test'], args.gnn_datasets, [0,0,1])        
     # TODO: one-time hack, think if this makes sense
     test_dataset_ptrs = val_dataset_ptrs ; used_is['test'] = used_is['valid']
