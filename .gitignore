@@ -11,7 +11,6 @@ tmp/
 .old/
 .notes/
 .aliases
-*.sh
 
 # === template ===
 
