@@ -20,17 +20,10 @@ def get_args():
     parser.add_argument("--skeleton-dir", type=str, help="Directory with X,y data.")    
 
     # for training gnn
-    parser.add_argument(
-        "--gnn-input-feats",
-        type=str,
-        help="Where to load featurized data to train GNN",
-    )
+    parser.add_argument("--gnn-input-feats", type=str, help="Where to load featurized data to train GNN")
     parser.add_argument("--pe", choices=['sin'], help='pos encoding')
-    parser.add_argument(
-        "--feats-split",
-        action='store_true',
-        help="add _{train|valid|test} suffix to gnn-input-feats",
-    )
+    parser.add_argument("--feats-split", action='store_true', help="add _{train|valid|test} suffix to gnn-input-feats")
+    parser.add_argument("--rewire-edges", action='store_true', help="whether to rewire skeleton edges")
         
     parser.add_argument("--gnn-datasets", type=int, nargs='+')
     parser.add_argument("--lazy_load", action='store_true')

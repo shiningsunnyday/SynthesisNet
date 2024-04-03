@@ -37,40 +37,29 @@ MODEL_ID = Path(__file__).stem
 # all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
 # keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
-    def __init__(self, ptrs, pe=None, **kwargs):
+    def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
         super().__init__(**kwargs)
         self.ptrs = ptrs
         self.edge_index = {}
         self.graphs = {}
         self.interms_map = {}
-        self.rxns = {}
+        self.num_nodes = {}
         self.pe = pe
         for ptr in ptrs:
             _, e, _ = ptr
             if e in self.edge_index:
                 continue
             edges = np.load(e)
-            self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)            
-            self.graphs[e] = nx.DiGraph(list(tuple(x) for x in edges.T))
-            root = -1
-            for pred in self.graphs[e]:
-                if not list(self.graphs[e].predecessors(pred)):
-                    root = pred
-            self.interms_map[e] = [False for _ in self.graphs[e]]
-            self.rxns[e] = [False for _ in self.graphs[e]]
-            for n in nx.dfs_preorder_nodes(self.graphs[e], root):
-                if n == root:
-                    self.interms_map[e][n] = True
-                else:
-                    p = list(self.graphs[e].predecessors(n))[0]
-                    if self.rxns[e][p]:
-                        if list(self.graphs[e].successors(n)):
-                            self.interms_map[e][n] = True
-                        self.rxns[e][n] = False
-                    if self.interms_map[e][p]:
-                        self.interms_map[e][n] = False
-                        self.rxns[e][n] = True
-            self.interms_map[e][root] = False
+            self.graphs[e] = self.get_graph(edges)
+            root = self.get_root(self.graphs[e])
+            self.interms_map[e] = [False for _ in self.graphs[e]]            
+            self.interms_map[e] = self.get_interms(self.graphs[e], root)
+            self.num_nodes[e] = len(self.graphs[e])
+            if rewire:
+                # re-wire edges on graph
+                self.rewire(self.graphs[e], root)
+                edges = np.array(self.graphs[e].edges).T                
+            self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)                
         # for e in self.interms_map:
         #     dataset_index = int(e.split('/')[-1].split('_')[0])
         #     sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
@@ -78,7 +67,55 @@ class PtrDataset(Dataset):
         #     mask[sk.tree_root] = False
         #     assert (mask == (self.interms_map[e])).all()            
                     
+    @staticmethod
+    def get_graph(edges):
+        graph = nx.DiGraph(list(tuple(x) for x in edges.T))        
+        return graph
+        
 
+    @staticmethod
+    def get_root(graph):
+        for pred in graph:
+            if not list(graph.predecessors(pred)):
+                root = pred  
+        return root  
+
+
+    @staticmethod
+    def rewire(graph, cur):
+        neis = list(graph[cur])
+        if graph.pred[cur]: # not target
+            for nei in neis:
+                hop_neis = list(graph[nei])
+                for hop_nei in hop_neis:
+                    PtrDataset.rewire(graph, hop_nei)
+                    graph.add_edge(cur, hop_nei)
+                    graph.remove_edge(nei, hop_nei)
+                if hop_neis: # not leaf
+                    graph.remove_edge(cur, nei)            
+        else:
+            for nei in neis:
+                 PtrDataset.rewire(graph, nei)
+
+
+    @staticmethod
+    def get_interms(graph, root):
+        rxns = [False for _ in graph]
+        interms_map = {}
+        for n in nx.dfs_preorder_nodes(graph, root):
+            if n == root:
+                interms_map[n] = True
+            else:
+                p = list(graph.predecessors(n))[0]
+                if rxns[p]:
+                    if list(graph.successors(n)):
+                        interms_map[n] = True
+                    rxns[n] = False
+                if interms_map[p]:
+                    interms_map[n] = False
+                    rxns[n] = True
+        interms_map[root] = False  
+        return interms_map
 
 
     @staticmethod
@@ -107,7 +144,7 @@ class PtrDataset(Dataset):
         # smi = sparse.load_npz(base+'_smiles.npz').toarray()[index]
         # if smi == 'CCNCC1=NNC(Cc2ccccc2CS(=O)(=O)N2CCCC2COC(C)(C)C)=N1':
         #     breakpoint()
-        num_nodes = self.edge_index[e].max()+1
+        num_nodes = self.num_nodes[e]
         X = sparse.load_npz(base+'_Xs.npz').toarray()
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
         # add 1D positional encoding (num_nodes, dim)                        
@@ -198,9 +235,9 @@ def load_lazy_dataloaders(args):
         setattr(args, 'gnn_datasets', indices)    
     
     train_dataset_ptrs, val_dataset_ptrs, test_dataset_ptrs, used_is = gather_ptrs(input_dir, args.gnn_datasets)        
-    dataset_train = PtrDataset(train_dataset_ptrs, args.pe)
-    dataset_valid = PtrDataset(val_dataset_ptrs, args.pe)
-    dataset_test = PtrDataset(test_dataset_ptrs, args.pe)
+    dataset_train = PtrDataset(train_dataset_ptrs, args.rewire_edges, args.pe)
+    dataset_valid = PtrDataset(val_dataset_ptrs, args.rewire_edges, args.pe)
+    dataset_test = PtrDataset(test_dataset_ptrs, args.rewire_edges, args.pe)
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
@@ -218,9 +255,10 @@ def load_split_dataloaders(args):
     if not args.gnn_datasets:
         all_indices = []
         for split in ['train', 'valid', 'test']:
-            files = os.listdir(input_dir[split])        
-            indices = [f.split('_')[0] for f in files]
-            all_indices += list(map(int, set(indices)))
+            if os.path.isdir(input_dir[split]):
+                files = os.listdir(input_dir[split])        
+                indices = [f.split('_')[0] for f in files]
+                all_indices += list(map(int, set(indices)))
         all_indices = list(map(int, set(all_indices)))
         indices = sorted(all_indices)
         print(f"gnn-datasets has been set to {indices}")
@@ -236,9 +274,9 @@ def load_split_dataloaders(args):
     test_dataset_ptrs = val_dataset_ptrs ; used_is['test'] = used_is['valid']
     # if not (used_is['train'] == used_is['valid'] == used_is['test']):
     #     breakpoint()
-    dataset_train = PtrDataset(train_dataset_ptrs, args.pe)
-    dataset_valid = PtrDataset(val_dataset_ptrs, args.pe)
-    dataset_test = PtrDataset(test_dataset_ptrs, args.pe)
+    dataset_train = PtrDataset(train_dataset_ptrs, args.rewire_edges, args.pe)
+    dataset_valid = PtrDataset(val_dataset_ptrs, args.rewire_edges, args.pe)
+    dataset_test = PtrDataset(test_dataset_ptrs, args.rewire_edges, args.pe)
 
     prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
