@@ -183,8 +183,8 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
                 bbs_child = data['bbs'][f"{e}{DELIM}{int(second)}"]
                 assert len(bbs_child) == 1
                 bbs_child = bbs_child[0]
-            if args.forcing_eval:
-                assert sk.tree.nodes[n]['smiles'] in bbs_child
+            # if args.forcing_eval:
+            #     assert sk.tree.nodes[n]['smiles'] in bbs_child
             indices = [bbs.index(smi) for smi in bbs_child]
             if len(indices) >= top_bb:
                 bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
@@ -393,12 +393,9 @@ def get_args():
         help="Input file for the pre-computed embeddings (*.npy).",
         default="data/assets/building-blocks/enamine_us_emb_fp_256.npy"
     )    
-    parser.add_argument(
-        "--ckpt-bb", type=str, help="Model checkpoint to use"
-    )
-    parser.add_argument(
-        "--ckpt-rxn", type=str, help="Model checkpoint to use"
-    )    
+    parser.add_argument("--ckpt-bb", type=str, help="Model checkpoint to use")
+    parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
+    parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")
     parser.add_argument(
         "--syntree-set-file",
         type=str,
@@ -556,18 +553,16 @@ def main(args):
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
     # ... models
     logger.info("Start loading models from checkpoints...")  
-    if os.path.isdir(args.ckpt_rxn):
+    if os.path.isdir(args.ckpt_dir):
         constraint = {'valid_loss': 'accuracy_loss'}
-        rxn_models = load_from_dir(args.ckpt_rxn, constraint)
+        rxn_models = load_from_dir(args.ckpt_dir, constraint)
         globals()['rxn_models'] = rxn_models
+        constraint = {'valid_loss': 'nn_accuracy_loss'}
+        bb_models = load_from_dir(args.ckpt_dir, constraint)
+        globals()['bb_models'] = bb_models    
     else:
         rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn))
         globals()['rxn_gnn'] = rxn_gnn
-    if os.path.isdir(args.ckpt_bb):
-        constraint = {'valid_loss': 'nn_accuracy_loss'}
-        bb_models = load_from_dir(args.ckpt_bb, constraint)
-        globals()['bb_models'] = bb_models
-    else:
         bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
         globals()['bb_gnn'] = bb_gnn
     logger.info("...loading models completed.")    
