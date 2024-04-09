@@ -17,7 +17,7 @@ else
 fi
 python src/synnet/models/gnn.py \
         --gnn-input-feats data/top_1000/gnn_featurized_leaf_up_2_split \
-        --results-log /dccstor/graph-design/gnn/ \
+        --results-log $4 \
         --mol-embedder-file $EMBEDDINGS_KNN_FILE \
         ${datasets} \
         --gnn-valid-loss ${metric} \
