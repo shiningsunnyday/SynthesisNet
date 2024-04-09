@@ -1,5 +1,5 @@
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet, Skeleton, SkeletonSet, \
-load_skeletons, compute_md, get_bool_mask, get_wl_kernel, process_syntree_mask, test_is_leaves_up
+load_skeletons, compute_md, get_bool_mask, get_wl_kernel, process_syntree_mask, test_is_leaves_up, inds_to_i
 import pickle
 import os
 import networkx as nx
@@ -48,7 +48,7 @@ def get_args():
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_target_down', 'rxn_target_down_bb', 'rxn_frontier', 'bb_frontier'],
+        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_target_down', 'rxn_target_down_bb', 'rxn_frontier', 'bb_frontier', 'leaf_up_2'],
         default='leaves_up',
         help="""
         Criteria for a determined skeleton:
@@ -60,6 +60,7 @@ def get_args():
             bfs_frontier: bfs frontier, expand from target only
             rxn_frontier: there exists rxn on bfs frontier, predict rxns
             bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier
+            leaf_up_2: target and bottom-2 reactions unmasked
         """
     )
     parser.add_argument(
@@ -107,7 +108,14 @@ def get_parg(syntree, min_r_set, index, args):
             sk.mask = fill_in
             pargs.append([i, sk, args, min_r_set, [sk.tree_root] + fill_in])    
     else:
-        for i in range(2**(len(sk.tree)-len(min_r_set))-1):
+        # for some, we can compute the valid i easily
+        if determine_criteria == 'leaf_up_2':
+            sk.mask = [sk.tree_root]
+            inds = [inds_to_i(sk.bottom_2_rxns + [sk.tree_root], len(sk.tree), min_r_set)]
+        else:
+            inds = range(2**(len(sk.tree)-len(min_r_set))-1)
+
+        for i in inds:
             sk.reset(min_r_set)
             zero_mask_inds = np.where(sk.mask == 0)[0]
             bool_mask = get_bool_mask(i)
@@ -128,8 +136,6 @@ def main():
     for index, st in tqdm(enumerate(skeletons)):
         if len(list(skeletons[st])) == 0:
             continue
-        if kth_largest[index] < 20:
-            continue
         # if len(skeletons[st]) < 100:
         #     continue
         # if index < 3:
@@ -139,6 +145,15 @@ def main():
         # figure out "a" minimal resolving set   
         print(f"class {index} which is {kth_largest[index]+1}th most represented")
         sk = Skeleton(st, index)
+        sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))
+        print(os.path.abspath(os.path.join(args.visualize_dir, f"{index}.png")))
+        # check that every building block is under a bottom-most-2 reaction
+        sk_copy = deepcopy(sk)
+        sk_copy.mask = [sk_copy.tree_root]
+        if not np.all([list(sk.tree.predecessors(bb))[0] in sk_copy.bottom_2_rxns for bb in np.argwhere(sk.leaves).flatten()]):
+            print(f"skipping {index}")
+            continue        
+
         edge_index = np.array(sk.tree.edges).T           
         pargs = []
         syntree = list(skeletons[st])[0]
@@ -157,9 +172,9 @@ def main():
         else:
             min_r_set = [sk.tree_root]
         
-        with Pool(args.ncpu) as p:
-            pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
-        # pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
+        # with Pool(args.ncpu) as p:
+        #     pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
+        pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)}")
         if args.num_trees_per_batch == -1:

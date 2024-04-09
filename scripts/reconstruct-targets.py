@@ -397,11 +397,6 @@ def get_args():
     parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")
     parser.add_argument(
-        "--syntree-set-file",
-        type=str,
-        help="Input file for the ground-truth syntrees to lookup target smiles in",
-    )          
-    parser.add_argument(
         "--skeleton-set-file",
         type=str,
         required=True,

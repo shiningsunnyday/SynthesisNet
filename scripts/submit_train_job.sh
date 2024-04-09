@@ -16,7 +16,7 @@ else
         datasets="--gnn-datasets $1";
 fi
 python src/synnet/models/gnn.py \
-        --gnn-input-feats data/top_1000/gnn_featurized_rxn_target_down_bb_split \
+        --gnn-input-feats data/top_1000/gnn_featurized_leaf_up_2_split \
         --results-log /dccstor/graph-design/gnn/ \
         --mol-embedder-file $EMBEDDINGS_KNN_FILE \
         ${datasets} \

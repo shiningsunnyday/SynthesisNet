@@ -33,6 +33,7 @@ from collections import defaultdict, deque
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 from networkx.algorithms import weisfeiler_lehman_graph_hash
 import networkx as nx
+import matplotlib.pyplot as plt
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 from copy import deepcopy
@@ -1953,6 +1954,29 @@ class Skeleton:
         self.reset()
 
 
+    def visualize(self, path, Xy=None):
+        fig = plt.Figure()
+        ax = fig.add_subplot(1, 1, 1)
+        pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
+        if Xy:
+            X, y = Xy
+            node_colors = []
+            for i in self.tree:
+                assert ((X[i].sum() > 0) + (y[i].sum() > 0)) <= 1
+                if X[i].sum():
+                    node_colors.append('green')
+                if y[i].sum():
+                    if self.leaves[i]:
+                        node_colors.append('yellow')
+                    else:
+                        node_colors.append('gray')
+        else:
+            node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
+        nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
+        fig.savefig(path)
+        print(path)
+    
+
     def reset(self, mask=None):
         """
         Resets the mask to mask out every node
@@ -2011,6 +2035,17 @@ class Skeleton:
     
     def pred(self, n):
         return list(self.tree.predecessors(n))[0]
+    
+    @staticmethod
+    def lowest_rxns(tree, cur, max_depths, ans): # returns depth
+        # get all nodes whose bottom-up depth is in max_depths
+        depth = 0
+        if tree[cur]:
+            depth = 1+max([Skeleton.lowest_rxns(tree, j, max_depths, ans) for j in tree[cur]])
+        if depth in max_depths:
+            ans.append(cur)
+        return depth
+
 
 
     @mask.setter
@@ -2046,15 +2081,12 @@ class Skeleton:
             if not self.mask[self.pred(n)]:
                 self.rxn_target_down_bb = False
 
-        # if list(self.tree.edges) == [(2, 6), (4, 7), (5, 8), (6, 0), (6, 1), (7, 3), (8, 4), (8, 2)]:                
-        #     good = [[5], [5,8],[5,8,7],[5,8,7,6],[5,8,7,6,1],[5,8,7,6,1,3],[5,8,7,6,3,0],[5,8,7,6,0],[5,8,6,0],[5,8,6,1],[5,8,7,3],[5,8,6],[5,8,7,6,0,1],[5,8,6,0,1],[5,8,7,6,3,0,1], [3,5,6,7,8]]
-        #     good = [sorted(lis) for lis in good]
-        #     if self.rxn_target_down_bb and not (np.argwhere(self.mask).flatten().tolist() in good):
-        #         breakpoint()
-        #     if not self.rxn_target_down_bb and (np.argwhere(self.mask).flatten().tolist() in good):
-        #         breakpoint()
-        
-
+        # bottom-most 2 reactions
+        nodes = []
+        self.lowest_rxns(self.tree, self.tree_root, max_depths=[1, 3], ans=nodes)
+        correct_mask = [i for i in range(len(self.tree)) if i == self.tree_root or i in nodes]        
+        self.bottom_2_rxns = nodes
+        self.leaf_up_2 = np.argwhere(self.mask).flatten().tolist() == correct_mask
         
     
     @staticmethod
@@ -2098,7 +2130,6 @@ class Skeleton:
         """        
         X = np.zeros((len(self.tree), 2*2048+91))
         y = np.zeros((len(self.tree), 256+91))
-        
         try:
             for n in self.tree.nodes():             
                 # is target, or parent is target, or parent rxn is fulfilled
@@ -2111,7 +2142,7 @@ class Skeleton:
                 is_frontier_bb = is_frontier and not self.rxns[n] and not self.rxn_frontier
                 if is_frontier_rxn:
                     assert self.mask[self.bidir_edges.T[self.bidir_edges[1] == n][:, 0]].any()
-                    assert 'rxn_id' in self.tree.nodes[n]                
+                    assert 'rxn_id' in self.tree.nodes[n]                                
                 if self.mask[n]:
                     # if leaves_filled and list(self.tree.neighbors(n)):
                     #     if 'smiles' in self.tree.nodes[n]: # impossible
@@ -2441,6 +2472,15 @@ def get_bool_mask(i, size=-1):
     return mask
 
 
+def inds_to_i(inds, length, min_r_set):
+    """
+    compute i using indices outside min_r_set
+    """
+    zeros = np.zeros((length,), dtype=int)
+    zeros[inds] = 1
+    zeros[min_r_set] = -1    
+    return int(''.join(map(str, filter(lambda x: x !=- 1, zeros))), 2)
+
 
 def get_wl_kernel(tree: nx.digraph, fill_in=[]):
     for n in tree.nodes():
@@ -2478,8 +2518,7 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         if len(poss_vals) > 1:
             breakpoint()
         # featurize prediction problem of next anchor, which can be any of poss_vals
-        node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])
-        return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
+        node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])        
     else:
         sk.reset(min_r_set)
         zero_mask_inds = np.where(sk.mask == 0)[0]    
@@ -2488,7 +2527,13 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         node_mask, X, y = sk.get_state(**kwargs)        
         if args.determine_criteria == 'all_leaves':
             assert sk.all_leaves
-        return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
+    
+
+    # visualize to help debug
+    sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{i}.png"))
+    sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{i}_Xy.png"), Xy=(X, y))
+
+    return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
 
 
 def test_is_leaves_up(i, sk, min_r_set):
