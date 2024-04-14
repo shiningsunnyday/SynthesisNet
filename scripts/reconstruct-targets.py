@@ -140,7 +140,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
     else
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
     """            
-    rxn_graph, node_map, _ = sk.rxn_graph()       
+    rxn_graph, node_map, _ = sk.rxn_graph()
     if sk.rxns[n]:  
         cur = node_map[n]          
         mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
@@ -162,6 +162,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
     else:   
         assert sk.leaves[n]
         emb_bb = logits_n[:-NUM_POSS]
+        emb_bb = emb_bb/np.linalg.norm(emb_bb)
         pred = list(sk.tree.predecessors(n))[0]           
         if 'bb' in args.filter_only:            
             if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
@@ -335,21 +336,8 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
             return correct, total_incorrect
     elif method == 'postorder':
         # compute intermediates and target
-        postorder = list(nx.dfs_postorder_nodes(sk.tree, source=sk.tree_root))
-        for i in postorder:
-            if sk.rxns[i]:
-                succ = list(sk.tree.successors(i))
-                if sk.tree.nodes[succ[0]]['child'] == 'right':
-                    succ = succ[::-1]
-                reactants = tuple(sk.tree.nodes[j]['smiles'] for j in succ)
-                if len(reactants) != rxns[sk.tree.nodes[i]['rxn_id']].num_reactant:
-                    return False
-                interm = Reaction(sk.tree.nodes[i]['smirks']).run_reaction(reactants)              
-                pred = list(sk.tree.predecessors(i))[0]
-                if interm is None:
-                    return False
-                sk.tree.nodes[pred]['smiles'] = interm
-        smi1 = Chem.CanonSmiles(sk.tree.nodes[sk.tree_root]['smiles'])
+
+        smi1 = sk.reconstruct(rxns)
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
         correct = smi1 == smi2
     else:
@@ -663,7 +651,7 @@ def main(args):
                 sks_batch = p.map(decode, tqdm(target_batch))        
         all_targets += target_batch
         all_sks += sks_batch     
-        batch_correct, batch_incorrect = get_metrics(all_targets, all_sks)        
+        batch_correct, batch_incorrect = get_metrics(all_targets, all_sks)
         logger.info(f"batch {batch} correct: {format_metrics(batch_correct)}")
         logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
     
