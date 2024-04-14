@@ -1,3 +1,6 @@
 [submodule "retro_star"]
 	path = retro_star
 	url = https://github.com/binghong-ml/retro_star
+[submodule "Single-Player-MCTS"]
+	path = Single-Player-MCTS
+	url = https://github.com/FelixOpolka/Single-Player-MCTS.git
