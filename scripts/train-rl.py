@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.policy import RxnPolicy, Trainer, ReplayMemory, execute_episode
-from synnet.envs.synnet_env import SkeletonEnv, make_skeleton_class
+from synnet.envs.synnet_env import make_skeleton_class
 from synnet.utils.data_utils import Skeleton, SkeletonSet, ReactionSet
 from synnet.models.common import load_gnn_from_ckpt
 import torch
@@ -38,6 +38,7 @@ def get_args():
     parser.add_argument("--skeleton_class", default=[3], nargs='+', type=int)
     parser.add_argument("--surrogate")
     parser.add_argument("--test-iters", default=1)
+    parser.add_argument("--test_size", default=0.2)
     return parser.parse_args()
 
 
@@ -87,6 +88,28 @@ def plot_rewards(rewards, path):
     print(os.path.abspath(path))
 
 
+def evaluate(iter, sts, index, skeleton_class, network):
+    for i, st in enumerate(sts):
+        sk = Skeleton(st, index)
+        sk.reset()
+        test_env = skeleton_class(network)
+        total_rew = 0
+        state, reward, done, _ = test_env.reset(st.chemicals[-1].smiles)        
+        done = False
+        step_idx = 0
+        while not done:
+            p, _ = network.step(np.array([state]))
+            # print(p)
+            action = np.argmax(p)
+            state, reward, done, _ = test_env.step(action)
+            step_idx += 1
+            total_rew += reward     
+        folder = os.path.join(test_env.vis_dir, f"{iter}")   
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(f"{folder}/{i}_eval.png")
+        test_env.render(path)
+
+
 
 def main(args):
     trainers = {}
@@ -99,7 +122,10 @@ def main(args):
     rxns = ReactionSet().load(args.rxns_collection_file).rxns
     for idx in args.skeleton_class:
         sts = pickle.load(open(f'results/viz/top_1000/class/{idx}.pkl', 'rb'))
+        # Train-test split
         random.shuffle(sts)
+        sts, sts_test = sts[:int(len(sts)*(1-args.test_size))], sts[int(len(sts)*(1-args.test_size)):]
+        
         sk = Skeleton(sts[0], idx)        
         trainer = Trainer(lambda: RxnPolicy(4096+sk.rxns.sum()*91, 20, sk.rxns.sum()*91, sk, args.hash_dir, rxns))
         trainers[idx] = trainer
@@ -114,23 +140,20 @@ def main(args):
         model = load_gnn_from_ckpt(args.surrogate)
         vis_dir = os.path.join(args.log_path, f"{idx}/")
         os.makedirs(vis_dir, exist_ok=True)        
-        skeleton_class = make_skeleton_class(idx, vis_dir, sk, model, rxns, bbs, bb_emb)
+        skeleton_class = make_skeleton_class(idx, vis_dir, sk, model, args.hash_dir, rxns, bbs, bb_emb)
         value_losses = []
         policy_losses = []        
         total_rewards = []
         for i, st in enumerate(sts):
-            # if i % args.test_iters == 0:
-            #     sk = Skeleton(st, i)
-            #     test_agent(i, sk, skeleton_class, networks[idx])
-            #     fig = plt.Figure()
-            #     ax = fig.add_subplot(1,1,1)
-            #     ax.plot(value_losses, label="value loss")
-            #     ax.plot(policy_losses, label="policy loss")
-            #     ax.legend()
-            #     fig.savefig(os.path.join(args.log_path, f'{i}.png'))
-            #     print(os.path.join(args.log_path, f'{i}.png'))
-                
-
+            if i % args.test_iters == 0:
+                fig = plt.Figure()
+                ax = fig.add_subplot(1,1,1)
+                ax.plot(value_losses, label="value loss")
+                ax.plot(policy_losses, label="policy loss")
+                ax.legend()
+                fig.savefig(os.path.join(args.log_path, f'{i}_loss.png'))
+                print(os.path.join(args.log_path, f'{i}_loss.png'))                  
+                evaluate(i, sts_test, idx, skeleton_class, networks[idx])
             obs, pis, returns, total_reward, done_state = execute_episode(networks[idx], 20, skeleton_class, smiles=st.chemicals[-1].smiles)
             mems[idx].add_all({"ob": obs, "pi": pis, "return": returns})
             total_rewards.append(total_reward)

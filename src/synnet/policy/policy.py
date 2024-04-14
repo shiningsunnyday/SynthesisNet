@@ -126,7 +126,10 @@ class RxnPolicy(nn.Module):
         obs_one_hot = obs.float()
         h_relu = F.relu(self.dense1(obs_one_hot))
         logits = self.dense_p(h_relu)           
-        logits[~self.action_mask(obs_one_hot)] = float("-inf")
+        mask = self.action_mask(obs_one_hot)
+        if mask.sum().item() == 0:
+            breakpoint()
+        logits[~mask] = float("-inf")
         policy = F.softmax(logits, dim=1)
         value = self.dense_v(h_relu).view(-1)
         return logits, policy, value

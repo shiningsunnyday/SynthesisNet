@@ -1954,9 +1954,10 @@ class Skeleton:
         self.reset()
 
 
-    def visualize(self, path, Xy=None):
-        fig = plt.Figure()
-        ax = fig.add_subplot(1, 1, 1)
+    def visualize(self, path, Xy=None, ax=None):
+        if ax is None:
+            fig = plt.Figure()
+            ax = fig.add_subplot(1, 1, 1)
         pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
         if Xy:
             X, y = Xy
@@ -1973,8 +1974,9 @@ class Skeleton:
         else:
             node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
         nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
-        fig.savefig(path)
-        print(path)
+        if ax is None:
+            fig.savefig(path)
+            print(path)
     
 
     def reset(self, mask=None):

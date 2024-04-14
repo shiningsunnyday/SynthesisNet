@@ -13,28 +13,13 @@ from copy import deepcopy
 import torch
 from torch_geometric.data import Data
 from pathlib import Path
+import matplotlib.pyplot as plt
 import pickle
 import json
 UP = 0
 RIGHT = 1
 DOWN = 2
 LEFT = 3
-
-
-class SkeletonEnv(gym.Env):
-    """
-    Simple gym environment with the goal of populating a Skeleton object.
-    """
-
-    vis_dir = None
-    sk = None
-    model = None
-    
-    def initial_state(self):
-        breakpoint()
-
-    def render(self):
-        self.sk.visualize(os.path.join(self.vis_dir, f"{self.step_idx}.png"))
 
 
 
@@ -148,24 +133,90 @@ def get_mask(sk, policy, state):
     return policy.action_mask(np.array(state))
 
 
+# class SkeletonEnv(gym.Env):
+#     """
+#     Simple gym environment with the goal of populating a Skeleton object.
+#     """
 
-def make_skeleton_class(idx, vis_dir, sk, model, rxns, bbs, bb_emb):
+#     vis_dir = None
+#     sk = None
+#     model = None
+    
+#     def initial_state(self):
+#         breakpoint()
+
+#     def render(self):
+#         self.sk.visualize(os.path.join(self.vis_dir, f"{self.step_idx}.png"))
+
+def constructor(self, policy):
+    self.policy = policy
+    self.actions = []
+    self.states = []  
+    self.sk_progress = [] 
+
+
+def step(self, action):
+    self.actions.append(action)
+    next_state = self.next_state(self.states[-1], action)    
+    self.states.append(next_state)    
+    done = self.is_done_state(next_state, self.policy)    
+    n = np.argwhere(self.sk.rxns).flatten()[action//91]     
+    self.sk.modify_tree(n, rxn_id=action%91)
+    self.sk_progress.append(deepcopy(self.sk))
+    if done:
+        reward = self.get_return(next_state, self.model, self.hash_dir, self.rxns, self.bbs, self.bb_emb)
+        self.sk_progress.append(deepcopy(self.sk))
+    else:           
+        reward = 0.    
+    return next_state, reward, done, None
+
+
+def reset(self, smiles):
+    self.sk.clear_tree()
+    self.sk.reset([self.sk.tree_root])
+    self.sk.tree.nodes[self.sk.tree_root]['smiles'] = smiles
+    init_state = initial_state(self.sk, smiles)
+    self.states.append(init_state)
+    self.sk_progress.append(deepcopy(self.sk))
+    return init_state, 0., False, None
+
+
+def render(self, path):
+    fig = plt.Figure()
+    n = len(self.sk_progress)
+    for i in range(n):
+        ax = fig.add_subplot(1, n, i+1)
+        self.sk_progress[i].visualize(path, ax=ax)
+    fig.savefig(path)
+    print(os.path.abspath(path))
+
+
+
+def make_skeleton_class(idx, vis_dir, sk, model, hash_dir, rxns, bbs, bb_emb):
     attrs = {
         'vis_dir': vis_dir,
         'sk': sk,
         'model': model,
         'n_actions': sk.rxns.sum()*91,
+        'hash_dir': hash_dir,
         'rxns': rxns,
         'bbs': bbs,
         'bb_emb': bb_emb,
     }
     attrs.update({
+        # static methods
         'initial_state': partial(initial_state, sk),
         'get_obs_for_states': partial(get_obs_for_states, sk),
         'next_state': partial(next_state, sk),
         'is_done_state': partial(is_done_state, sk),
         'get_return': partial(get_return, sk),
         'get_mask': partial(get_mask, sk),
+        # constructor
+        "__init__": constructor,
+        # instance methods
+        'step': step,
+        'reset': reset,
+        'render': render,
     })
     return type(f"SkeletonEnv_{idx}", (gym.Env,), attrs)
 
