@@ -721,7 +721,7 @@ class Program:
 
     def get_path(self):
         mask = []
-        for n in range(len(self.rxn_tree)):
+        for n in self.rxn_tree:
             if 'rxn_id_forcing' in self.rxn_tree.nodes[n]:
                 b = self.rxn_tree.nodes[n]['rxn_id_forcing'] != -1
             elif 'rxn_id' in self.rxn_tree.nodes[n]:
@@ -1921,11 +1921,11 @@ class Skeleton:
         for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
             if len(smile_set[r.parent]) > 1:
                 c_ind = -1
-                for ind in smile_set[r.parent]:
+                for i, ind in enumerate(smile_set[r.parent]):
                     if st.chemicals[ind].child == r.rxn_id:
                         if c_ind != -1:
                             breakpoint()
-                        c_ind = ind                
+                        c_ind = i
             else:
                 c_ind = 0
             p = smile_set[r.parent][c_ind]
@@ -2027,6 +2027,24 @@ class Skeleton:
                 raise
         self.reset()
 
+    
+    def reconstruct(self, rxns):
+        postorder = list(nx.dfs_postorder_nodes(self.tree, source=self.tree_root))
+        for i in postorder:
+            if self.rxns[i]:
+                succ = list(self.tree.successors(i))
+                if self.tree.nodes[succ[0]]['child'] == 'right':
+                    succ = succ[::-1]
+                reactants = tuple(self.tree.nodes[j]['smiles'] for j in succ)
+                if len(reactants) != rxns[self.tree.nodes[i]['rxn_id']].num_reactant:
+                    return False
+                interm = Reaction(self.tree.nodes[i]['smirks']).run_reaction(reactants)              
+                pred = list(self.tree.predecessors(i))[0]
+                if interm is None:
+                    return False
+                self.tree.nodes[pred]['smiles'] = interm
+        smi1 = Chem.CanonSmiles(self.tree.nodes[self.tree_root]['smiles'])        
+
 
     @property
     def mask(self):
@@ -2037,15 +2055,22 @@ class Skeleton:
         return list(self.tree.predecessors(n))[0]
     
     @staticmethod
-    def lowest_rxns(tree, cur, max_depths, ans): # returns depth
+    def lowest_rxns(tree, cur, ans): # returns depth
         # get all nodes whose bottom-up depth is in max_depths
         depth = 0
         if tree[cur]:
-            depth = 1+max([Skeleton.lowest_rxns(tree, j, max_depths, ans) for j in tree[cur]])
-        if depth in max_depths:
-            ans.append(cur)
+            depth = 1+max([Skeleton.lowest_rxns(tree, j, ans) for j in tree[cur]])
+        ans[cur] = depth
         return depth
 
+
+    @staticmethod
+    def num_rxns(tree, cur, nums):
+        count = 'rxn_id' in tree.nodes[cur]
+        for nei in tree[cur]:
+            count += Skeleton.num_rxns(tree, nei, nums)
+        nums[cur] = count        
+        return count
 
 
     @mask.setter
@@ -2082,10 +2107,10 @@ class Skeleton:
                 self.rxn_target_down_bb = False
 
         # bottom-most 2 reactions
-        nodes = []
-        self.lowest_rxns(self.tree, self.tree_root, max_depths=[1, 3], ans=nodes)
-        correct_mask = [i for i in range(len(self.tree)) if i == self.tree_root or i in nodes]        
-        self.bottom_2_rxns = nodes
+        nodes = {}
+        self.lowest_rxns(self.tree, self.tree_root, nodes)        
+        self.bottom_2_rxns = [n for n in nodes if nodes[n] in [1,3]]
+        correct_mask = [i for i in range(len(self.tree)) if i == self.tree_root or i in self.bottom_2_rxns]
         self.leaf_up_2 = np.argwhere(self.mask).flatten().tolist() == correct_mask
         
     
