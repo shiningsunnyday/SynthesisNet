@@ -4,6 +4,7 @@ import os
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
+import multiprocessing as mp
 from tqdm import tqdm
 from collections import defaultdict
 from networkx.drawing.nx_pydot import graphviz_layout
@@ -46,42 +47,57 @@ def vis_skeletons(args, skeletons):
     print(f"visualized some skeletons at {fig_path}")
 
 
+def reorder(syntree):    
+    total_swapped = 0
+    correct = 0
+    incorrect = 0
+    for i in range(len(syntree.chemicals)):
+        swapped = False
+        edges = [e for e in syntree.edges if e[0] == i]
+        assert len(edges) in [0, 1, 2]
+        if len(edges) == 2:
+            # decide if swap needed
+            c1, c2 = edges[0][1], edges[1][1]
+            assert syntree.chemicals[c1].parent == syntree.chemicals[c2].parent
+            rxn_id = syntree.chemicals[c1].parent
+            if not rxns[rxn_id].is_reactant_first(syntree.chemicals[c1].smiles) \
+                or not rxns[rxn_id].is_reactant_second(syntree.chemicals[c2].smiles):
+                ind1 = syntree.edges.index(edges[0])
+                ind2 = syntree.edges.index(edges[1])
+                syntree.edges[ind1], syntree.edges[ind2] = syntree.edges[ind2], syntree.edges[ind1]
+                swapped = True
+        total_swapped += swapped
+    for reaction in syntree.reactions:
+        if len(reaction.child) == 2:
+            rxn_id = reaction.rxn_id
+            if rxns[rxn_id].is_reactant_first(reaction.child[0]):
+                if not rxns[rxn_id].is_reactant_second(reaction.child[0]):
+                    assert rxns[rxn_id].is_reactant_second(reaction.child[1])                    
+                else:
+                    assert rxns[rxn_id].is_reactant_first(reaction.child[1]) \
+                        or rxns[rxn_id].is_reactant_second(reaction.child[1])
+                correct += 1
+            else:
+                assert rxns[rxn_id].is_reactant_second(reaction.child[0])
+                assert rxns[rxn_id].is_reactant_first(reaction.child[1])
+                incorrect += 1     
+    return syntree, total_swapped, correct, incorrect
+
+
 def reorder_syntrees(syntrees, rxns):
     correct = 0
     incorrect = 0
-    total_swapped = 0
-    for syntree in syntrees:
-        for i in range(len(syntree.chemicals)):
-            swapped = False
-            edges = [e for e in syntree.edges if e[0] == i]
-            assert len(edges) in [0, 1, 2]
-            if len(edges) == 2:
-                # decide if swap needed
-                c1, c2 = edges[0][1], edges[1][1]
-                assert syntree.chemicals[c1].parent == syntree.chemicals[c2].parent
-                rxn_id = syntree.chemicals[c1].parent
-                if not rxns[rxn_id].is_reactant_first(syntree.chemicals[c1].smiles) \
-                    or not rxns[rxn_id].is_reactant_second(syntree.chemicals[c2].smiles):
-                    ind1 = syntree.edges.index(edges[0])
-                    ind2 = syntree.edges.index(edges[1])
-                    syntree.edges[ind1], syntree.edges[ind2] = syntree.edges[ind2], syntree.edges[ind1]
-                    swapped = True
-            total_swapped += swapped
-        for reaction in syntree.reactions:
-            if len(reaction.child) == 2:
-                rxn_id = reaction.rxn_id
-                if rxns[rxn_id].is_reactant_first(reaction.child[0]):
-                    if not rxns[rxn_id].is_reactant_second(reaction.child[0]):
-                        assert rxns[rxn_id].is_reactant_second(reaction.child[1])                    
-                    else:
-                        assert rxns[rxn_id].is_reactant_first(reaction.child[1]) \
-                            or rxns[rxn_id].is_reactant_second(reaction.child[1])
-                    correct += 1
-                else:
-                    assert rxns[rxn_id].is_reactant_second(reaction.child[0])
-                    assert rxns[rxn_id].is_reactant_first(reaction.child[1])
-                    incorrect += 1 
+    total_swapped = 0    
+    globals()["rxns"] = rxns
+    with mp.Pool(50) as p:
+        res = p.map(reorder, tqdm(syntrees, desc="reordering"))
+    syntrees = [r[0] for r in res]
+    total_swapped = sum([r[1] for r in res])
+    correct = sum([r[2] for r in res])
+    incorrect = sum([r[3] for r in res])
+    print()
     print(f"correct: {correct}, incorrect: {incorrect}, total swapped: {total_swapped}")   
+    return syntrees
 
 
 

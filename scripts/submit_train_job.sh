@@ -27,4 +27,4 @@ python src/synnet/models/gnn.py \
         --ncpu $2 \
         --prefetch_factor 0 \
         --feats-split \
-        --cuda 0
+        --cuda 0 \

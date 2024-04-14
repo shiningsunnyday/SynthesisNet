@@ -68,9 +68,10 @@ if __name__ == "__main__":
         syntree_collection = SyntheticTreeSet()
         syntrees = syntree_collection.load(args.input_file)        
         rxns = ReactionSet().load(args.rxns_collection_file).rxns        
-        reorder_syntrees(syntrees, rxns) # make sure reactant order is correct        
+        print("finished loading")
+        syntrees = reorder_syntrees(syntrees, rxns) # make sure reactant order is correct        
         sts = []
-        for st in syntree_collection.sts:
+        for st in tqdm(syntree_collection.sts):
             if st: 
                 try:
                     st.build_tree()
