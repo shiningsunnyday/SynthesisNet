@@ -38,7 +38,7 @@ def next_state(sk, state, action):
 
 
 def state_to_program(sk, state):
-    sk.clear_tree()
+    sk.clear_tree([sk.tree_root])
     rxn_graph, node_map, reverse_node_map = sk.rxn_graph()
     for i in range(sk.rxns.sum()):
         rxn_id = np.argmax(state[-sk.rxns.sum()*91:][91*i:91*i+91])
@@ -118,15 +118,11 @@ def get_return(sk, state, model, hash_dir, rxns, bbs, bb_emb):
         bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=1).item()
         smiles = bbs[indices[bb_ind]]
         sk.modify_tree(i, smiles=smiles)
-
-    sk.reconstruct(rxns)
     
-    interms = []
-    for n in sk.tree:
-        if 'smiles' in sk.tree.nodes[n]:
-            interms.append(sk.tree.nodes[n]['smiles'])
-    sims = tanimoto_similarity(state[:4096], interms)
-    return max(sims)
+    sk.reconstruct(rxns)            
+    sim = tanimoto_similarity(state[:4096], [sk.tree.nodes[sk.tree_root]['smiles']])[0]  
+    return sim
+    # return max(sims)
 
 
 def get_mask(sk, policy, state):
@@ -150,40 +146,45 @@ def get_mask(sk, policy, state):
 
 def constructor(self, policy):
     self.policy = policy
-    self.actions = []
-    self.states = []  
-    self.sk_progress = [] 
+    self.actions = {}
+    self.states = {}
+    self.sks = {}
+    self.sk_progress = {}
 
 
-def step(self, action):
-    self.actions.append(action)
-    next_state = self.next_state(self.states[-1], action)    
-    self.states.append(next_state)    
-    done = self.is_done_state(next_state, self.policy)    
-    n = np.argwhere(self.sk.rxns).flatten()[action//91]     
-    self.sk.modify_tree(n, rxn_id=action%91)
-    self.sk_progress.append(deepcopy(self.sk))
+def step(self, i, action):
+    self.actions[i].append(action)
+    next_state = self.next_state(self.sks[i], self.states[i][-1], action)    
+    self.states[i].append(next_state)    
+    done = self.is_done_state(self.sks[i], next_state, self.policy)    
+    n = np.argwhere(self.sks[i].rxns).flatten()[action//91]     
+    self.sks[i].modify_tree(n, rxn_id=action%91)
+    self.sk_progress[i].append(deepcopy(self.sks[i]))
     if done:
-        reward = self.get_return(next_state, self.model, self.hash_dir, self.rxns, self.bbs, self.bb_emb)
-        self.sk_progress.append(deepcopy(self.sk))
+        assert len(self.states[i]) == 3
+        assert len(self.actions[i]) == 2
+        reward = self.get_return(self.sks[i], next_state, self.model, self.hash_dir, self.rxns, self.bbs, self.bb_emb)
+        self.sk_progress[i].append(deepcopy(self.sks[i]))
     else:           
         reward = 0.    
     return next_state, reward, done, None
 
 
-def reset(self, smiles):
-    self.sk.clear_tree()
-    self.sk.reset([self.sk.tree_root])
-    self.sk.tree.nodes[self.sk.tree_root]['smiles'] = smiles
-    init_state = initial_state(self.sk, smiles)
-    self.states.append(init_state)
-    self.sk_progress.append(deepcopy(self.sk))
+def reset(self, i, smiles):
+    self.sks[i] = deepcopy(self.sk)
+    self.sks[i].clear_tree()
+    self.sks[i].reset([self.sks[i].tree_root])
+    self.sks[i].tree.nodes[self.sks[i].tree_root]['smiles'] = smiles
+    init_state = initial_state(self.sks[i], smiles)
+    self.states[i] = [init_state]
+    self.actions[i] = []
+    self.sk_progress[i] = [deepcopy(self.sks[i])]
     return init_state, 0., False, None
 
 
 def render(self, path):
     fig = plt.Figure()
-    n = len(self.sk_progress)
+    n = len(self.sk_progress[i])
     for i in range(n):
         ax = fig.add_subplot(1, n, i+1)
         self.sk_progress[i].visualize(path, ax=ax)
@@ -196,6 +197,7 @@ def make_skeleton_class(idx, vis_dir, sk, model, hash_dir, rxns, bbs, bb_emb):
     attrs = {
         'vis_dir': vis_dir,
         'sk': sk,
+        'sks': {},
         'model': model,
         'n_actions': sk.rxns.sum()*91,
         'hash_dir': hash_dir,
@@ -205,12 +207,12 @@ def make_skeleton_class(idx, vis_dir, sk, model, hash_dir, rxns, bbs, bb_emb):
     }
     attrs.update({
         # static methods
-        'initial_state': partial(initial_state, sk),
-        'get_obs_for_states': partial(get_obs_for_states, sk),
-        'next_state': partial(next_state, sk),
-        'is_done_state': partial(is_done_state, sk),
-        'get_return': partial(get_return, sk),
-        'get_mask': partial(get_mask, sk),
+        'initial_state': staticmethod(initial_state),
+        'get_obs_for_states': staticmethod(get_obs_for_states),
+        'next_state': staticmethod(next_state),
+        'is_done_state': staticmethod(is_done_state),
+        'get_return': staticmethod(get_return),
+        'get_mask': staticmethod(get_mask),
         # constructor
         "__init__": constructor,
         # instance methods

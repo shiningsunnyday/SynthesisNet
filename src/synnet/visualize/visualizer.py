@@ -191,7 +191,7 @@ class SkeletonVisualizer:
 
     def with_drawings(self, mol_drawer: MolDrawer, rxn_drawer: RxnDrawer):
         """Init `MolDrawer` or `RxnDrawer` to plot molecules or rxns in the nodes."""
-        self.path.mkdir(parents=True)
+        self.path.mkdir(parents=True, exist_ok=True)
         self.mol_drawer = mol_drawer(self.path)
         self.rxn_drawer = rxn_drawer(self.path)
         return self

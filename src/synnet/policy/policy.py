@@ -77,7 +77,7 @@ class RxnPolicy(nn.Module):
             assert parent == self.node_map[self.rxn_to_nodes[parent]]
             r_mask = []
             for r in range(91):
-                if self.rxns[r].num_reactant != num_reactant:
+                if Reaction(self.rxns[r]).num_reactant != num_reactant:
                     r_mask.append(False)
                 else:
                     rxn_graph_copy.nodes[parent]['rxn_id'] = r
@@ -104,7 +104,7 @@ class RxnPolicy(nn.Module):
             unfilled = int(unfilled)  
             # mask out bi-mol rxns if unfilled is uni-mol, vice-versa            
             num_reactant = len(list(self.tree.successors(self.reverse_node_map[unfilled])))
-            r_mask = [num_reactant == self.rxns[r].num_reactant for r in range(91)]
+            r_mask = [num_reactant == Reaction(self.rxns[r]).num_reactant for r in range(91)]
             if bool_mask[self.parents[unfilled]].item():
                 pred = self.parents[unfilled][0]                
                 for r in range(91):

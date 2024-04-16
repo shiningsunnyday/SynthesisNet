@@ -2008,11 +2008,13 @@ class Skeleton:
         self.mask = [i]
 
 
-    def clear_tree(self, forcing=False):
+    def clear_tree(self, save=[], forcing=False):
         """
         Clears the semantic information in the tree
         """
         for n in self.tree:
+            if n in save:
+                continue
             if 'smiles' in self.tree.nodes[n]:
                 if forcing:
                     self.tree.nodes[n]['smiles_forcing'] = ''    
@@ -2032,6 +2034,10 @@ class Skeleton:
     
     def reconstruct(self, rxns):
         postorder = list(nx.dfs_postorder_nodes(self.tree, source=self.tree_root))
+        for i in self.tree:
+            if not self.leaves[i]:
+                if 'smiles' in self.tree.nodes[i]:
+                    self.tree.nodes[i]['smiles'] = ''
         for i in postorder:
             if self.rxns[i]:
                 succ = list(self.tree.successors(i))
@@ -2040,12 +2046,12 @@ class Skeleton:
                 reactants = tuple(self.tree.nodes[j]['smiles'] for j in succ)
                 if len(reactants) != rxns[self.tree.nodes[i]['rxn_id']].num_reactant:
                     return False
-                interm = Reaction(self.tree.nodes[i]['smirks']).run_reaction(reactants)              
+                interm = rxns[self.tree.nodes[i]['rxn_id']].run_reaction(reactants)              
                 pred = list(self.tree.predecessors(i))[0]
                 if interm is None:
                     return False
                 self.tree.nodes[pred]['smiles'] = interm
-        smi1 = Chem.CanonSmiles(self.tree.nodes[self.tree_root]['smiles'])        
+        smi1 = Chem.CanonSmiles(self.tree.nodes[self.tree_root]['smiles'])                
 
 
     @property

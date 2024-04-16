@@ -30,7 +30,7 @@ from synnet.models.gnn import PtrDataset
 from synnet.models.mlp import nn_search_list
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.data_utils import Reaction, ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
-from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search
+from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search, tanimoto_similarity
 import torch
 import rdkit.Chem as Chem
 from torch_geometric.data import Data
@@ -220,7 +220,7 @@ def pick_node(sk, logits, bb_emb):
                 best_conf = conf
                 best_rxn_n = n
     if best_rxn_n is not None:
-        return [n]
+        return [best_rxn_n]
     else:
         dists = [dist(logits[n][:-NUM_POSS], bb_emb) for n in logits]
         n = list(logits)[np.argmin(dists)]
@@ -295,9 +295,10 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                     fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1)
                     sks.append(sk_n)
                     if skviz is not None:
-                        mermaid_txt = skviz.write(node_mask=sk_n.mask)             
+                        sk_viz_n = skviz(sk_n)
+                        mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
                         mask_str = ''.join(map(str,sk_n.mask))
-                        outfile = skviz.path / f"skeleton_{sk_n.index}_{mask_str}.md"  
+                        outfile = sk_viz_n.path / f"skeleton_{sk_n.index}_{mask_str}.md"  
                         SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)      
                         print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
         else:
@@ -342,7 +343,15 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
         correct = smi1 == smi2
     else:
         assert method == 'reconstruct'
-        breakpoint()
+        sk.reconstruct(rxns)
+        smiles = []
+        for n in sk.tree:
+            if 'smiles' in sk.tree.nodes[n]:
+                if sk.tree.nodes[n]['smiles']:
+                    smiles.append(sk.tree.nodes[n]['smiles'])
+        smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
+        sims = tanimoto_similarity(mol_fp(smi2), smiles)
+        correct = max(sims)
     return correct
 
 
@@ -458,14 +467,13 @@ def get_metrics(targets, all_sks):
                         update(total_incorrect[tree_id], incorrect)                    
                 else:
                     assert args.test_correct_method == 'reconstruct'
-                    sim = match
-                if correct:
+                    correct = max(correct, match)
+                if correct == 1:
                     break
             total_correct[tree_id]['correct'] += correct
             total_correct[tree_id]['total'] += 1
             total_correct[tree_id]['all'] += [correct]
             # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
-            breakpoint()
             summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
             if args.test_correct_method == 'preorder':
                 print(f"total summary: {summary}, total incorrect: {total_incorrect}")     
@@ -483,14 +491,19 @@ def decode(smi):
     sk.clear_tree(forcing=args.forcing_eval)
     sk.modify_tree(sk.tree_root, smiles=smi)              
     if args.mermaid:
-        skviz = SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
+        skviz = lambda sk: SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
     else:
         skviz = None
     # print(f"begin decoding {smi}")
     if 'rxn_models' in globals():
         rxn_gnn = rxn_models[sk.index]
+    else:
+        rxn_gnn = globals()['rxn_gnn']
+
     if 'bb_models' in globals():
         bb_gnn = bb_models[sk.index]
+    else:
+        bb_gnn = globals()['bb_gnn']
     try:
         sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
         print(f"done decoding {smi}")
@@ -536,7 +549,7 @@ def main(args):
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
     # ... models
     logger.info("Start loading models from checkpoints...")  
-    if os.path.isdir(args.ckpt_dir):
+    if args.ckpt_dir and os.path.isdir(args.ckpt_dir):
         constraint = {'valid_loss': 'accuracy_loss'}
         rxn_models = load_from_dir(args.ckpt_dir, constraint)
         globals()['rxn_models'] = rxn_models
@@ -574,6 +587,8 @@ def main(args):
             if 'rxn_models' in globals() and 'bb_models' in globals():
                 if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
                     SKELETON_INDEX.append(ind)                
+            else:
+                SKELETON_INDEX.append(ind)      
         print(f"SKELETON INDEX: {SKELETON_INDEX}")
         if args.one_per_class:
             rep = set()

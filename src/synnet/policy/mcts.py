@@ -9,6 +9,7 @@ import random as rd
 import collections
 import numpy as np
 import torch
+from copy import deepcopy
 
 rd.seed(0)
 np.random.seed(0)
@@ -132,7 +133,7 @@ class MCTSNode:
         """
         return self.child_Q + self.child_U
 
-    def select_leaf(self):
+    def select_leaf(self, sk):
         """
         Traverses the MCT rooted in the current node until it finds a leaf
         (i.e. a node that only exists in its parent node in terms of its
@@ -159,12 +160,12 @@ class MCTSNode:
             if current.mask.sum().item() == 0:
                 breakpoint()
             best_move = np.argmax(action_score)
-            current = current.maybe_add_child(best_move)
+            current = current.maybe_add_child(sk, best_move)
             if current.state[4096+80] == 1 and current.state[4096+144] == 1:
                 breakpoint()
         return current
 
-    def maybe_add_child(self, action):
+    def maybe_add_child(self, sk, action):
         """
         Adds a child node for the given action if it does not yet exists, and
         returns it.
@@ -174,7 +175,7 @@ class MCTSNode:
         """
         if action not in self.children:
             # Obtain state following given action.            
-            new_state = self.TreeEnv.next_state(self.state, action)
+            new_state = self.TreeEnv.next_state(sk, self.state, action)
             self.children[action] = MCTSNode(new_state, self.n_actions,
                                              self.TreeEnv,
                                              action=action, parent=self, policy=self.policy)
@@ -255,8 +256,8 @@ class MCTSNode:
             return
         self.parent.backup_value(value, up_to)
 
-    def is_done(self):
-        return self.TreeEnv.is_done_state(self.state, self.policy)
+    def is_done(self, sk):
+        return self.TreeEnv.is_done_state(sk, self.state, self.policy)
 
     def inject_noise(self):
         dirch = np.random.dirichlet([D_NOISE_ALPHA] * self.n_actions)
@@ -320,8 +321,8 @@ class MCTS:
 
         self.root = None
 
-    def initialize_search(self, smiles):
-        init_state = self.TreeEnv.initial_state(smiles)
+    def initialize_search(self, sk, smiles):
+        init_state = self.TreeEnv.initial_state(sk, smiles)
         n_actions = self.TreeEnv.n_actions        
         self.root = MCTSNode(init_state, n_actions, self.TreeEnv, policy=self.agent_netw)
         # Number of steps into the episode after which we always select the
@@ -333,7 +334,7 @@ class MCTS:
         self.searches_pi = []
         self.obs = []
 
-    def tree_search(self, num_parallel=None):
+    def tree_search(self, sk, num_parallel=None):
         """
         Performs multiple simulations in the tree (following trajectories)
         until a given amount of leaves to expand have been encountered.
@@ -352,13 +353,13 @@ class MCTS:
             failsafe += 1
             # self.root.print_tree()
             # print("_"*50)
-            leaf = self.root.select_leaf()
+            leaf = self.root.select_leaf(sk)
             # If we encounter done-state, we do not need the agent network to
             # bootstrap. We can backup the value right away.
-            if leaf.is_done():
-                value = self.TreeEnv.get_return(leaf.state, self.TreeEnv.model, self.agent_netw.hash_dir, self.TreeEnv.rxns, self.TreeEnv.bbs, self.TreeEnv.bb_emb)
+            if leaf.is_done(sk):
+                value = self.TreeEnv.get_return(sk, leaf.state, self.TreeEnv.model, self.agent_netw.hash_dir, self.TreeEnv.rxns, self.TreeEnv.bbs, self.TreeEnv.bb_emb)
                 leaf.backup_value(value, up_to=self.root)
-                print("backing up")
+                # print("backing up")
                 continue
             # Otherwise, discourage other threads to take the same trajectory
             # via virtual loss and enqueue the leaf for evaluation by agent
@@ -368,7 +369,7 @@ class MCTS:
         # Evaluate the leaf-states all at once and backup the value estimates.
         if leaves:
             action_probs, values = self.agent_netw.step(
-                self.TreeEnv.get_obs_for_states([leaf.state for leaf in leaves]))
+                self.TreeEnv.get_obs_for_states(sk, [leaf.state for leaf in leaves]))
             for leaf, action_prob, value in zip(leaves, action_probs, values):
                 leaf.revert_virtual_loss(up_to=self.root)
                 leaf.incorporate_estimates(action_prob, value, up_to=self.root)
@@ -390,29 +391,29 @@ class MCTS:
             assert self.root.child_N[action] != 0
         return action
 
-    def take_action(self, action):
+    def take_action(self, sk, action):
         """
         Takes the specified action for the root state. The subsequent child
         state becomes the new root state of the tree.
         :param action: Action to take for the root state.
         """
         # Store data to be used as experience tuples.
-        ob = self.TreeEnv.get_obs_for_states([self.root.state])
+        ob = self.TreeEnv.get_obs_for_states(sk, [self.root.state])
         self.obs.append(ob)
         self.searches_pi.append(
             self.root.visits_as_probs()) # TODO: Use self.root.position.n < self.temp_threshold as argument
         self.qs.append(self.root.Q)
         child = self.root.children[action]
-        reward = (self.TreeEnv.get_return(child.state, self.TreeEnv.model, child.policy.hash_dir, self.TreeEnv.rxns, self.TreeEnv.bbs, self.TreeEnv.bb_emb)
+        reward = (self.TreeEnv.get_return(sk, child.state, self.TreeEnv.model, child.policy.hash_dir, self.TreeEnv.rxns, self.TreeEnv.bbs, self.TreeEnv.bb_emb)
                   - sum(self.rewards))
         self.rewards.append(reward)
 
         # Resulting state becomes new root of the tree.
-        self.root = self.root.maybe_add_child(action)
+        self.root = self.root.maybe_add_child(sk, action)
         del self.root.parent.children
 
 
-def execute_episode(agent_netw, num_simulations, TreeEnv, smiles):
+def execute_episode(num_simulations, TreeEnv, i, smiles):
     """
     Executes a single episode of the task using Monte-Carlo tree search with
     the given agent network. It returns the experience tuples collected during
@@ -427,15 +428,17 @@ def execute_episode(agent_netw, num_simulations, TreeEnv, smiles):
     rewards in each step, total return for this episode and the final state of
     this episode.
     """
+    assert hasattr(TreeEnv, 'network')
+    agent_netw = TreeEnv.network
     mcts = MCTS(agent_netw, TreeEnv)
-
-    mcts.initialize_search(smiles)
+    TreeEnv.sks[i] = deepcopy(TreeEnv.sk)
+    mcts.initialize_search(TreeEnv.sks[i], smiles)
 
     # Must run this once at the start, so that noise injection actually affects
     # the first action of the episode.
-    first_node = mcts.root.select_leaf()
+    first_node = mcts.root.select_leaf(TreeEnv.sks[i])
     probs, vals = agent_netw.step(
-        TreeEnv.get_obs_for_states([first_node.state]))
+        TreeEnv.get_obs_for_states(TreeEnv.sks[i], [first_node.state]))
     first_node.incorporate_estimates(probs[0], vals[0], first_node)
 
     while True:
@@ -445,26 +448,26 @@ def execute_episode(agent_netw, num_simulations, TreeEnv, smiles):
         # We want `num_simulations` simulations per action not counting
         # simulations from previous actions.
         while mcts.root.N < current_simulations + num_simulations:
-            print(mcts.root.N, "root.N", current_simulations + num_simulations)
-            print("begin tree search")
-            mcts.tree_search()
+            # print(mcts.root.N, "root.N", current_simulations + num_simulations)
+            # print("begin tree search")
+            mcts.tree_search(TreeEnv.sks[i])
 
         # mcts.root.print_tree()
         # print("_"*100)
         action = mcts.pick_action()
-        print("taking action")
-        mcts.take_action(action)
+        # print("taking action")
+        mcts.take_action(TreeEnv.sks[i], action)
 
-        if mcts.root.is_done():
+        if mcts.root.is_done(TreeEnv.sks[i]):
             break
 
     # Computes the returns at each step from the list of rewards obtained at
     # each step. The return is the sum of rewards obtained *after* the step.
-    ret = [TreeEnv.get_return(mcts.root.state, TreeEnv.model, agent_netw.hash_dir, TreeEnv.rxns, TreeEnv.bbs, TreeEnv.bb_emb) for _
+    ret = [TreeEnv.get_return(TreeEnv.sks[i], mcts.root.state, TreeEnv.model, agent_netw.hash_dir, TreeEnv.rxns, TreeEnv.bbs, TreeEnv.bb_emb) for _
            in range(len(mcts.rewards))]
 
     total_rew = np.sum(mcts.rewards)
-
+    print("done")
     obs = np.concatenate(mcts.obs)
     return (obs, mcts.searches_pi, ret, total_rew, mcts.root.state)
 
