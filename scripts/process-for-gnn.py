@@ -45,6 +45,9 @@ def get_args():
         default='rset',
         help="What constitutes anchors"
     )
+    parser.add_argument(
+        "--gnn-datasets", type=int, nargs='+'
+    )
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
@@ -134,6 +137,8 @@ def main():
     kth_largest[len_inds] = np.arange(len(skeletons))[::-1]
     for index, st in tqdm(enumerate(skeletons)):
         if len(list(skeletons[st])) == 0:
+            continue
+        if args.gnn_datasets is not None and index not in args.gnn_datasets:
             continue
         # if len(skeletons[st]) < 100:
         #     continue

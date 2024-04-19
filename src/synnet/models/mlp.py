@@ -290,7 +290,7 @@ class GNN(pl.LightningModule):
         y_bb = y[mask_bb, :256]
         y_hat_bb = y_hat[mask_bb, :256]
         # only reactions
-        mask_rxn = (y[:, 256:] != 0).any(axis=-1)
+        mask_rxn = (y[:, 256:] != 0).any(axis=-1)        
         y_rxn = y[mask_rxn, 256:]        
         y_hat_rxn = y_hat[mask_rxn, 256:]
 
@@ -313,6 +313,7 @@ class GNN(pl.LightningModule):
                                     
         if "accuracy" in self.valid_loss:
             if y_rxn.shape[0]:
+                breakpoint()
                 y_hat, y = y_hat_rxn, y_rxn
                 y_hat = torch.argmax(y_hat, axis=1)
                 y = torch.argmax(y, axis=1)

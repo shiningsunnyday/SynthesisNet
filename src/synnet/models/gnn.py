@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
 
-# all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
+all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
 # keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
@@ -43,6 +43,7 @@ class PtrDataset(Dataset):
         self.edge_index = {}
         self.graphs = {}
         self.interms_map = {}
+        self.sks = {}
         self.num_nodes = {}
         self.pe = pe
         for ptr in ptrs:
@@ -60,12 +61,11 @@ class PtrDataset(Dataset):
                 self.rewire(self.graphs[e], root)
                 edges = np.array(self.graphs[e].edges).T                
             self.edge_index[e] = np.concatenate((edges, edges[::-1]), axis=-1)                
-        # for e in self.interms_map:
-        #     dataset_index = int(e.split('/')[-1].split('_')[0])
-        #     sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
-        #     mask = (~(sk.rxns | sk.leaves))
-        #     mask[sk.tree_root] = False
-        #     assert (mask == (self.interms_map[e])).all()            
+        
+            dataset_index = int(e.split('/')[-1].split('_')[0])
+            sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
+            sk.mask = [sk.tree_root]           
+            self.sks[e] = sk
                     
     @staticmethod
     def get_graph(edges):
@@ -149,13 +149,20 @@ class PtrDataset(Dataset):
         X = X.reshape(-1, num_nodes, X.shape[-1])[index]
         # add 1D positional encoding (num_nodes, dim)                        
         # interm nodes :2048 feats are 0
+        # TODO: Fix these hacky tricks
+
         # simulate scenario of retrosynthesis where interms aren't known        
+        X[np.nonzero(self.interms_map[e])[0], :2048] = 0        
+
         X[np.nonzero(self.interms_map[e])[0], :2048] = 0
         if self.pe == 'sin':            
             pe = self.positionalencoding1d(32, num_nodes) # add to target
             X = np.concatenate((X, pe.numpy()), axis=-1)
         y = sparse.load_npz(base+'_ys.npz').toarray()
-        y = y.reshape(-1, num_nodes, y.shape[-1])[index]        
+        y = y.reshape(-1, num_nodes, y.shape[-1])[index]
+
+        # mask out y all rxns except bottom-2        
+        y[self.sks[e].rxns] = 0.
         key_val = e.split('/')[-1].split('_')[0]+''.join(list(map(str, node_mask)  ))
         data = (
             torch.tensor(self.edge_index[e], dtype=torch.int64),
@@ -443,7 +450,6 @@ def main(args):
     logger.info(f"Start training")
     trainer.fit(gnn, train_dataloader, valid_dataloader)
     logger.info(f"Training completed.")
-
 
 
 if __name__ == "__main__":

@@ -28,3 +28,4 @@ python src/synnet/models/gnn.py \
         --prefetch_factor 0 \
         --feats-split \
         --cuda 0 \
+        --pe sin        
