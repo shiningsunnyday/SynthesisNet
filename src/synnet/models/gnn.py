@@ -35,7 +35,7 @@ MODEL_ID = Path(__file__).stem
 
 
 all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
-# keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
+keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
         super().__init__(**kwargs)
@@ -162,7 +162,7 @@ class PtrDataset(Dataset):
         y = y.reshape(-1, num_nodes, y.shape[-1])[index]
 
         # mask out y all rxns except bottom-2        
-        y[self.sks[e].rxns] = 0.
+        # y[self.sks[e].rxns] = 0.
         key_val = e.split('/')[-1].split('_')[0]+''.join(list(map(str, node_mask)  ))
         data = (
             torch.tensor(self.edge_index[e], dtype=torch.int64),
@@ -405,9 +405,9 @@ def main(args):
         learning_rate=args.lr,
         val_freq=1,
         # molembedder=molembedder,
-        ncpu=args.ncpu,
         X=args.mol_embedder_file,
-        datasets=used_is
+        datasets=used_is,
+        **vars(args)
     )
 
     # Set up Trainer

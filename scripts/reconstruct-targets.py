@@ -25,12 +25,12 @@ from synnet.visualize.drawers import MolDrawer, RxnDrawer
 from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
 from synnet.visualize.visualizer import SkeletonVisualizer
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt, load_gnn_from_ckpt
+from synnet.models.common import load_gnn_from_ckpt
 from synnet.models.gnn import PtrDataset
 from synnet.models.mlp import nn_search_list
 from synnet.MolEmbedder import MolEmbedder
-from synnet.utils.data_utils import Reaction, ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
-from synnet.utils.predict_utils import mol_fp, synthetic_tree_decoder_greedy_search, tanimoto_similarity
+from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
+from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 import torch
 import rdkit.Chem as Chem
 from torch_geometric.data import Data
@@ -140,7 +140,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
     else
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
     """            
-    rxn_graph, node_map, _ = sk.rxn_graph()
+    rxn_graph, node_map, _ = sk.rxn_graph()    
     if sk.rxns[n]:  
         cur = node_map[n]          
         mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
@@ -159,10 +159,9 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
             if len(paths):
                 sk.tree.nodes[n]['path'] = paths[rxn_id]
         # print("path", os.path.join(args.hash_dir, p.get_path()))            
-    else:   
+    else:           
         assert sk.leaves[n]
         emb_bb = logits_n[:-NUM_POSS]
-        emb_bb = emb_bb/np.linalg.norm(emb_bb)
         pred = list(sk.tree.predecessors(n))[0]           
         if 'bb' in args.filter_only:            
             if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
@@ -184,8 +183,15 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
                 bbs_child = data['bbs'][f"{e}{DELIM}{int(second)}"]
                 assert len(bbs_child) == 1
                 bbs_child = bbs_child[0]
-            # if args.forcing_eval:
-            #     assert sk.tree.nodes[n]['smiles'] in bbs_child
+            if args.forcing_eval:
+                if sk.tree.nodes[n]['smiles'] not in bbs_child:
+                    bad = False
+                    for m in sk.tree:
+                        if 'rxn_id' in sk.tree.nodes[m]:
+                            if sk.tree.nodes[m]['rxn_id_forcing'] != sk.tree.nodes[m]['rxn_id']:
+                                bad = True
+                    if not bad:
+                        breakpoint()
             indices = [bbs.index(smi) for smi in bbs_child]
             if len(indices) >= top_bb:
                 bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
@@ -504,13 +510,9 @@ def decode(smi):
         bb_gnn = bb_models[sk.index]
     else:
         bb_gnn = globals()['bb_gnn']
-    try:
-        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
-        print(f"done decoding {smi}")
-        return sks
-    except Exception as e:
-        pdb.post_mortem()
-        logger.error(f"{smi} {e}")
+    sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
+    print(f"done decoding {smi}")
+    return sks
 
 
 def format_metrics(metrics):
@@ -538,11 +540,30 @@ def load_from_dir(dir, constraint):
                 continue
             models[int(hparams_file['datasets'])] = load_gnn_from_ckpt(fpaths[0])
     return models
+
+
+
+def test_skeletons(args, skeleton_set):
+    if args.ckpt_dir:
+        SKELETON_INDEX = []
+        for ind in range(len(skeleton_set.sks)):
+            sk = skeleton_set.sks[ind]      
+            if 'rxn_models' in globals() and 'bb_models' in globals():
+                if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
+                    SKELETON_INDEX.append(ind)
+            else:
+                SKELETON_INDEX.append(ind)
+    else:
+        dirname = os.path.dirname(args.ckpt_rxn)
+        config_file = os.path.join(dirname, 'hparams.yaml')
+        config = yaml.safe_load(open(config_file))
+        SKELETON_INDEX = list(map(int, config['datasets']))
+    return SKELETON_INDEX
+
     
 
 
-
-def main(args):
+def main(args):    
     handler = logging.FileHandler(os.path.join(args.out_dir, "log.txt"))
     logger.addHandler(handler)
     logger.info("Start.")
@@ -581,14 +602,7 @@ def main(args):
         skeleton_set = SkeletonSet().load_skeletons(skeletons)                
         syntree_set_all = [st for v in skeletons.values() for st in v]
         syntree_set = []
-        SKELETON_INDEX = []
-        for ind in range(len(skeleton_set.sks)):
-            sk = skeleton_set.sks[ind]      
-            if 'rxn_models' in globals() and 'bb_models' in globals():
-                if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
-                    SKELETON_INDEX.append(ind)                
-            else:
-                SKELETON_INDEX.append(ind)      
+        SKELETON_INDEX = test_skeletons(args, skeleton_set)
         print(f"SKELETON INDEX: {SKELETON_INDEX}")
         if args.one_per_class:
             rep = set()
@@ -626,20 +640,21 @@ def main(args):
         targets = _fetch_data(args.data)
     
 
-    # ... building blocks
+    # # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-    # A dict is used as lookup table for 2nd reactant during inference:
-    bblocks_dict = {block: i for i, block in enumerate(bblocks)}
-    logger.info(f"Successfully read {args.building_blocks_file}.")
+    # # A dict is used as lookup table for 2nd reactant during inference:
+    # bblocks_dict = {block: i for i, block in enumerate(bblocks)}
+    # logger.info(f"Successfully read {args.building_blocks_file}.")
 
     # # ... building block embedding
-    bblocks_molembedder = (
-        MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-    )
-    bb_emb = bblocks_molembedder.get_embeddings()
+    # bblocks_molembedder = (
+    #     MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
+    # )
+    # bb_emb = bblocks_molembedder.get_embeddings()    
+    # bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
+    bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
+    logger.info(f"Successfully read {args.embeddings_knn_file}.")
     
-    bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
-    logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
     logger.info("...loading data completed.")
 
     # Decode queries, i.e. the target molecules.
@@ -665,16 +680,20 @@ def main(args):
             with mp.Pool(args.ncpu) as p:
                 sks_batch = p.map(decode, tqdm(target_batch))        
         all_targets += target_batch
-        all_sks += sks_batch     
-        batch_correct, batch_incorrect = get_metrics(all_targets, all_sks)
-        logger.info(f"batch {batch} correct: {format_metrics(batch_correct)}")
-        logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
+        all_sks += sks_batch
+        if args.forcing_eval:
+            correct_summary = get_metrics(target_batch, sks_batch)
+            logger.info(f"correct summary: {correct_summary}")
+        else:
+            batch_correct, batch_incorrect = get_metrics(target_batch, sks_batch)
+            logger.info(f"batch {batch} correct: {format_metrics(batch_correct)}")
+            logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
     
     if args.forcing_eval:
         correct_summary = get_metrics(targets, all_sks)
         logger.info(f"correct summary: {correct_summary}")
     else:
-        total_correct, total_incorrect = get_metrics(targets, all_sks)
+        total_correct, total_incorrect = get_metrics(all_targets, all_sks)
         logger.info(f"total correct: {format_metrics(total_correct)}")
         logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
         
@@ -688,6 +707,10 @@ def main(args):
     #         logger.info(f"Starting MP with ncpu={args.ncpu}")
     #         results = pool.starmap(wrapper_decoder, targets)
     logger.info("Finished decoding.")
+
+    return
+
+    # Legacy code
 
     # Print some results from the prediction
     # Note: If a syntree cannot be decoded within `max_depth` steps (15),

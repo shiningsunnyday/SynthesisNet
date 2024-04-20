@@ -1966,17 +1966,15 @@ class Skeleton:
                 assert ((X[i].sum() > 0) + (y[i].sum() > 0)) <= 1
                 if X[i].sum():
                     node_colors.append('green')
-                if y[i].sum():
-                    if self.leaves[i]:
-                        node_colors.append('yellow')
-                    else:
-                        node_colors.append('gray')
+                elif y[i].sum():
+                    node_colors.append('yellow')
+                else:
+                    node_colors.append('gray')
         else:
             node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
         nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
-        if ax is None:
-            fig.savefig(path)
-            print(path)
+        fig.savefig(path)
+        print(path)
     
 
     def reset(self, mask=None):

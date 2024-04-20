@@ -313,7 +313,6 @@ class GNN(pl.LightningModule):
                                     
         if "accuracy" in self.valid_loss:
             if y_rxn.shape[0]:
-                breakpoint()
                 y_hat, y = y_hat_rxn, y_rxn
                 y_hat = torch.argmax(y_hat, axis=1)
                 y = torch.argmax(y, axis=1)
