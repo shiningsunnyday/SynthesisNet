@@ -86,15 +86,19 @@ if __name__ == "__main__":
             class_nums = {k: len(skeletons[k]) for k in skeletons}
         else:
             skeletons = {}
-        for i, st in tqdm(enumerate(sts)):
-            done = False
-            for sk in skeletons:
-                if st.is_isomorphic(sk): 
-                    done = True
-                    skeletons[sk].append(st)
-                    break                    
-            if not done: 
+        lookup = {}
+        for i, st in tqdm(enumerate(sts), desc="serializing trees"):
+            sk = Skeleton(st, -1)
+            ans = []
+            try:
+                serialize(sk.tree, sk.tree_root, ans)
+            except:
+                breakpoint()
+            if ','.join(ans) not in lookup:
+                lookup[','.join(ans)] = st        
                 skeletons[st] = [st]
+            else:
+                skeletons[lookup[','.join(ans)]].append(st)
         if args.skeleton_canonical_file:
             if list(class_nums.keys()) != list(skeletons.keys()):
                 breakpoint()
@@ -103,11 +107,11 @@ if __name__ == "__main__":
         for k, v in skeletons.items():
             print(f"count: {len(v)}") 
         pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))    
-
+    breakpoint()
     if args.visualize_dir:
         os.makedirs(args.visualize_dir, exist_ok=True)
-        count_bbs(args, skeletons)
-        count_rxns(args, skeletons)
+        # count_bbs(args, skeletons)
+        # count_rxns(args, skeletons)
         vis_skeletons(args, skeletons)
         count_skeletons(args, skeletons)
         

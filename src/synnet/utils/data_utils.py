@@ -1598,19 +1598,24 @@ class SyntheticTree:
 
 
     def is_isomorphic(self, other):
-        def get_parent(node):
-            if node.parent: return node.parent[0]
-            return None
+        breakpoint()
+        sk1 = Skeleton(self, -1)
+        sk2 = Skeleton(other, -1)
         
-        def try_perm(perm, self_nodes, other_nodes):
-            other_nodes = [other_nodes[perm[i]] for i in range(len(perm))]
-            for i in range(len(self_nodes)):
-                for j in range(len(other_nodes)):
-                    if (get_parent(self_nodes[i]) == self_nodes[j]) ^ (get_parent(other_nodes[i]) == other_nodes[j]):
-                        return False
-                    if (get_parent(self_nodes[j]) == self_nodes[i]) ^ (get_parent(other_nodes[j]) == other_nodes[i]):
-                        return False 
-            return True       
+        
+        def serialize(tree, root, ans):
+            bfs = deque([root])
+            while len(bfs):
+                cur = bfs.popleft()
+                childs = list(tree[cur])                
+                if len(childs):
+                    if tree.nodes[childs[0]]['child'] == 'right':
+                        childs = childs[::-1]
+                    for c in childs:
+                        bfs.append(c)
+                else:
+                    bfs += [0, 0]
+
         
 
         if len(self.nodes) != len(other.nodes): return False
@@ -1906,8 +1911,8 @@ class Skeleton:
         interms = []
         whole_tree = nx.DiGraph()        
         for action in st.actions:
-            if action == 0:
-                n = len(whole_tree)-1
+            n = len(whole_tree)-1
+            if action == 0:                
                 if st.reactions[j].rtype == 1:                    
                     whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child='left')
                     whole_tree.add_node(n+2, rxn_id=st.reactions[j].rxn_id)
@@ -1917,10 +1922,11 @@ class Skeleton:
                     interms.append(n+3)
                     i += 2                    
                 else:
-                    whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child='left')
-                    whole_tree.add_node(n+2, smiles=st.chemicals[i+1].smiles, child='right')
+                    child = st.reactions[j].child.index(st.chemicals[i].smiles)                    
+                    whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child=['left', 'right'][child])
+                    whole_tree.add_node(n+2, smiles=st.chemicals[i+1].smiles, child=['right', 'left'][child])
                     whole_tree.add_node(n+3, rxn_id=st.reactions[j].rxn_id)
-                    assert st.reactions[j].child == [st.chemicals[i].smiles, st.chemicals[i+1].smiles]
+                    assert set(st.reactions[j].child) == set([st.chemicals[i].smiles, st.chemicals[i+1].smiles])
                     whole_tree.add_edge(n+3, n+1)
                     whole_tree.add_edge(n+3, n+2)
                     whole_tree.add_node(n+4, smiles=st.chemicals[i+2].smiles)
@@ -1929,7 +1935,7 @@ class Skeleton:
                     i += 3
                 j += 1
             elif action == 1:
-                n = interms[-1]
+                a = interms[-1]
                 if st.reactions[j].rtype == 1:
                     whole_tree.add_node(n+1, rxn_id=st.reactions[j].rxn_id)
                     whole_tree.add_edge(n+1, n)
@@ -1957,7 +1963,7 @@ class Skeleton:
                 child = st.reactions[j].child.index(whole_tree.nodes[a]['smiles'])
                 whole_tree.nodes[a]['child'] = ['left', 'right'][child]
                 whole_tree.nodes[b]['child'] = ['right', 'left'][child]
-                whole_tree.add_node(n+1, rxn_id=st.reactions[j])
+                whole_tree.add_node(n+1, rxn_id=st.reactions[j].rxn_id)
                 whole_tree.add_node(n+2, smiles=st.chemicals[i].smiles)
                 whole_tree.add_edge(n+1, a)
                 whole_tree.add_edge(n+1, b)
@@ -1980,15 +1986,15 @@ class Skeleton:
         self.reset()
 
 
-    def visualize(self, path, Xy=None, ax=None):
+    def visualize(self, path=None, Xy=None, ax=None):
         pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
-        assets_folder = os.path.join(os.path.dirname(path), 'assets/')
-        os.makedirs(assets_folder, exist_ok=True)
         if ax is None:
             pos_np = np.array([v for v in pos.values()])
             w, l = pos_np.max(axis=0)-pos_np.min(axis=0)
             fig = plt.Figure(figsize=(20*w, 20*l))
             ax = fig.add_subplot(1, 1, 1)        
+        else:
+            fig = None
         if Xy:
             X, y = Xy
             node_colors = []
@@ -2001,12 +2007,12 @@ class Skeleton:
                 else:
                     node_colors.append('gray')
         else:
-        #     node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
+            node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
+
         # nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
         # fig.savefig(path)
-        # print(path)
-    
-            node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]  
+        # print(path)    
+
         node_labels = {}
         node_sizes = []
         for n in self.tree:
@@ -2025,7 +2031,10 @@ class Skeleton:
                          node_color=node_colors, 
                          labels=node_labels,
                          node_size=node_sizes)
-        fig.savefig(path)
+        if fig is not None:
+            if path is not None:
+                fig.savefig(path)
+                print(os.path.abspath(path))
 
 
     def reset(self, mask=None):

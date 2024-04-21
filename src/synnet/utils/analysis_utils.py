@@ -27,24 +27,37 @@ def skeleton2graph(skeleton):
 
 def vis_skeletons(args, skeletons):
     min_count = args.min_count
-    max_i = args.num_to_vis
-    fig_path = os.path.join(args.visualize_dir, 'skeletons.png')
-    fig = plt.Figure(figsize=(30, 30))
+    max_i = args.num_to_vis        
     skeletons = {k:skeletons[k] for k in skeletons if len(skeletons[k]) >= min_count}
     for i in range(max_i):
         for j, sk in enumerate(skeletons):
-            ax = fig.add_subplot(max_i, len(skeletons), i*len(skeletons)+j+1)
-            G, root = skeleton2graph(skeletons[sk][i])
-            pos = Skeleton.hierarchy_pos(G, root)
-            # pos = graphviz_layout(G, prog="twopi")
-            # pos = nx.circular_layout(G)
-            node_sizes = [200 for _ in G.nodes()]
-            node_sizes[list(G.nodes()).index(skeletons[sk][i].root.smiles)] *= 2
-            nx.draw_networkx(G, pos=pos, ax=ax, node_size=node_sizes)
+            sk = Skeleton(sk, j)
+            fig_path = os.path.join(args.visualize_dir, f'skeleton_{j}.png')
+            sk.visualize(path=fig_path)
     
     # fig(f"{args.num_to_vis} representing {len(skeletons)} classes")    
-    fig.savefig(fig_path)    
+    # fig.savefig(fig_path)    
     print(f"visualized some skeletons at {fig_path}")
+
+
+def serialize(tree, cur, ans):
+    if cur == -1:
+        ans += ['0']
+        return
+    else:
+        ans += ['1']
+    childs = list(tree[cur])                
+    if len(childs):
+        if 'child' in tree.nodes[childs[0]]:
+            if tree.nodes[childs[0]]['child'] == 'right':
+                childs = childs[::-1]
+        if len(childs) == 1:
+            childs += [-1]        
+        for c in childs:
+            serialize(tree, c, ans)
+    else:
+        serialize(tree, -1, ans)
+        serialize(tree, -1, ans)
 
 
 def reorder(syntree):    
@@ -66,8 +79,19 @@ def reorder(syntree):
                 ind2 = syntree.edges.index(edges[1])
                 syntree.edges[ind1], syntree.edges[ind2] = syntree.edges[ind2], syntree.edges[ind1]
                 swapped = True
-                print("swapped")
+                print("swapped edges")
         total_swapped += swapped
+    for j in range(len(syntree.reactions)):
+        swapped = False
+        childs = syntree.reactions[j].child
+        if len(childs) == 2:
+            rxn_id = syntree.reactions[j].rxn_id
+            if not rxns[rxn_id].is_reactant_first(childs[0]):
+                assert rxns[rxn_id].is_reactant_second(childs[0])
+                assert rxns[rxn_id].is_reactant_first(childs[1])
+                syntree.reactions[j].child = childs[::-1]
+                swapped = True
+                print("swapped childs")
     for reaction in syntree.reactions:
         if len(reaction.child) == 2:
             rxn_id = reaction.rxn_id
@@ -92,6 +116,7 @@ def reorder_syntrees(syntrees, rxns):
     globals()["rxns"] = rxns
     with mp.Pool(50) as p:
         res = p.map(reorder, tqdm(syntrees, desc="reordering"))
+    # res = [reorder(syntree) for syntree in syntrees]
     syntrees = [r[0] for r in res]
     total_swapped = sum([r[1] for r in res])
     correct = sum([r[2] for r in res])
