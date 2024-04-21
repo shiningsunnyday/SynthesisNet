@@ -1900,52 +1900,77 @@ class Skeleton:
         st: example of SyntheticTree with the skeleton
         This is a dual use class. It also remembers st for later use.
         """   
-        tree = nx.DiGraph(st.edges)
-        n = len(st.chemicals)
-        smile_set = dict() 
-        for c, ind in zip([c.smiles for c in st.chemicals], range(n)):
-            smile_set[c] = smile_set.get(c, []) + [ind]                          
-        
-        nodes = [ZSSNode(node) for node in tree.nodes()]
-        for a, b in tree.edges:
-            nodes[a].addkid(nodes[b])        
-        self.zss_tree = nodes[-1]
-
-        """
-        Build the synthetic tree using the representative st
-        With helper functions to modify this
-        """
-        whole_tree = nx.DiGraph()
-        for i in tree.nodes():
-            whole_tree.add_node(i, smiles=st.chemicals[i].smiles)            
-        for j, r in zip(range(n, n+len(st.reactions)), st.reactions):
-            if len(smile_set[r.parent]) > 1:
-                c_ind = -1
-                for i, ind in enumerate(smile_set[r.parent]):
-                    if st.chemicals[ind].child == r.rxn_id:
-                        if c_ind != -1:
-                            breakpoint()
-                        c_ind = i
-            else:
-                c_ind = 0
-            p = smile_set[r.parent][c_ind]
-            whole_tree.add_node(j, rxn_id=r.rxn_id)
-            whole_tree.add_edge(p, j)
-            inds = []                        # 
-            # for c in r.child: # TODO: use edges instead
-            #     inds.append(smile_set[c][0])
-            #     smile_set[c].pop(0)
-            for edge in st.edges:
-                if edge[0] == p:
-                    inds.append(edge[1])   
-            for child, i in enumerate(inds):
-                whole_tree.nodes[i]['child'] = ['left', 'right'][child]
-                assert tree.has_edge(p, i)
-                whole_tree.add_edge(j, i)
+        i = 0 # chemical index
+        j = 0 # reaction index
+        interms = []
+        whole_tree = nx.DiGraph()        
+        for action in st.actions:
+            if action == 0:
+                n = len(whole_tree)-1
+                if st.reactions[j].rtype == 1:                    
+                    whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child='left')
+                    whole_tree.add_node(n+2, rxn_id=st.reactions[j].rxn_id)
+                    whole_tree.add_edge(n+2, n+1)
+                    whole_tree.add_node(n+3, smiles=st.chemicals[i+1].smiles)
+                    whole_tree.add_edge(n+3, n+2)
+                    interms.append(n+3)
+                    i += 2                    
+                else:
+                    whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child='left')
+                    whole_tree.add_node(n+2, smiles=st.chemicals[i+1].smiles, child='right')
+                    whole_tree.add_node(n+3, rxn_id=st.reactions[j].rxn_id)
+                    assert st.reactions[j].child == [st.chemicals[i].smiles, st.chemicals[i+1].smiles]
+                    whole_tree.add_edge(n+3, n+1)
+                    whole_tree.add_edge(n+3, n+2)
+                    whole_tree.add_node(n+4, smiles=st.chemicals[i+2].smiles)
+                    whole_tree.add_edge(n+4, n+3)
+                    interms.append(n+4)
+                    i += 3
+                j += 1
+            elif action == 1:
+                n = interms[-1]
+                if st.reactions[j].rtype == 1:
+                    whole_tree.add_node(n+1, rxn_id=st.reactions[j].rxn_id)
+                    whole_tree.add_edge(n+1, n)
+                    whole_tree.nodes[n]['child'] = 'left'
+                    whole_tree.add_node(n+2, smiles=st.chemicals[i].smiles)
+                    whole_tree.add_edge(n+2, n+1)
+                    interms[-1] = n+2
+                    i += 1
+                else:
+                    child = st.reactions[j].child.index(whole_tree.nodes[n]['smiles'])
+                    whole_tree.nodes[n]['child'] = ['left', 'right'][child]
+                    whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child=['right', 'left'][child])
+                    whole_tree.add_node(n+2, rxn_id=st.reactions[j].rxn_id)                
+                    whole_tree.add_edge(n+2, n)
+                    whole_tree.add_edge(n+2, n+1)
+                    whole_tree.add_node(n+3, smiles=st.chemicals[i+1].smiles)
+                    whole_tree.add_edge(n+3, n+2)
+                    interms[-1] = n+3
+                    i += 2
+                j += 1
+            elif action == 2:
+                a = interms[-1]
+                b = interms[-2] # second
+                assert st.reactions[j].rtype == 2
+                child = st.reactions[j].child.index(whole_tree.nodes[a]['smiles'])
+                whole_tree.nodes[a]['child'] = ['left', 'right'][child]
+                whole_tree.nodes[b]['child'] = ['right', 'left'][child]
+                whole_tree.add_node(n+1, rxn_id=st.reactions[j])
+                whole_tree.add_node(n+2, smiles=st.chemicals[i].smiles)
+                whole_tree.add_edge(n+1, a)
+                whole_tree.add_edge(n+1, b)
+                whole_tree.add_edge(n+2, n+1)
+                interms[-1] = n+2
+                i += 1
+                j += 1
+            elif action == 3:
+                break
 
         self.tree = whole_tree            
         self.tree_edges = np.array(self.tree.edges).T        
-        self.tree_root = len(st.chemicals)-1
+        # self.tree_root = len(st.chemicals)-1
+        self.tree_root = len(self.tree)-1
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
         self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])                
         self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree))])
