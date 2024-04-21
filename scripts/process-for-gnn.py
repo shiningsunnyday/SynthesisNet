@@ -152,11 +152,11 @@ def main():
         sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))
         print(os.path.abspath(os.path.join(args.visualize_dir, f"{index}.png")))
         # check that every building block is under a bottom-most-2 reaction
-        sk_copy = deepcopy(sk)
-        sk_copy.mask = [sk_copy.tree_root]
-        if not np.all([list(sk.tree.predecessors(bb))[0] in sk_copy.bottom_2_rxns for bb in np.argwhere(sk.leaves).flatten()]):
-            print(f"skipping {index}")
-            continue        
+        # sk_copy = deepcopy(sk)
+        # sk_copy.mask = [sk_copy.tree_root]
+        # if not np.all([list(sk.tree.predecessors(bb))[0] in sk_copy.bottom_2_rxns for bb in np.argwhere(sk.leaves).flatten()]):
+        #     print(f"skipping {index}")
+        #     continue        
 
         edge_index = np.array(sk.tree.edges).T           
         pargs = []

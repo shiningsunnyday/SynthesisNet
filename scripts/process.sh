@@ -6,8 +6,7 @@ for split in {'train','valid','test'}; do
         --visualize-dir results/viz/top_1000/ \
         --skeleton-file results/viz/top_1000/skeletons-top-1000-${split}.pkl \
         --ncpu 50 \
-        --num-trees-per-batch 50 \
-        --gnn-datasets 1
+        --num-trees-per-batch 50        
 done;
 
 # for split in {'valid','test'}; do
