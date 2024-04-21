@@ -35,7 +35,7 @@ MODEL_ID = Path(__file__).stem
 
 
 all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
-keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
+# keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
         super().__init__(**kwargs)

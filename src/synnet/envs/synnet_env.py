@@ -56,6 +56,7 @@ def is_done_state(sk, state, policy):
 
 
 def prepare_input(sk, model_bb):
+    sk.mask = [sk.tree_root]
     edges = sk.tree_edges
     tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
     edge_input = torch.tensor(tree_edges, dtype=torch.int64)      
@@ -96,7 +97,7 @@ def get_return(sk, state, model, hash_dir, rxns, bbs, bb_emb):
     parent_dic = json.load(open(parent_path))
     child_dic = json.load(open(child_path))
     lookup = {src: parent_dic, dest: child_dic}
-        
+
     # reconstruct target
     for i in np.argwhere(sk.leaves).flatten():
         emb_bb = logits_bb[i][:256]
@@ -114,11 +115,13 @@ def get_return(sk, state, model, hash_dir, rxns, bbs, bb_emb):
             assert key in bb_lookup
             assert len(bb_lookup[key]) == 1
             indices = [bbs.index(smi) for smi in bb_lookup[key][0]]
+
+        if 'save_smiles' in sk.tree.nodes[i]:
+            assert bbs.index(sk.tree.nodes[i]['save_smiles']) in indices
         
         bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=1).item()
         smiles = bbs[indices[bb_ind]]
         sk.modify_tree(i, smiles=smiles)
-    
     sk.reconstruct(rxns)            
     sim = tanimoto_similarity(state[:4096], [sk.tree.nodes[sk.tree_root]['smiles']])[0]  
     return sim
@@ -172,6 +175,8 @@ def step(self, i, action):
 
 def reset(self, i, smiles):
     self.sks[i] = deepcopy(self.sk)
+    for j in [0, 1, 3]:        
+        self.sks[i].tree.nodes[j]['save_smiles'] = self.sks[i].tree.nodes[j]['smiles']    
     self.sks[i].clear_tree()
     self.sks[i].reset([self.sks[i].tree_root])
     self.sks[i].tree.nodes[self.sks[i].tree_root]['smiles'] = smiles

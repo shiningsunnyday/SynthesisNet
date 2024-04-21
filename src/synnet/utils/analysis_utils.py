@@ -66,6 +66,7 @@ def reorder(syntree):
                 ind2 = syntree.edges.index(edges[1])
                 syntree.edges[ind1], syntree.edges[ind2] = syntree.edges[ind2], syntree.edges[ind1]
                 swapped = True
+                print("swapped")
         total_swapped += swapped
     for reaction in syntree.reactions:
         if len(reaction.child) == 2:

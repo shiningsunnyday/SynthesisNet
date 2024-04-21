@@ -8,11 +8,13 @@ python scripts/train-rl.py \
     --hash-dir results/hash_table-bb=1000-prods=2_new/ \
     --building_blocks_file $BUILDING_BLOCKS_FILE \
     --rxn_templates_file $RXN_TEMPLATE_FILE \
+    --rxns_collection_file $RXN_COLLECTION_FILE \
     --embeddings_knn_file $EMBEDDINGS_KNN_FILE \
     --skeleton_class 1 \
-    --test_size 0.00001 \
+    --test_size 0.1 \
     --test-iters 1 \
     --ncpu 100 \
+    --method forward \
     --num-simulations 1000 \
     --lr 0.01
 # python scripts/rl.py \

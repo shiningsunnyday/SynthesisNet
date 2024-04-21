@@ -12,12 +12,14 @@ from synnet.data_generation.preprocessing import BuildingBlockFileHandler, React
 from synnet.policy import RxnPolicy, Trainer, ReplayMemory, execute_episode
 from synnet.envs.synnet_env import make_skeleton_class
 from synnet.utils.data_utils import Skeleton, SkeletonSet, ReactionSet
+from synnet.utils.analysis_utils import reorder_syntrees
 from synnet.models.common import load_gnn_from_ckpt
 import torch
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
+import rdkit.Chem as Chem
 random.seed(0)
 
 import pickle
@@ -37,9 +39,11 @@ def get_args():
     parser.add_argument("--hash-dir")
     parser.add_argument("--building_blocks_file")
     parser.add_argument("--rxn_templates_file")
+    parser.add_argument("--rxns_collection_file")
     parser.add_argument("--embeddings_knn_file")
     parser.add_argument("--skeleton_class", default=[3], nargs='+', type=int)
     parser.add_argument("--surrogate")
+    parser.add_argument("--method", choices=['mcts', 'forward'], default='mcts')
     parser.add_argument("--test-iters", default=5, type=int)
     parser.add_argument("--num-simulations", default=20, type=int)
     parser.add_argument("--ncpu", default=50, type=int)
@@ -67,7 +71,7 @@ def log(test_env, iteration, step_idx, total_rew):
 
 
 def test_agent(iteration, sk, skeleton_class, network):  
-    sk.reset()      
+    sk.reset([sk.tree_root])      
     test_env = skeleton_class
     total_rew = 0
     state, reward, done, _ = test_env.reset()
@@ -96,9 +100,38 @@ def plot_rewards(rewards, path):
     print(os.path.abspath(path))
 
 
+def forward_search(st, i, index, test_env, p):
+    sk = Skeleton(st, index)
+    sk.reset([sk.tree_root])
+    smiles = st.chemicals[-1].smiles # key for shared data        
+    total_rew = 0
+    state, reward, done, _ = test_env.reset(i, smiles)
+    done = False
+    step_idx = 0    
+    while not done:
+        # p, _ = network.step(np.array([state]))
+        # print(p)            
+        if not network.action_mask(np.array(state))[p[step_idx]].item(): 
+            break
+        action = p[step_idx]
+        state, reward, done, _ = test_env.step(i, action)
+        step_idx += 1
+        total_rew += reward
+    print(total_rew)
+    # if total_rew > globals()['best_reward']:
+    #     globals()['best_reward'] = total_rew
+    #     print(total_rew)
+    # folder = os.path.join(test_env.vis_dir, f"{iter}")   
+    # os.makedirs(folder, exist_ok=True)
+    # path = os.path.join(f"{folder}/{i}_eval.png")
+    # test_env.render(path)    
+    return total_rew
+
+
+
 def evaluate(st, i, index, test_env):
     sk = Skeleton(st, index)
-    sk.reset()    
+    sk.reset([sk.tree_root])
     total_rew = 0
     smiles = st.chemicals[-1].smiles # key for shared data
     state, reward, done, _ = test_env.reset(i, smiles)        
@@ -115,22 +148,43 @@ def evaluate(st, i, index, test_env):
     # os.makedirs(folder, exist_ok=True)
     # path = os.path.join(f"{folder}/{i}_eval.png")
     # test_env.render(path)
-    print("done", total_rew)
     return total_rew
 
 
 def mp_evaluate(args, sts, index, skeleton_class, network):
+    def get_rxns(st):
+        sk = Skeleton(st, -1)
+        rxn_id_1 = sk.tree.nodes[6]['rxn_id']
+        rxn_id_2 = sk.tree.nodes[5]['rxn_id']
+        return [91+rxn_id_1, rxn_id_2]
+        
     print(len(sts), "test sts")
     test_env = skeleton_class(network)
     globals()['network'] = network   
+    
     if args.ncpu == 1:
         total_rews = [evaluate(st, i, index, test_env) for i, st in enumerate(sts)]
     else:        
         # with mp.Pool(50) as p:
         #     total_rews = p.starmap(evaluate, tqdm([(st, i, index) for i, st in enumerate(sts)]))
         tasks = [(st, i, index, test_env) for i, st in tqdm(enumerate(sts))]
-        with mp.pool.ThreadPool(args.ncpu) as p:
-            total_rews = p.starmap(evaluate, tqdm(tasks))
+        if args.method == 'mcts':
+            with mp.pool.ThreadPool(args.ncpu) as p:
+                total_rews = p.starmap(evaluate, tqdm(tasks))
+        else:
+            globals()['best_reward'] = 0.
+            total_rews = []
+            # poss = []
+            # for a1 in range(91, 182):
+            #     for a2 in range(91):
+            #         poss.append((a1, a2))         
+            for i, st in enumerate(sts):             
+                tasks = [(st, i, index, test_env, get_rxns(st))]
+                rew = forward_search(*tasks[0])
+                # with mp.pool.ThreadPool(args.ncpu) as p:
+                #     rews = p.starmap(forward_search, tqdm(tasks))
+                # total_rews.append(max(rews))
+                total_rews.append(rew)
         total_rews = list(total_rews)
     return total_rews
 
@@ -157,13 +211,28 @@ def main(args):
     bb_emb = np.load(args.embeddings_knn_file)
     bb_emb = bb_emb/np.linalg.norm(bb_emb, axis=-1, keepdims=True)
     bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)    
-    rxns = ReactionTemplateFileHandler().load(args.rxn_templates_file) 
+    # rxns = ReactionTemplateFileHandler().load(args.rxn_templates_file)
+    rxns = ReactionSet().load(args.rxns_collection_file).rxns
     for idx in args.skeleton_class:
         sts = pickle.load(open(f'results/viz/top_1000/class/{idx}.pkl', 'rb'))
         # Train-test split
         random.shuffle(sts)
         sts, sts_test = sts[:int(len(sts)*(1-args.test_size))], sts[int(len(sts)*(1-args.test_size)):]
         sts = sts_test
+
+        # test
+        for st in tqdm(sts_test, desc="testing"):
+            sk_test = Skeleton(st, idx)
+            sk_test.visualize(f'results/viz/top_1000/class/debug/{idx}_gold.png')
+            gold = sk_test.tree.nodes[sk_test.tree_root]['smiles']
+            sk_test.reconstruct(rxns)
+            sk_test.visualize(f'results/viz/top_1000/class/debug/{idx}.png')
+            pred = sk_test.tree.nodes[sk_test.tree_root]['smiles']
+            gold = Chem.CanonSmiles(gold)
+            pred = Chem.CanonSmiles(pred)
+            if gold != pred:
+                breakpoint()
+ 
         sk = Skeleton(sts[0], idx)        
         trainer = Trainer(lambda: RxnPolicy(4096+sk.rxns.sum()*91, 20, sk.rxns.sum()*91, sk, args.hash_dir, rxns), learning_rate=args.lr)
         trainers[idx] = trainer
