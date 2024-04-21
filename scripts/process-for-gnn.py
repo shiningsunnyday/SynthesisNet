@@ -10,6 +10,7 @@ from scipy import sparse
 from tqdm import tqdm
 from copy import deepcopy
 from multiprocessing import Pool
+from multiprocessing.pool import ThreadPool
 
 def get_args():
     import argparse
@@ -139,7 +140,7 @@ def main():
         if len(list(skeletons[st])) == 0:
             continue
         if args.gnn_datasets is not None and index not in args.gnn_datasets:
-            continue
+            continue    
         # if len(skeletons[st]) < 100:
         #     continue
         # if index < 3:
@@ -147,10 +148,12 @@ def main():
         # if index == 2:
         #     breakpoint()
         # figure out "a" minimal resolving set   
+        if kth_largest[index]+1 > 100:
+            continue
         print(f"class {index} which is {kth_largest[index]+1}th most represented")
         sk = Skeleton(st, index)
-        sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))
-        print(os.path.abspath(os.path.join(args.visualize_dir, f"{index}.png")))
+        # sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))
+        # print(os.path.abspath(os.path.join(args.visualize_dir, f"{index}.png")))
         # check that every building block is under a bottom-most-2 reaction
         # sk_copy = deepcopy(sk)
         # sk_copy.mask = [sk_copy.tree_root]
@@ -176,9 +179,9 @@ def main():
         else:
             min_r_set = [sk.tree_root]
         
-        # with Pool(args.ncpu) as p:
-        #     pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
-        pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
+        with Pool(args.ncpu) as p:
+            pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
+        # pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)}")
         if args.num_trees_per_batch == -1:

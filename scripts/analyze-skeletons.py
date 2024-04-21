@@ -69,17 +69,7 @@ if __name__ == "__main__":
         syntrees = syntree_collection.load(args.input_file)        
         rxns = ReactionSet().load(args.rxns_collection_file).rxns        
         print("finished loading")
-        syntrees = reorder_syntrees(syntrees, rxns) # make sure reactant order is correct        
-        sts = []
-        for st in tqdm(syntree_collection.sts):
-            if st: 
-                try:
-                    st.build_tree()
-                except:
-                    breakpoint()
-                sts.append(st)
-            else:
-                breakpoint()        
+        syntrees = reorder_syntrees(syntrees, rxns) # make sure reactant order is correct              
         # use the train set to define the skeleton classes
         if args.skeleton_canonical_file:
             skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
@@ -87,7 +77,7 @@ if __name__ == "__main__":
         else:
             skeletons = {}
         lookup = {}
-        for i, st in tqdm(enumerate(sts), desc="serializing trees"):
+        for i, st in tqdm(enumerate(syntrees), desc="serializing trees"):
             sk = Skeleton(st, -1)
             ans = []
             try:
@@ -107,7 +97,6 @@ if __name__ == "__main__":
         for k, v in skeletons.items():
             print(f"count: {len(v)}") 
         pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))    
-    breakpoint()
     if args.visualize_dir:
         os.makedirs(args.visualize_dir, exist_ok=True)
         # count_bbs(args, skeletons)

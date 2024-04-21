@@ -176,7 +176,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
             e = str(node_map[pred])
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
-            second = len(succs) == 2 and n == succs[1]
+            second = sk.tree.nodes[n]['child'] == 'right'
             if e in data['bbs']:
                 bbs_child = data['bbs'][e][int(second)]
             else:
@@ -599,7 +599,7 @@ def main(args):
     sk_set = None
     if args.skeleton_set_file:        
         skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
-        skeleton_set = SkeletonSet().load_skeletons(skeletons)                
+        skeleton_set = SkeletonSet().load_skeletons(skeletons)
         syntree_set_all = [st for v in skeletons.values() for st in v]
         syntree_set = []
         SKELETON_INDEX = test_skeletons(args, skeleton_set)
