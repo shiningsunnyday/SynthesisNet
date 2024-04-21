@@ -74,6 +74,13 @@ if __name__ == "__main__":
         if args.skeleton_canonical_file:
             skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
             class_nums = {k: len(skeletons[k]) for k in skeletons}
+            lookup = {}
+            for st in skeletons:
+                sk = Skeleton(st, -1)
+                ans = []
+                serialize(sk.tree, sk.tree_root, ans)
+                assert ','.join(ans) not in lookup
+                lookup[','.join(ans)] = st
         else:
             skeletons = {}
         lookup = {}

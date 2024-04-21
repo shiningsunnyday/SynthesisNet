@@ -140,6 +140,7 @@ def get_parg(syntree, min_r_set, index, args):
 
 def main():
     args = get_args()
+    breakpoint()
     skeletons = load_skeletons(args)    
     sk_set = SkeletonSet().load_skeletons(skeletons)
     len_inds = np.argsort([len(skeletons[st]) for st in skeletons])
