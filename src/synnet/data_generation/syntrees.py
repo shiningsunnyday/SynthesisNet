@@ -9,6 +9,9 @@ from scipy import sparse
 from tqdm import tqdm
 import random
 
+np.random.seed(0)
+random.seed(0)
+
 from synnet.config import MAX_PROCESSES
 
 logger = logging.getLogger(__name__)

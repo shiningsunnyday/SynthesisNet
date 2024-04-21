@@ -40,6 +40,7 @@ from copy import deepcopy
 from filelock import FileLock
 from synnet.encoding.fingerprints import fp_2048, fp_256
 import os
+import math
 import logging
 import hashlib
 
@@ -1980,10 +1981,14 @@ class Skeleton:
 
 
     def visualize(self, path, Xy=None, ax=None):
-        if ax is None:
-            fig = plt.Figure()
-            ax = fig.add_subplot(1, 1, 1)
         pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
+        assets_folder = os.path.join(os.path.dirname(path), 'assets/')
+        os.makedirs(assets_folder, exist_ok=True)
+        if ax is None:
+            pos_np = np.array([v for v in pos.values()])
+            w, l = pos_np.max(axis=0)-pos_np.min(axis=0)
+            fig = plt.Figure(figsize=(20*w, 20*l))
+            ax = fig.add_subplot(1, 1, 1)        
         if Xy:
             X, y = Xy
             node_colors = []
@@ -1996,11 +2001,32 @@ class Skeleton:
                 else:
                     node_colors.append('gray')
         else:
-            node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
-        nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
-        fig.savefig(path)
-        print(path)
+        #     node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
+        # nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
+        # fig.savefig(path)
+        # print(path)
     
+            node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]  
+        node_labels = {}
+        node_sizes = []
+        for n in self.tree:
+            if 'smiles' in self.tree.nodes[n]:
+                smiles = self.tree.nodes[n]['smiles']
+                m = int(math.sqrt(len(smiles)))
+                l = (len(smiles)+m-1)//m
+                smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])
+                node_labels[n] = f"{n}: {smiles}"
+                node_sizes.append(5000)
+            else:
+                rxn_id = self.tree.nodes[n]['rxn_id']
+                node_labels[n] = f"{n}: {rxn_id}"
+                node_sizes.append(1000)
+        nx.draw_networkx(self.tree, pos=pos, ax=ax, 
+                         node_color=node_colors, 
+                         labels=node_labels,
+                         node_size=node_sizes)
+        fig.savefig(path)
+
 
     def reset(self, mask=None):
         """
@@ -2033,7 +2059,7 @@ class Skeleton:
 
     def clear_tree(self, save=[], forcing=False):
         """
-        Clears the semantic information in the tree
+        Clears the semantic information in the tree    
         """
         for n in self.tree:
             if n in save:

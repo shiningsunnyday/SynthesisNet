@@ -17,6 +17,7 @@ from synnet.data_generation.preprocessing import (
 )
 from synnet.data_generation.syntrees import SynTreeGenerator, wraps_syntreegenerator_generate
 from synnet.utils.data_utils import SyntheticTree, SyntheticTreeSet
+import numpy as np
 
 logger = logging.getLogger(__name__)
 from typing import Tuple, Union
@@ -61,6 +62,8 @@ def get_args():
 
     # Processing
     parser.add_argument("--ncpu", type=int, default=MAX_PROCESSES, help="Number of cpus")
+    parser.add_argument("--log_file", help="Where to log file")
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--verbose", default=False, action="store_true")
     return parser.parse_args()
 
@@ -92,7 +95,11 @@ def generate() -> Tuple[dict[int, str], list[Union[SyntheticTree, None]]]:
     syntrees: list[Union[SyntheticTree, None]] = []
     myrange = tqdm(range(args.number_syntrees)) if args.verbose else range(args.number_syntrees)
     for i in myrange:
-        st, e = wraps_syntreegenerator_generate(stgen)
+        st, e = wraps_syntreegenerator_generate(stgen)        
+        if e is None:
+            print(st.chemicals[-1].smiles)
+            if st.chemicals[-1].smiles == 'COc1cc(C)c(N)c(C(=O)OC(CCl)(c2ccc([N+](=O)[O-])c(Cl)c2S(N)(=O)=O)C2CCCCO2)c1':
+                breakpoint()
         outcomes[i] = e.__class__.__name__ if e is not None else "success"
         syntrees.append(st)    
 
@@ -104,6 +111,7 @@ if __name__ == "__main__":
 
     # Parse input args
     args = get_args()
+    logger.FileHandler()
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
 
     # Load assets
@@ -121,7 +129,7 @@ if __name__ == "__main__":
         stgen = pickle.load(open(args.stgen_cache, 'rb'))
     else:
         stgen = SynTreeGenerator(
-            building_blocks=bblocks, rxn_templates=rxn_templates, verbose=args.verbose
+            building_blocks=bblocks, rxn_templates=rxn_templates, verbose=args.verbose, rng=np.random.default_rng(seed=args.seed)
         )
         if args.stgen_cache:
             pickle.dump(stgen, open(args.stgen_cache, 'wb+'))
