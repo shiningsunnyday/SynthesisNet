@@ -129,17 +129,11 @@ def find_best_model_ckpt(path: str, version=None, key="val_loss") -> Union[Path,
     best_model_ckpt = None
     lowest_loss = 10_000  # ~ math.inf    
     for file in ckpts:
-        if version is not None:
-            if str(file).find(f"version_{version}") != -1:
-                return file
-        else:
-            stem = file.stem
-            val_loss = float(stem.split(f"{key}=")[-1])
-            if val_loss < lowest_loss:
-                best_model_ckpt = file
-                lowest_loss = val_loss
-    if version is None:
-        raise AssertionError(f"{path} {version} has no ckpt")
+        stem = file.stem
+        val_loss = float(stem.split(f"{key}=")[-1])
+        if val_loss < lowest_loss:
+            best_model_ckpt = file
+            lowest_loss = val_loss
     return best_model_ckpt
 
 

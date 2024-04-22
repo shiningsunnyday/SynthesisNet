@@ -1,4 +1,5 @@
-# for split in {'valid','test'}; do
+# for split in {'train','valid','test'}; do
+#     mkdir -p data/top_1000/gnn_featurized_rxn_target_down_bb_${split}
 #     python scripts/process-for-gnn.py \
 #         --determine_criteria rxn_target_down_bb \
 #         --output-dir data/top_1000/gnn_featurized_rxn_target_down_bb_${split} \

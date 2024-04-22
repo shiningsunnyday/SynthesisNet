@@ -25,7 +25,7 @@ from synnet.visualize.drawers import MolDrawer, RxnDrawer
 from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
 from synnet.visualize.visualizer import SkeletonVisualizer
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import load_gnn_from_ckpt
+from synnet.models.common import load_gnn_from_ckpt, find_best_model_ckpt
 from synnet.models.gnn import PtrDataset
 from synnet.models.mlp import nn_search_list
 from synnet.MolEmbedder import MolEmbedder
@@ -190,8 +190,8 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
                         if 'rxn_id' in sk.tree.nodes[m]:
                             if sk.tree.nodes[m]['rxn_id_forcing'] != sk.tree.nodes[m]['rxn_id']:
                                 bad = True
-                    if not bad:
-                        breakpoint()
+                    # if not bad:
+                    #     breakpoint()
             indices = [bbs.index(smi) for smi in bbs_child]
             if len(indices) >= top_bb:
                 bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
@@ -553,7 +553,7 @@ def test_skeletons(args, skeleton_set):
                     SKELETON_INDEX.append(ind)
             else:
                 SKELETON_INDEX.append(ind)
-    else:
+    else:        
         dirname = os.path.dirname(args.ckpt_rxn)
         config_file = os.path.join(dirname, 'hparams.yaml')
         config = yaml.safe_load(open(config_file))
@@ -578,8 +578,14 @@ def main(args):
         bb_models = load_from_dir(args.ckpt_dir, constraint)
         globals()['bb_models'] = bb_models    
     else:
+        if not os.path.isfile(args.ckpt_rxn):
+            best_ckpt = find_best_model_ckpt(args.ckpt_rxn, key="val_accuracy_loss")
+            setattr(args, "ckpt_rxn", best_ckpt)
         rxn_gnn = load_gnn_from_ckpt(Path(args.ckpt_rxn))
         globals()['rxn_gnn'] = rxn_gnn
+        if not os.path.isfile(args.ckpt_bb):
+            best_ckpt = find_best_model_ckpt(args.ckpt_bb, key="val_nn_accuracy_loss")
+            setattr(args, "ckpt_bb", best_ckpt)        
         bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
         globals()['bb_gnn'] = bb_gnn
     logger.info("...loading models completed.")    

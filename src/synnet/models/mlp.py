@@ -45,8 +45,7 @@ class MLP(pl.LightningModule):
         self.learning_rate = learning_rate
         self.ncpu = ncpu
         self.val_freq = val_freq
-        self.molembedder = molembedder
-        self.X = torch.Tensor(np.load(X)) if (X is not None) else (molembedder.embeddings if molembedder is not None else None)
+        # self.X = torch.Tensor(np.load(X)) if (X is not None) else (molembedder.embeddings if molembedder is not None else None)
         # self.nn = NearestNeighbors(n_neighbors=1)
         # self.nn.fit(molembedder.embeddings)
         modules = []

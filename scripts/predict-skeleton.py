@@ -69,7 +69,7 @@ def get_args():
     parser.add_argument(
         "--work-dir",
         type=str,
-        default=f"results/logs/{time.time()}",
+        default=f"results/logs/recognizer/{time.time()}",
         help="Input file for the generated synthetic trees (*.json.gz)",
     )   
     # Training args
@@ -117,56 +117,31 @@ if __name__ == "__main__":
         train_dataset = pickle.load(open(os.path.join(args.work_dir, 'train_dataset.pkl'), 'rb'))
         valid_dataset = pickle.load(open(os.path.join(args.work_dir, 'valid_dataset.pkl'), 'rb'))
     else:      
-        syntree_collection = SyntheticTreeSet()
-        syntrees = syntree_collection.load(args.input_file)          
-        if os.path.exists(args.skeleton_file):
-            skeletons = pickle.load(open(args.skeleton_file, 'rb'))
-        else:
-            sts = []
-            for st in syntree_collection.sts:
-                if st: 
-                    try:
-                        st.build_tree()
-                    except:
-                        breakpoint()
-                    sts.append(st)
-            
-            skeletons = {}
-            
-            for i, st in tqdm(enumerate(sts)):
-                print(i)
-                done = False
-                for sk in skeletons:
-                    if st.is_isomorphic(sk):
-                        done = True
-                        skeletons[sk].append(st)
-                        break
-                if not done: 
-                    skeletons[st] = [st]            
+        skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
         nbits = args.nbits    
         num_per_class = args.num_per_class
         skeletons = {k:skeletons[k] for k in skeletons if len(skeletons[k]) >= num_per_class}
-        print(f"{len(skeletons)} classes with {num_per_class} per class")
+        print(f"{len(skeletons)} classes with >= {num_per_class} per class")
         num_classes = len(skeletons)
         setattr(args, 'num_classes', num_classes)
         encoder = MorganFingerprintEncoder(args.fp_radii, nbits)
-        features = []
-        labels = []
-        for i, k in enumerate(skeletons):
-            seen_set = set()
+        lookup = {}
+        for i, k in enumerate(skeletons):            
             for j, st in enumerate(skeletons[k]):                
-                if len(seen_set) >= num_per_class:
-                    break
                 try: feats = encoder.encode(st.root.smiles).flatten()                    
                 except: continue
-                if Chem.CanonSmiles(st.root.smiles) in seen_set:
-                    continue
-                seen_set.add(Chem.CanonSmiles(st.root.smiles))
-                features.append(feats)
-                labels.append(i)        
+                if st.root.smiles not in lookup:
+                    lookup[st.root.smiles] = {'labels': np.zeros((len(skeletons),)), 'features': feats}                
+                lookup[st.root.smiles]['labels'][i] = 1
+        features, labels = [], []
+        for smi in lookup:
+            features.append(lookup[smi]['features'])
+            label = lookup[smi]['labels']
+            label = label/label.sum()
+            labels.append(label)
 
-
-        X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33, stratify=labels)
+        # X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33, stratify=labels)
+        X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33)
         print("valid unique counts:", np.unique(y_valid, return_counts=True))
         train_dataset = torch.utils.data.TensorDataset(
             torch.Tensor(X_train),
