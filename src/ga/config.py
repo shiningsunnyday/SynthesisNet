@@ -16,7 +16,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     seed: int = 10
 
     # Individuals
-    fp_bits: int = 4096
+    fp_bits: int = 2048
     bt_nodes_min: int = 5
     bt_nodes_max: int = 10
 
