@@ -1901,7 +1901,8 @@ class SyntheticTree:
         
 
 class Skeleton:
-    def __init__(self, st, index):
+
+    def __init__(self, st, index, whole_tree=None, zss_tree=None):
         """
         st: example of SyntheticTree with the skeleton
         This is a dual use class. It also remembers st for later use.
