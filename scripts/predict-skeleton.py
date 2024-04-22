@@ -80,7 +80,7 @@ def get_args():
     parser.add_argument("--fp_radii", type=int, default=2)    
     parser.add_argument("--hidden_dim", type=int, default=512) 
     parser.add_argument("--num_classes", type=int, default=62)
-    
+    parser.add_argument('--cuda', type=int, default=-1)
     return parser.parse_args()
 
 
@@ -184,12 +184,17 @@ if __name__ == "__main__":
         dirpath=save_dir,
         filename="ckpts.{epoch}-{val_loss:.2f}",
         save_weights_only=False,
-    )    
+    )  
+    if args.cuda > -1:
+        gpu_kwargs = {'accelerator': 'gpu'}
+        gpu_kwargs = {'devices': [args.cuda]}
+    else:        
+        gpu_kwargs = {'accelerator': 'cpu'}      
     trainer = pl.Trainer(
-    gpus=None,
-    max_epochs=args.max_epochs,
-    callbacks=[checkpoint_callback, tqdm_callback],
-    logger=[tb_logger, csv_logger],
+        max_epochs=args.max_epochs,
+        callbacks=[checkpoint_callback, tqdm_callback],
+        logger=[tb_logger, csv_logger],
+        **gpu_kwargs
     )
     logger.info(f"Start training")
     trainer.fit(mlp, train_dataloader, valid_dataloader)

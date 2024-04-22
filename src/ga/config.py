@@ -6,7 +6,7 @@ import numpy as np
 import pydantic
 import pydantic_cli
 
-from src.synnet.utils.data_utils import Skeleton
+from synnet.utils.data_utils import Skeleton
 
 
 class GeneticSearchConfig(pydantic.BaseModel):

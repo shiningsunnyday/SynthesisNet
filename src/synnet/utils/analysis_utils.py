@@ -60,6 +60,14 @@ def serialize(tree, cur, ans):
         serialize(tree, -1, ans)
 
 
+
+def serialize_string(tree, root):
+    ans = []
+    serialize(tree, root, ans)
+    return ','.join(ans)
+
+
+
 def reorder(syntree):    
     total_swapped = 0
     correct = 0

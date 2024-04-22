@@ -6,7 +6,7 @@ import networkx as nx
 import numpy as np
 import zss
 
-from src.synnet.utils.data_utils import Skeleton
+from synnet.utils.data_utils import Skeleton
 
 
 def random_boolean(p: float) -> bool:

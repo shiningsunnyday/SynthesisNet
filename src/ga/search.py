@@ -9,8 +9,8 @@ import torch
 import tqdm
 import wandb
 
-from src.ga import utils
-from src.ga.config import GeneticSearchConfig, Individual
+from ga import utils
+from ga.config import GeneticSearchConfig, Individual
 
 Population = List[Individual]
 

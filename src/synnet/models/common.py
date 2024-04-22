@@ -137,6 +137,7 @@ def find_best_model_ckpt(path: str, version=None, key="val_loss") -> Union[Path,
     return best_model_ckpt
 
 
+
 def _load_mlp_from_iclr_ckpt(ckpt_file: str):
     """Load a model from a checkpoint for inference.
     Info: hparams were not saved, so we specify the ones needed for inference again."""

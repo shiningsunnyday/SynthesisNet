@@ -78,17 +78,13 @@ if __name__ == "__main__":
             skeletons = {}
         lookup = {}
         for i, st in tqdm(enumerate(syntrees), desc="serializing trees"):
-            sk = Skeleton(st, -1)
-            ans = []
-            try:
-                serialize(sk.tree, sk.tree_root, ans)
-            except:
-                breakpoint()
-            if ','.join(ans) not in lookup:
-                lookup[','.join(ans)] = st        
+            sk = Skeleton(st, -1)   
+            key = serialize_string(sk.tree, sk.tree_root)
+            if key not in lookup:
+                lookup[key] = st        
                 skeletons[st] = [st]
             else:
-                skeletons[lookup[','.join(ans)]].append(st)
+                skeletons[lookup[key]].append(st)
         if args.skeleton_canonical_file:
             if list(class_nums.keys()) != list(skeletons.keys()):
                 breakpoint()
