@@ -53,7 +53,10 @@ def fp_4096(smi):
     return fp_embedding(smi, _radius=2, _nBits=4096)
 
 
-def fp_2048(smi):
+def fp_2048(smi): # handle case of given fingerprint
+    if isinstance(smi, np.ndarray):
+        assert smi.shape == (2048,)
+        return smi
     return fp_embedding(smi, _radius=2, _nBits=2048)
 
 

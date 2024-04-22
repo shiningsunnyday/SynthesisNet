@@ -2632,9 +2632,9 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
     
 
     # visualize to help debug
-    if not os.path.exists(os.path.join(args.visualize_dir, f"{sk.index}_{i}.png")):
-        sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{i}.png"))
-        sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{i}_Xy.png"), Xy=(X, y))
+    # if not os.path.exists(os.path.join(args.visualize_dir, f"{sk.index}_{i}.png")):
+    #     sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{i}.png"))
+    #     sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{i}_Xy.png"), Xy=(X, y))
 
     return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
 

@@ -145,8 +145,8 @@ def main():
         #     continue
         # if index < 3:
         #     continue
-        # if index == 2:
-        #     breakpoint()
+        if index < 15:
+            continue
         # figure out "a" minimal resolving set   
         if kth_largest[index]+1 > 100:
             continue

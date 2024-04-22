@@ -74,12 +74,11 @@ def get_args():
     )   
     # Training args
     parser.add_argument("--max_epochs", type=int, default=10)     
-    parser.add_argument("--nbits", type=int, default=4096)   
+    parser.add_argument("--nbits", type=int, default=2048)   
     parser.add_argument("--num_per_class", type=int, default=100)        
     parser.add_argument("--batch_size", type=int, default=32)    
     parser.add_argument("--fp_radii", type=int, default=2)    
     parser.add_argument("--hidden_dim", type=int, default=512) 
-    parser.add_argument("--num_classes", type=int, default=62)
     parser.add_argument('--cuda', type=int, default=-1)
     return parser.parse_args()
 
@@ -113,17 +112,17 @@ if __name__ == "__main__":
             if args_dict[k] != getattr(args, k):
                 same = False 
     
+    skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
+    nbits = args.nbits    
+    num_per_class = args.num_per_class
+    skeletons = {k:skeletons[k] for k in skeletons if len(skeletons[k]) >= num_per_class}
+    print(f"{len(skeletons)} classes with >= {num_per_class} per class")
+    num_classes = len(skeletons)
+    setattr(args, 'num_classes', num_classes)    
     if same:
         train_dataset = pickle.load(open(os.path.join(args.work_dir, 'train_dataset.pkl'), 'rb'))
         valid_dataset = pickle.load(open(os.path.join(args.work_dir, 'valid_dataset.pkl'), 'rb'))
     else:      
-        skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
-        nbits = args.nbits    
-        num_per_class = args.num_per_class
-        skeletons = {k:skeletons[k] for k in skeletons if len(skeletons[k]) >= num_per_class}
-        print(f"{len(skeletons)} classes with >= {num_per_class} per class")
-        num_classes = len(skeletons)
-        setattr(args, 'num_classes', num_classes)
         encoder = MorganFingerprintEncoder(args.fp_radii, nbits)
         lookup = {}
         for i, k in enumerate(skeletons):            
@@ -170,7 +169,7 @@ if __name__ == "__main__":
         val_freq=1,
         ncpu=0
     )            
-
+    breakpoint()
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)    
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=True)    
     
