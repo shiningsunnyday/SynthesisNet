@@ -76,11 +76,8 @@ class MLP(pl.LightningModule):
         """The complete training loop."""
         x, y = batch
         y_hat = self.layers(x)
-        if self.loss == "cross_entropy":
-            try:
-                loss = F.cross_entropy(y_hat, y.long())
-            except:
-                breakpoint()
+        if self.loss == "cross_entropy":            
+            loss = F.cross_entropy(y_hat, y)
         elif self.loss == "mse":
             loss = F.mse_loss(y_hat, y)
         elif self.loss == "l1":
@@ -103,7 +100,34 @@ class MLP(pl.LightningModule):
         elif self.valid_loss == "accuracy":
             y_hat = torch.argmax(y_hat, axis=1)
             accuracy = (y_hat == y).sum() / len(y)
-            loss = 1 - accuracy
+            loss = 1 - accuracy            
+        elif self.valid_loss == "multi_class_accuracy":
+            mask = y.sum(axis=-1) == 1
+            y_hat, y = y_hat[mask], y[mask]
+            y_hat = torch.argmax(y_hat, axis=1)
+            y = torch.argmax(y, axis=1)
+            accuracy = (y_hat == y).sum() / len(y)
+            loss = 1 - accuracy            
+            # per-class precision & recall
+            metrics = {}
+            for i in range(y.shape[0]):
+                pred = y_hat[i].item()
+                true = y[i].item()
+                if pred not in metrics:
+                    metrics[pred] = {'precision': [0, 0], 'recall': [0, 0]}
+                if true not in metrics:
+                    metrics[true] = {'precision': [0, 0], 'recall': [0, 0]}
+                metrics[pred]['precision'][1] += 1
+                metrics[pred]['precision'][0] += true == pred
+                metrics[true]['recall'][1] += 1
+                metrics[true]['recall'][0] += pred == true
+            for k in metrics:                
+                for metric in ['precision', 'recall']:
+                    correct = metrics[k][metric][0]
+                    tot = metrics[k][metric][1]
+                    if tot == 0:
+                        continue
+                    self.log(f"class_{k}_{metric}", correct/tot, batch_size=tot, on_step=False, on_epoch=True, logger=True)
         elif self.valid_loss[:11] == "nn_accuracy":
             # NOTE: Very slow!
             # Performing the knn-search can easily take a couple of minutes,

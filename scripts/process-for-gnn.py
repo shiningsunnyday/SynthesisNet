@@ -52,7 +52,15 @@ def get_args():
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
-        choices=['leaves_up', 'all_leaves', 'target_down', 'rxn_target_down', 'rxn_target_down_bb', 'rxn_frontier', 'bb_frontier', 'leaf_up_2'],
+        choices=['leaves_up', 
+                 'all_leaves', 
+                 'target_down', 
+                 'rxn_target_down', 
+                 'rxn_target_down_bb',
+                 'rxn_frontier', 
+                 'bb_frontier', 
+                 'leaf_up_2',
+                 'bfs'],
         default='leaves_up',
         help="""
         Criteria for a determined skeleton:
@@ -65,6 +73,7 @@ def get_args():
             rxn_frontier: there exists rxn on bfs frontier, predict rxns
             bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier
             leaf_up_2: target and bottom-2 reactions unmasked
+            bfs: bfs level-by-level
         """
     )
     parser.add_argument(
@@ -114,11 +123,11 @@ def get_parg(syntree, min_r_set, index, args):
     else:
         # for some, we can compute the valid i easily
         if determine_criteria == 'leaf_up_2':
-            sk.mask = [sk.tree_root]
             inds = [inds_to_i(sk.bottom_2_rxns + [sk.tree_root], len(sk.tree), min_r_set)]
+        elif determine_criteria == 'bfs':           
+            inds = [inds_to_i(sk.correct_bfs_mask[:l], len(sk.tree), min_r_set) for l in range(1, len(sk.correct_bfs_mask))]
         else:
             inds = range(2**(len(sk.tree)-len(min_r_set))-1)
-
         for i in inds:
             sk.reset(min_r_set)
             zero_mask_inds = np.where(sk.mask == 0)[0]
@@ -142,11 +151,7 @@ def main():
         if args.gnn_datasets is not None and index not in args.gnn_datasets:
             continue    
         # if len(skeletons[st]) < 100:
-        #     continue
-        # if index < 3:
-        #     continue
-        if index < 15:
-            continue
+        #     continue   
         # figure out "a" minimal resolving set   
         if kth_largest[index]+1 > 100:
             continue
@@ -179,9 +184,11 @@ def main():
         else:
             min_r_set = [sk.tree_root]
         
-        with Pool(args.ncpu) as p:
-            pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
-        # pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
+        if args.ncpu > 1:
+            with Pool(args.ncpu) as p:
+                pargs = p.starmap(get_parg, tqdm([[syntree, min_r_set, index, args] for syntree in tqdm(skeletons[st], desc="gathering pargs")]))
+        else:
+            pargs = [get_parg(*[syntree, min_r_set, index, args]) for syntree in tqdm(skeletons[st])]
         pargs = [parg for parg_sublist in pargs for parg in parg_sublist]
         print(f"mapping {len(pargs)}")
         if args.num_trees_per_batch == -1:
@@ -196,8 +203,11 @@ def main():
             # print(k)  
             res = []     
             if batch_size > 1:
-                with Pool(args.ncpu) as p:
-                    res = p.starmap(process_syntree_mask, tqdm(pargs[batch_size*k:batch_size*k+batch_size], desc="featurize a batch"))
+                if args.ncpu > 1:
+                    with Pool(args.ncpu) as p:
+                        res = p.starmap(process_syntree_mask, tqdm(pargs[batch_size*k:batch_size*k+batch_size], desc="featurize a batch"))
+                else:
+                    res = [process_syntree_mask(*parg) for parg in tqdm(pargs[batch_size*k:batch_size*k+batch_size], desc="featurize a batch")]
             else:
                 res.append(process_syntree_mask(*pargs[k]))            
             res = [r for r in res if r is not None]                       

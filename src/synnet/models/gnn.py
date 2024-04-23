@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
 
-all_skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl','rb'))
+all_skeletons = pickle.load(open('/home/msun415/SynTreeNet/results/viz/top_1000/skeletons-top-1000.pkl','rb'))
 # keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
@@ -66,6 +66,8 @@ class PtrDataset(Dataset):
             sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
             sk.mask = [sk.tree_root]           
             self.sks[e] = sk
+            # get canonical bfs ordering used for positional embedding
+            breakpoint()            
                     
     @staticmethod
     def get_graph(edges):
@@ -119,12 +121,13 @@ class PtrDataset(Dataset):
 
 
     @staticmethod
-    def positionalencoding1d(d_model, length):
+    def positionalencoding1d(d_model, length, perm_mask):
         """
         :param d_model: dimension of the model
         :param length: length of positions
+        :param perm_mask: canonical order of nodes
         :return: length*d_model position matrix
-        """
+        """        
         if d_model % 2 != 0:
             raise ValueError("Cannot use sin/cos positional encoding with "
                             "odd dim (got dim={:d})".format(d_model))
@@ -134,7 +137,7 @@ class PtrDataset(Dataset):
                             -(math.log(10000.0) / d_model)))
         pe[:, 0::2] = torch.sin(position.float() * div_term)
         pe[:, 1::2] = torch.cos(position.float() * div_term)
-
+        breakpoint()
         return pe
     
 
@@ -153,7 +156,6 @@ class PtrDataset(Dataset):
 
         # simulate scenario of retrosynthesis where interms aren't known        
         X[np.nonzero(self.interms_map[e])[0], :2048] = 0        
-
         X[np.nonzero(self.interms_map[e])[0], :2048] = 0
         if self.pe == 'sin':            
             pe = self.positionalencoding1d(32, num_nodes) # add to target

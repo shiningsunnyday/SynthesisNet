@@ -82,7 +82,7 @@ def get_metrics(targets, all_sks):
 
 
 
-def decode(sk, smi):    
+def decode(sk, smi): 
     sk.clear_tree(forcing=args.forcing_eval)
     sk.modify_tree(sk.tree_root, smiles=smi)              
     if args.mermaid:
@@ -477,10 +477,11 @@ def update(dic_total, dic):
         dic_total[k] += dic[k]
 
 
-def load_data(args, logger):
+def load_data(args, logger=None):
     # ... reaction templates
     rxns = ReactionSet().load(args.rxns_collection_file).rxns
-    logger.info(f"Successfully read {args.rxns_collection_file}.")
+    if logger is not None:
+        logger.info(f"Successfully read {args.rxns_collection_file}.")
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)    
 
     # # ... building blocks
@@ -496,8 +497,9 @@ def load_data(args, logger):
     # bb_emb = bblocks_molembedder.get_embeddings()    
     # bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
-    logger.info(f"Successfully read {args.embeddings_knn_file}.")    
-    logger.info("...loading data completed.")        
+    if logger is not None:
+        logger.info(f"Successfully read {args.embeddings_knn_file}.")    
+        logger.info("...loading data completed.")        
     globals()['rxns'] = rxns
     globals()['rxn_templates'] = rxn_templates    
     globals()['bblocks'] = bblocks

@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from synnet.data_generation.syntrees import MorganFingerprintEncoder
 from synnet.models.mlp import MLP
+from synnet.utils.data_utils import Skeleton
 import torch.nn as nn
 import time
 import logging
@@ -99,9 +100,7 @@ def skeleton2graph(skeleton):
     return graph
 
 
-if __name__ == "__main__":
-    args = get_args()
-
+def main(args):
     os.makedirs(args.work_dir, exist_ok=True)  
     same = False
     config_path = os.path.join(args.work_dir, 'config.json')
@@ -112,10 +111,19 @@ if __name__ == "__main__":
             if args_dict[k] != getattr(args, k):
                 same = False 
     
-    skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
+    all_skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
     nbits = args.nbits    
     num_per_class = args.num_per_class
-    skeletons = {k:skeletons[k] for k in skeletons if len(skeletons[k]) >= num_per_class}
+    os.makedirs(os.path.join(args.work_dir, 'sks/'), exist_ok=True)
+    skeletons = {}
+    for index, k in enumerate(all_skeletons):
+        if len(all_skeletons[k]) >= num_per_class:
+            sk = Skeleton(k, index=index)
+            ind = len(skeletons)
+            path = os.path.join(os.path.join(args.work_dir, 'sks/'), f'{index}_{ind}.png')
+            sk.visualize(path=path)
+            skeletons[k] = all_skeletons[k]
+
     print(f"{len(skeletons)} classes with >= {num_per_class} per class")
     num_classes = len(skeletons)
     setattr(args, 'num_classes', num_classes)    
@@ -142,6 +150,10 @@ if __name__ == "__main__":
         # X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33, stratify=labels)
         X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33)
         print("valid unique counts:", np.unique(y_valid, return_counts=True))
+        X_train = np.array(X_train)
+        y_train = np.array(y_train)
+        X_valid = np.array(X_valid)
+        y_valid = np.array(y_valid)
         train_dataset = torch.utils.data.TensorDataset(
             torch.Tensor(X_train),
             torch.Tensor(y_train),
@@ -163,13 +175,13 @@ if __name__ == "__main__":
         num_dropout_layers=1,
         task="classification",
         loss="cross_entropy",
-        valid_loss="accuracy",
+        valid_loss="multi_class_accuracy",
         optimizer="adam",
         learning_rate=1e-4,
         val_freq=1,
         ncpu=0
     )            
-    breakpoint()
+
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)    
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=True)    
     
@@ -198,4 +210,10 @@ if __name__ == "__main__":
     logger.info(f"Start training")
     trainer.fit(mlp, train_dataloader, valid_dataloader)
     logger.info(f"Training completed.")    
-    
+        
+
+
+if __name__ == "__main__":
+    args = get_args()
+    breakpoint()
+    main(args)
