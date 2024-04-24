@@ -32,6 +32,7 @@ from itertools import permutations, product
 from collections import defaultdict, deque
 from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 from networkx.algorithms import weisfeiler_lehman_graph_hash
+from networkx.algorithms.traversal.depth_first_search import dfs_tree
 import networkx as nx
 import matplotlib.pyplot as plt
 from sklearn.manifold import MDS
@@ -41,6 +42,7 @@ from filelock import FileLock
 from synnet.encoding.fingerprints import fp_2048, fp_256
 import os
 import math
+import zss
 import logging
 import hashlib
 
@@ -1980,7 +1982,7 @@ class Skeleton:
             # self.tree_root = len(st.chemicals)-1
             self.tree_root = len(self.tree)-1
         else:
-            assert (zss_tree is not None) and (whole_tree is not None)
+            assert (whole_tree is not None)
             self.zss_tree = zss_tree
             self.tree = whole_tree
             self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)            
@@ -2001,17 +2003,34 @@ class Skeleton:
         self.do_bfs(bfs)
         self.correct_bfs_mask = bfs
         self.reset()
+
+    
+    def subtree(self, n):     
+        def dfs(tree, cur):
+            res = [cur]
+            for nei in tree[cur]:
+                res += dfs(tree, nei)
+            return res
+        assert 'smiles' in self.tree.nodes[n]
+        nodes = dfs(self.tree, n)
+        tree = nx.subgraph(self.tree, nodes)
+        mapping = {k: i for i, k in enumerate(reversed(list(nx.topological_sort(tree))))}
+        tree: nx.DiGraph = nx.relabel_nodes(tree, mapping)  # makes a copy
+        return Skeleton(st=None, index=self.index, whole_tree=tree, zss_tree=None)
+
     
     
-    def do_bfs(self, res):
+    def do_bfs(self, res, interm=False):
         dq = deque([self.tree_root])
         while dq:
             cur = dq.popleft()
-            if cur == self.tree_root:
+            if interm:
                 res.append(cur)
-            if self.rxns[cur]:
+            elif cur == self.tree_root:
                 res.append(cur)
-            if self.leaves[cur]:
+            elif self.rxns[cur]:
+                res.append(cur)
+            elif self.leaves[cur]:
                 res.append(cur)
             neis = list(self.tree[cur])
             assert len(neis) in [0, 1, 2]
@@ -2058,10 +2077,14 @@ class Skeleton:
             node_sizes = []
             for n in self.tree:
                 if 'smiles' in self.tree.nodes[n]:
-                    smiles = self.tree.nodes[n]['smiles']
-                    m = int(math.sqrt(len(smiles)))
-                    l = (len(smiles)+m-1)//m
-                    smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])
+                    smiles = self.tree.nodes[n]['smiles']                                       
+                    if isinstance(smiles, np.ndarray):
+                        smiles = 'fp'
+                    else:
+                        if len(smiles):
+                            m = int(math.sqrt(len(smiles))) 
+                            l = (len(smiles)+m-1)//m
+                            smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])                    
                     node_labels[n] = f"{n}: {smiles}"
                     node_sizes.append(5000)
                 else:
@@ -2160,6 +2183,9 @@ class Skeleton:
     
     def pred(self, n):
         return list(self.tree.predecessors(n))[0]
+    
+    def succ(self, n):
+        return list(self.tree.successors(n))[0]
     
     @staticmethod
     def lowest_rxns(tree, cur, ans): # returns depth
@@ -2447,19 +2473,12 @@ class Skeleton:
 
     @staticmethod
     def label_depth(g, root):
-        dq = deque()
-        dq.append(root)
-        g.nodes[root]['depth'] = 1
-        max_depth = 1
-        while len(dq):
-            cur = dq.popleft()
-            for nex in g[cur]:
-                d = g.nodes[cur]['depth']+1
-                g.nodes[nex]['depth'] = d
-                dq.append(nex)
-                max_depth = max(max_depth, d)
-        for n in g:
-            g.nodes[n]['depth'] = max_depth-g.nodes[n]['depth']+1
+        neis = list(g[root])
+        d = 1
+        for n in neis:
+            Skeleton.label_depth(g, n)
+            d += g.nodes[n]['depth']
+        g.nodes[root]['depth'] = d
 
 
 
@@ -2507,6 +2526,50 @@ class Skeleton:
         p = self.rxn_prog()      
         val = p.hash(self.mask[self.rxns])
         return val
+
+
+def binary_tree_to_skeleton(tree: nx.DiGraph) -> Skeleton:
+    # Relabel nodes 0,...,n-1 based on reverse topological order (root last)
+    mapping = {k: i for i, k in enumerate(reversed(list(nx.topological_sort(tree))))}
+    tree: nx.DiGraph = nx.relabel_nodes(tree, mapping)  # makes a copy
+
+    # Build zss_tree
+    zss_nodes = [zss.Node(i) for i in range(tree.number_of_nodes())]
+    for src, dst in tree.edges:
+        assert src > dst
+        zss_nodes[src].addkid(zss_nodes[dst])
+    zss_tree = zss_nodes[-1]
+
+    # Expanded tree
+    whole_tree = nx.DiGraph()
+    rxn_counter = 0  # for reaction nodes
+    for i in range(tree.number_of_nodes()):
+        whole_tree.add_node(i, smiles="")
+        if tree.out_degree(i) == 0:  # leaf
+            continue
+
+        # Create a reaction node
+        r = tree.number_of_nodes() + rxn_counter
+        rxn_counter += 1
+        whole_tree.add_node(r, rxn_id=-1)
+
+        # Add edges
+        whole_tree.add_edge(i, r)
+        for c in tree.neighbors(i):
+            whole_tree.add_edge(r, c)
+            if tree.out_degree(i) == 1:
+                is_left_child = True  # convention
+            else:
+                if 'child' in tree[i][c]:
+                    is_left_child = tree.nodes[c]['child'] == 'left'
+                else:
+                    is_left_child = tree[i][c]["left"]
+            whole_tree.nodes[c]["child"] = ("left" if is_left_child else "right")
+
+    # Skeleton wrapper
+    sk = Skeleton(st=None, index=None, whole_tree=whole_tree, zss_tree=zss_tree)
+    sk.clear_tree()  # safety
+    return sk
 
 
 

@@ -149,7 +149,9 @@ def main():
         if len(list(skeletons[st])) == 0:
             continue
         if args.gnn_datasets is not None and index not in args.gnn_datasets:
-            continue    
+            continue  
+        if index > 0:
+            break  
         # if len(skeletons[st]) < 100:
         #     continue   
         # figure out "a" minimal resolving set   

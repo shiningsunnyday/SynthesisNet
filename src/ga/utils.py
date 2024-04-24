@@ -4,7 +4,6 @@ from typing import Dict
 
 import networkx as nx
 import numpy as np
-import zss
 
 from synnet.utils.data_utils import Skeleton
 
@@ -126,43 +125,3 @@ def random_graft(
 
     return merged
 
-
-def binary_tree_to_skeleton(tree: nx.DiGraph) -> Skeleton:
-    # Relabel nodes 0,...,n-1 based on reverse topological order (root last)
-    mapping = {k: i for i, k in enumerate(reversed(list(nx.topological_sort(tree))))}
-    tree: nx.DiGraph = nx.relabel_nodes(tree, mapping)  # makes a copy
-
-    # Build zss_tree
-    zss_nodes = [zss.Node(i) for i in range(tree.number_of_nodes())]
-    for src, dst in tree.edges:
-        assert src > dst
-        zss_nodes[src].addkid(zss_nodes[dst])
-    zss_tree = zss_nodes[-1]
-
-    # Expanded tree
-    whole_tree = nx.DiGraph()
-    rxn_counter = 0  # for reaction nodes
-    for i in range(tree.number_of_nodes()):
-        whole_tree.add_node(i, smiles="")
-        if tree.out_degree(i) == 0:  # leaf
-            continue
-
-        # Create a reaction node
-        r = tree.number_of_nodes() + rxn_counter
-        rxn_counter += 1
-        whole_tree.add_node(r, rxn_id=-1)
-
-        # Add edges
-        whole_tree.add_edge(i, r)
-        for c in tree.neighbors(i):
-            whole_tree.add_edge(r, c)
-            if tree.out_degree(i) == 1:
-                is_left_child = True  # convention
-            else:
-                is_left_child = tree[i][c]["left"]
-            whole_tree.nodes[c]["child"] = ("left" if is_left_child else "right")
-
-    # Skeleton wrapper
-    sk = Skeleton(st=None, index=None, whole_tree=whole_tree, zss_tree=zss_tree)
-    sk.clear_tree()  # safety
-    return sk

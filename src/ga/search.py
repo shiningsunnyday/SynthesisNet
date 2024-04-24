@@ -8,6 +8,7 @@ import scipy
 import torch
 import tqdm
 import wandb
+from multiprocessing.pool import ThreadPool
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -37,7 +38,11 @@ class GeneticSearch:
             assert cfg.bt_nodes_min <= ind.bt.number_of_nodes() <= cfg.bt_nodes_max
 
     def evaluate(self, population: Population) -> Dict[str, float]:
-        scores = [ind.fitness for ind in population]
+        if self.config.ncpu > 1:
+            with ThreadPool(self.config.ncpu) as p:
+                scores = p.map(lambda ind: ind.fitness, population)
+        else:
+            scores = [ind.fitness for ind in population]
         scores.sort(reverse=True)
 
         metrics = {

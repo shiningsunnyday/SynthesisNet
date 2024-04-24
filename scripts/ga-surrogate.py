@@ -3,7 +3,10 @@ from ga.search import *
 from ga.utils import *
 from synnet.utils.analysis_utils import serialize_string
 from synnet.utils.reconstruct_utils import *
+from synnet.utils.data_utils import binary_tree_to_skeleton
 import pickle
+from functools import partial
+from tqdm import tqdm
 import logging
 from tdc import Oracle
 
@@ -60,7 +63,8 @@ def get_args():
     parser.add_argument("--ncpu", type=int, help="Number of cpus")
     # Evaluation
     parser.add_argument(
-        "--objective", type=str, default="qed", help="Objective function to optimize"
+        "--objective", type=str, default="qed", help="Objective function to optimize",
+        choices=['qed', 'logp', 'jnk', 'gsk', 'drd2', '7l11', 'drd3']
     )    
     return parser.parse_args()  
 
@@ -74,12 +78,17 @@ def test_fitness(batch):
 
 
 
-def test_surrogate(batch):
+def test_surrogate(ncpu, batch):
+    pargs = []
     for ind in batch:
         fp = ind.fp
         bt = ind.bt        
-        sk = binary_tree_to_skeleton(bt)        
-        ind.fitness = surrogate(sk, fp, oracle)
+        sk = binary_tree_to_skeleton(bt)  
+        pargs.append((sk, fp, oracle))
+    with ThreadPool(ncpu) as p:      
+        scores = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
+    for ind, score in zip(batch, scores):
+        ind.fitness = score
 
 
 def set_oracle(args):
@@ -109,7 +118,6 @@ def set_oracle(args):
 
 
 def init_global_vars(args):
-    skeletons = pickle.load(open(args.skeleton_file, 'rb'))    
     set_models(args, logger)
     load_data(args, logger)
     oracle = set_oracle(args)
@@ -122,8 +130,8 @@ def main(args):
         handler = logging.FileHandler(args.log_file)
     logger.addHandler(handler)    
     init_global_vars(args)    
-    config = GeneticSearchConfig(wandb=True)
-    GeneticSearch(config).optimize(test_surrogate)
+    config = GeneticSearchConfig(ncpu=args.ncpu, wandb=True)
+    GeneticSearch(config).optimize(partial(test_surrogate, args.ncpu))
 
 
 

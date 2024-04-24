@@ -14,11 +14,12 @@ class GeneticSearchConfig(pydantic.BaseModel):
     """
 
     seed: int = 10
+    ncpu: int = 1
 
     # Individuals
     fp_bits: int = 2048
-    bt_nodes_min: int = 5
-    bt_nodes_max: int = 10
+    bt_nodes_min: int = 2
+    bt_nodes_max: int = 5
 
     # Search parameters
     generations: int = 200

@@ -8,6 +8,8 @@ from synnet.models.gnn import PtrDataset
 from synnet.models.mlp import nn_search_list
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
+from synnet.utils.analysis_utils import serialize_string
+from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
 from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
@@ -99,17 +101,29 @@ def decode(sk, smi):
         bb_gnn = bb_models[sk.index]
     else:
         bb_gnn = globals()['bb_gnn']
-    sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)
-    print(f"done decoding {smi}")
+    try:
+        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)    
+        ans = serialize_string(sk.tree, sk.tree_root)        
+        print(f"done decoding {smi} {ans}")
+    except:
+        sks = None
     return sks
 
 
-def format_metrics(metrics):
+def format_metrics(metrics, cum=False):
     res = ""
     for k, v in metrics.items():
         res += k + '\n'
         res += json.dumps(v) + '\n'
         res += '\n'
+
+    if cum:
+        cum = []
+        for k in metrics:
+            cum += metrics[k]['all']
+        score = np.mean(cum)
+        num = len(cum)
+        res += f"Total: {score}/{num}\n"
     return res
 
 
@@ -146,7 +160,7 @@ def test_skeletons(args, skeleton_set):
         dirname = os.path.dirname(args.ckpt_rxn)
         config_file = os.path.join(dirname, 'hparams.yaml')
         config = yaml.safe_load(open(config_file))
-        SKELETON_INDEX = list(map(int, config['datasets']))
+        SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
     return SKELETON_INDEX
 
 
@@ -199,44 +213,84 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
         return mask_imposs, None
     rxn_imposs = deepcopy(mask_imposs)    
     attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
-    if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
-        # try every reaction, and use existence of hash to filter possibilites            
-        term = rxn_graph.nodes[cur][attr_name]
-        for rxn_id in range(NUM_POSS):
-            rxn_graph.nodes[cur][attr_name] = rxn_id
-            p = Program(rxn_graph)
-            path = os.path.join(args.hash_dir, p.get_path())
-            mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
-            if os.path.exists(path):
-                paths.append(path)
-            else:
-                paths.append('')
-        rxn_graph.nodes[cur][attr_name] = term
-    elif rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
-        lca = get_anc(cur, rxn_graph)
-        # use prog_graph to hash, navigate the file system
-        term = rxn_graph.nodes[cur][attr_name]
-        for rxn_id in range(NUM_POSS):
-            rxn_graph.nodes[cur][attr_name] = rxn_id
-            p = Program(rxn_graph)
-            if 'path' not in rxn_graph.nodes[lca]:
-                breakpoint()
-            if rxn_graph.nodes[lca]['path'][-5:] == '.json': # prev lca exist              
-                path_stem = rxn_graph.nodes[lca]['path'][:-5]                
-                path_stem = Path(path_stem).stem
-                path = os.path.join(args.hash_dir, path_stem, p.get_path())
-                mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
+    # if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
+    #     # try every reaction, and use existence of hash to filter possibilites            
+    #     term = rxn_graph.nodes[cur][attr_name]
+    #     for rxn_id in range(NUM_POSS):
+    #         rxn_graph.nodes[cur][attr_name] = rxn_id
+    #         p = Program(rxn_graph)
+    #         path = os.path.join(args.hash_dir, p.get_path())
+    #         mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
+    #         if os.path.exists(path):
+    #             paths.append(path)
+    #         else:
+    #             paths.append('')
+    #     rxn_graph.nodes[cur][attr_name] = term
+    # elif rxn_graph.nodes[cur]['depth'] < MAX_DEPTH:
+    #     lca = get_anc(cur, rxn_graph)
+    #     # use prog_graph to hash, navigate the file system
+    #     term = rxn_graph.nodes[cur][attr_name]
+    #     for rxn_id in range(NUM_POSS):
+    #         rxn_graph.nodes[cur][attr_name] = rxn_id
+    #         p = Program(rxn_graph)
+    #         if 'path' not in rxn_graph.nodes[lca]:
+    #             breakpoint()
+    #         if rxn_graph.nodes[lca]['path'][-5:] == '.json': # prev lca exist              
+    #             path_stem = rxn_graph.nodes[lca]['path'][:-5]                
+    #             path_stem = Path(path_stem).stem
+    #             path = os.path.join(args.hash_dir, path_stem, p.get_path())
+    #             mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
+    #             if os.path.exists(path):
+    #                 paths.append(path)
+    #             else:
+    #                 paths.append('')                        
+    #         else:
+    #             mask_imposs[rxn_id] = True
+    #             paths.append('')
+
+    #     rxn_graph.nodes[cur][attr_name] = term     
+    # if sum(mask_imposs) == NUM_POSS:
+    #     mask_imposs = rxn_imposs    
+    if rxn_graph.nodes[cur]['depth'] == 1:    
+        base_case = False                    
+        r_preds = list(rxn_graph.predecessors(cur))
+        if len(r_preds) == 0:
+            base_case = True
+        else:
+            r_pred = r_preds[0]
+            pred = sk.pred(sk.pred(sk.pred(n)))
+            depth = rxn_graph.nodes[r_pred]['depth']
+            if depth > 2:
+                base_case = True
+        if base_case:
+            paths = []
+            for i in range(91):
+                g = nx.DiGraph()
+                g.add_node(0, rxn_id=i, depth=1)   
+                path = Program(g).get_path()
+                path = os.path.join(args.hash_dir, path)
                 if os.path.exists(path):
                     paths.append(path)
+                    rxn_imposs[i] = False
                 else:
-                    paths.append('')                        
-            else:
-                mask_imposs[rxn_id] = True
-                paths.append('')
-
-        rxn_graph.nodes[cur][attr_name] = term     
-    if sum(mask_imposs) == NUM_POSS:
+                    paths.append('')
+                    rxn_imposs[i] = True
+            return rxn_imposs, paths
+        policy = RxnPolicy(4096+2*91, 2, 2*91, sk.subtree(pred), args.hash_dir, rxns)
+        obs = np.zeros((4096+2*91,))        
+        rxn_id = rxn_graph.nodes[r_pred]['rxn_id']
+        obs[-91+rxn_id] = 1        
+        mask, paths = policy.action_mask(obs, return_paths=True)
+        mask_imposs = ~mask[:91]
+    elif rxn_graph.nodes[cur]['depth'] == 2:
+        pred = sk.pred(n)
+        policy = RxnPolicy(4096+2*91, 2, 2*91, sk.subtree(pred), args.hash_dir, rxns)
+        obs = np.zeros((4096+2*91,))        
+        mask, paths = policy.action_mask(obs, return_paths=True)
+        mask_imposs = ~mask[91:]
+    else:
         mask_imposs = rxn_imposs
+        paths = []
     return mask_imposs, paths
 
 
@@ -251,10 +305,13 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
     """            
     rxn_graph, node_map, _ = sk.rxn_graph()    
     if sk.rxns[n]:  
-        cur = node_map[n]          
-        mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
-        assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
-        logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
+        cur = node_map[n]
+        if rxn_graph.nodes[cur]['depth'] <= 2:
+            mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
+            assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
+            logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
+        else:
+            paths = []
         rxn_id = logits_n[-NUM_POSS:].argmax(axis=-1).item()     
         # Sanity check for forcing eval
         sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
@@ -281,8 +338,13 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
         else:
             exist = False
         failed = False
-        if exist:                    
+        if exist:                
             e = str(node_map[pred])
+            if rxn_graph.nodes[int(e)]['depth'] == 2:
+                e = '1'
+            else:
+                assert rxn_graph.nodes[int(e)]['depth'] == 1
+                e = '0'
             data = json.load(open(path))
             succs = list(sk.tree.successors(pred))
             second = sk.tree.nodes[n]['child'] == 'right'
@@ -466,7 +528,7 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
                     smiles.append(sk.tree.nodes[n]['smiles'])
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
         sims = tanimoto_similarity(mol_fp(smi2), smiles)
-        correct = max(sims)
+        correct = int(max(sims) == 1)
     return correct
 
 
@@ -512,9 +574,14 @@ def load_data(args, logger=None):
 
 def surrogate(sk, fp, oracle):
     sks = decode(sk, fp)
-    ans = float("-inf")
+    ans = 0.
+    if sks is None:
+        return 0.
     for sk in sks:
         sk.reconstruct(rxns)
+        sk.visualize('/home/msun415/test.png')
         smi = sk.tree.nodes[sk.tree_root]['smiles']
-        ans = max(ans, oracle(smi))
+        score = oracle(smi)
+        print(f"oracle {smi} score {score}")
+        ans = max(ans, score)    
     return ans

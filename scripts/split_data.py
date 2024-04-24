@@ -39,8 +39,13 @@ def main(args):
         indices = sorted(indices)
         print(f"gnn-datasets has been set to {indices}")
         setattr(args, 'gnn_datasets', indices)    
-
-    while i < 100:
+        max_ind = max(indices)+1
+    else:
+        max_ind = 10000
+    while i < max_ind:
+        if 'train' in args.in_dir and i < 100:
+            i += 1
+            continue
         if i not in args.gnn_datasets:
             i += 1
             continue
@@ -79,8 +84,6 @@ def main(args):
             # else: 
             #     y = sparse.load_npz(ys_path).todense()
             index += 1
-        if index == 0:
-            continue
         with mp.Pool(50) as p:
             res = p.starmap(load_npz, [(input_dir,f"{i}_{ind}","Xs") for ind in tqdm(range(index), desc="loading X")])
         X = np.concatenate(res, axis=0)

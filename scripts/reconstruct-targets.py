@@ -12,6 +12,8 @@ import os
 import pickle
 from synnet.utils.reconstruct_utils import *
 import multiprocessing as mp
+import random
+random.seed(42)
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ def main(args):
     sk_set = None     
     skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
     skeleton_set = SkeletonSet().load_skeletons(skeletons)
-    syntree_set_all = [st for v in skeletons.values() for st in v]
+    syntree_set_all = [st for v in skeletons.values() for st in v]    
     syntree_set = []
     SKELETON_INDEX = test_skeletons(args, skeleton_set)
     print(f"SKELETON INDEX: {SKELETON_INDEX}")
@@ -120,6 +122,7 @@ def main(args):
                         syntree_set.append(syntree)
                 else:
                     syntree_set.append(syntree)       
+    random.shuffle(syntree_set)
     targets = [syntree.root.smiles for syntree in syntree_set]
     lookup = {}
     # Compute the gold skeleton
@@ -154,11 +157,17 @@ def main(args):
         if args.ncpu == 1:
             sks_batch = []
             for arg in tqdm(target_batch):                        
-                sks = decode(*arg)
-                sks_batch.append(sks)              
+                try:
+                    sks = decode(*arg)
+                    sks_batch.append(sks)              
+                except:
+                    sks_batch.append(None)               
         else:
             with mp.Pool(args.ncpu) as p:
                 sks_batch = p.starmap(decode, tqdm(target_batch))        
+        mask = [sks is not None for sks in sks_batch]
+        target_batch = [t for (t, b) in zip(target_batch, mask) if b]
+        sks_batch = [t for (t, b) in zip(sks_batch, mask) if b]
         all_targets += target_batch
         all_sks += sks_batch
         if args.forcing_eval:
@@ -166,16 +175,16 @@ def main(args):
             logger.info(f"correct summary: {correct_summary}")
         else:
             batch_correct, batch_incorrect = get_metrics(target_batch, sks_batch)
-            logger.info(f"batch {batch} correct: {format_metrics(batch_correct)}")
+            logger.info(f"batch {batch} correct: {format_metrics(batch_correct, cum=True)}")
             logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
     
-    if args.forcing_eval:
-        correct_summary = get_metrics(targets, all_sks)
-        logger.info(f"correct summary: {correct_summary}")
-    else:
-        total_correct, total_incorrect = get_metrics(all_targets, all_sks)
-        logger.info(f"total correct: {format_metrics(total_correct)}")
-        logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
+        if args.forcing_eval:
+            correct_summary = get_metrics(targets, all_sks)
+            logger.info(f"correct summary: {correct_summary}")
+        else:
+            total_correct, total_incorrect = get_metrics(all_targets, all_sks)
+            logger.info(f"total correct: {format_metrics(total_correct, cum=True)}")
+            logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
         
   
     logger.info("Finished decoding.")

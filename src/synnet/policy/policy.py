@@ -53,7 +53,7 @@ class RxnPolicy(nn.Module):
         self.parents = {n: list(rxn_graph.predecessors(n)) for n in rxn_graph}
         return entries # entry nodes
     
-    def action_mask(self, obs):
+    def action_mask(self, obs, return_paths=False):
         if isinstance(obs, np.ndarray):
             obs = torch.from_numpy(obs)
         if len(obs.shape) == 2:
@@ -76,16 +76,23 @@ class RxnPolicy(nn.Module):
             num_reactant = len(list(self.tree.successors(self.rxn_to_nodes[parent])))
             assert parent == self.node_map[self.rxn_to_nodes[parent]]
             r_mask = []
+            paths = []
             for r in range(91):
                 if self.rxns[r].num_reactant != num_reactant:
+                    paths.append('')
                     r_mask.append(False)
                 else:
                     rxn_graph_copy.nodes[parent]['rxn_id'] = r
                     p = Program(rxn_graph_copy)
                     path = os.path.join(self.hash_dir, p.get_path())
+                    paths.append(path)
                     r_mask.append(os.path.exists(path))
             mask[parent] = torch.from_numpy(np.array(r_mask))
-            return mask.flatten()
+            mask = mask.flatten()
+            if return_paths:
+                return mask, paths
+            else:
+                return mask            
         filled_nodes = self.rxn_to_nodes[bool_mask]
         rxn_ids = rxns_mask[bool_mask].argmax(axis=-1).cpu().numpy()
 
@@ -106,20 +113,25 @@ class RxnPolicy(nn.Module):
             num_reactant = len(list(self.tree.successors(self.reverse_node_map[unfilled])))
             r_mask = [num_reactant == self.rxns[r].num_reactant for r in range(91)]
             if bool_mask[self.parents[unfilled]].item():
-                pred = self.parents[unfilled][0]                
+                pred = self.parents[unfilled][0]
+                paths = []
                 for r in range(91):
                     if not r_mask[r]:
+                        paths.append('')
                         continue
                     rxn_graph_copy.nodes[unfilled]['rxn_id'] = r
                     p = Program(rxn_graph_copy)
                     ppath = Path(entries[pred])
                     path = os.path.join(ppath.parent, ppath.stem, p.get_path())
+                    paths.append(path)
                     r_mask[r] = os.path.exists(path)
                 rxn_graph_copy.nodes[unfilled]['rxn_id'] = -1
                 mask[unfilled] = torch.from_numpy(np.array(r_mask))
         mask = mask.reshape(self.n_actions)
-        
-        return mask
+        if return_paths:
+            return mask, paths
+        else:
+            return mask
         
 
     def forward(self, obs):

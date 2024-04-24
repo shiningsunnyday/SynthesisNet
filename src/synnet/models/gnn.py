@@ -66,8 +66,7 @@ class PtrDataset(Dataset):
             sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
             sk.mask = [sk.tree_root]           
             self.sks[e] = sk
-            # get canonical bfs ordering used for positional embedding
-            breakpoint()            
+      
                     
     @staticmethod
     def get_graph(edges):
@@ -121,7 +120,7 @@ class PtrDataset(Dataset):
 
 
     @staticmethod
-    def positionalencoding1d(d_model, length, perm_mask):
+    def positionalencoding1d(d_model, length):
         """
         :param d_model: dimension of the model
         :param length: length of positions
@@ -137,7 +136,6 @@ class PtrDataset(Dataset):
                             -(math.log(10000.0) / d_model)))
         pe[:, 0::2] = torch.sin(position.float() * div_term)
         pe[:, 1::2] = torch.cos(position.float() * div_term)
-        breakpoint()
         return pe
     
 
@@ -247,7 +245,7 @@ def load_lazy_dataloaders(args):
     dataset_train = PtrDataset(train_dataset_ptrs, args.rewire_edges, args.pe)
     dataset_valid = PtrDataset(val_dataset_ptrs, args.rewire_edges, args.pe)
     dataset_test = PtrDataset(test_dataset_ptrs, args.rewire_edges, args.pe)
-    prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
+    prefetch_factor = args.prefetch_factor
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=True)
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
@@ -287,7 +285,7 @@ def load_split_dataloaders(args):
     dataset_valid = PtrDataset(val_dataset_ptrs, args.rewire_edges, args.pe)
     dataset_test = PtrDataset(test_dataset_ptrs, args.rewire_edges, args.pe)
 
-    prefetch_factor = args.prefetch_factor if args.prefetch_factor else None
+    prefetch_factor = args.prefetch_factor
     train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=True, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
     test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
