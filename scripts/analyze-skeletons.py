@@ -83,7 +83,7 @@ if __name__ == "__main__":
                 lookup[','.join(ans)] = st
         else:
             skeletons = {}
-        lookup = {}
+            lookup = {}
         for i, st in tqdm(enumerate(syntrees), desc="serializing trees"):
             sk = Skeleton(st, -1)   
             key = serialize_string(sk.tree, sk.tree_root)
