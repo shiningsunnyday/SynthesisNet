@@ -1977,18 +1977,16 @@ class Skeleton:
                     j += 1
                 elif action == 3:
                     break            
-            postorder = []    
-            self.do_postorder(whole_tree, len(whole_tree)-1, postorder)
-            whole_tree = nx.relabel_nodes(whole_tree, dict(zip(postorder, range(len(whole_tree)))))
-            self.tree = whole_tree
-            # self.tree_root = len(st.chemicals)-1
-            self.tree_root = len(self.tree)-1
         else:
             assert (whole_tree is not None)
             self.zss_tree = zss_tree
-            self.tree = whole_tree
-            self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)            
 
+        postorder = []    
+        self.do_postorder(whole_tree, next(v for v, d in whole_tree.in_degree() if d == 0), postorder)
+        whole_tree = nx.relabel_nodes(whole_tree, dict(zip(postorder, range(len(whole_tree)))))
+        self.tree = whole_tree        
+        self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)            
+        assert self.tree_root == len(whole_tree)-1
         self.tree_edges = np.array(self.tree.edges).T   
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
         self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])                

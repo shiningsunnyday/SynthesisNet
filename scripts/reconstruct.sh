@@ -17,4 +17,4 @@ python scripts/reconstruct-targets.py \
     --filter-only rxn bb \
     --top-bbs-file results/viz/programs/program_cache-bb=1000-prods=2/bblocks-top-1000.txt \
     --ncpu $ncpu \
-    --batch-size $batch_size   
+    --batch-size $batch_size

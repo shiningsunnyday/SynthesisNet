@@ -8,6 +8,7 @@ import scipy
 import torch
 import tqdm
 import wandb
+import json
 from multiprocessing.pool import ThreadPool
 
 from ga import utils
@@ -21,14 +22,22 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def initialize(self) -> Population:
-        cfg = self.config
-        population = []
-        for _ in range(cfg.population_size):
-            fp = np.random.choice([True, False], size=cfg.fp_bits)
-            bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
-            bt = utils.random_binary_tree(bt_size.item())
-            population.append(Individual(fp=fp, bt=bt))
+    def initialize(self, path='') -> Population:
+        if path:
+            indvs = json.load(path)
+            population = []
+            for indv in indvs:
+                bt = indv['bt']
+                fp = indv['fp']
+                population.append(Individual(fp=fp, bt=bt))            
+        else:
+            cfg = self.config
+            population = []
+            for _ in range(cfg.population_size):
+                fp = np.random.choice([True, False], size=cfg.fp_bits)
+                bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
+                bt = utils.random_binary_tree(bt_size.item())
+                population.append(Individual(fp=fp, bt=bt))
         return population
 
     def validate(self, population: Population):
