@@ -155,7 +155,7 @@ class PtrDataset(Dataset):
         # simulate scenario of retrosynthesis where interms aren't known        
         X[np.nonzero(self.interms_map[e])[0], :2048] = 0        
         X[np.nonzero(self.interms_map[e])[0], :2048] = 0
-        if self.pe == 'sin':            
+        if self.pe == 'sin':         
             pe = self.positionalencoding1d(32, num_nodes) # add to target
             X = np.concatenate((X, pe.numpy()), axis=-1)
         y = sparse.load_npz(base+'_ys.npz').toarray()

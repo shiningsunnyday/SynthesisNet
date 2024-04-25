@@ -1976,9 +1976,11 @@ class Skeleton:
                     i += 1
                     j += 1
                 elif action == 3:
-                    break
-
-            self.tree = whole_tree                             
+                    break            
+            postorder = []    
+            self.do_postorder(whole_tree, len(whole_tree)-1, postorder)
+            whole_tree = nx.relabel_nodes(whole_tree, dict(zip(postorder, range(len(whole_tree)))))
+            self.tree = whole_tree
             # self.tree_root = len(st.chemicals)-1
             self.tree_root = len(self.tree)-1
         else:
@@ -2040,6 +2042,17 @@ class Skeleton:
                         neis = neis[::-1]
             for nei in neis:
                 dq.append(nei)
+
+    
+    @staticmethod
+    def do_postorder(tree, cur, res):
+        neis = list(tree[cur])
+        if len(neis) == 2 and tree.nodes[neis[0]]['child'] == 'right':
+            neis = neis[::-1]
+        for n in neis:
+            Skeleton.do_postorder(tree, n, res)
+        res.append(cur)
+
 
 
     def visualize(self, path=None, Xy=None, ax=None, labels=True):
@@ -2733,12 +2746,12 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
             assert sk.all_leaves
 
     # visualize to help debug
-    if not os.path.exists(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}.png")):
-        try:
-            sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}.png"))
-            sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}_Xy.png"), Xy=(X, y))
-        except:
-            print("vis failed")
+    
+    path = os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}.png")
+    if not os.path.exists(path):
+        sk.visualize(path)
+        sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}_Xy.png"), Xy=(X, y))
+
 
     return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
 

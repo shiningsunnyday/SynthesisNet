@@ -43,9 +43,6 @@ def main(args):
     else:
         max_ind = 10000
     while i < max_ind:
-        if 'train' in args.in_dir and i < 100:
-            i += 1
-            continue
         if i not in args.gnn_datasets:
             i += 1
             continue

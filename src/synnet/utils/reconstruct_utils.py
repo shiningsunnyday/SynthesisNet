@@ -12,7 +12,7 @@ from synnet.utils.analysis_utils import serialize_string
 from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
-from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
+from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program, Reaction
 from pathlib import Path
 import numpy as np
 import networkx as nx
@@ -529,7 +529,7 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
                     smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
         sims = tanimoto_similarity(mol_fp(smi2), smiles)
-        correct = int(max(sims) == 1)
+        correct = max(sims)
     return correct
 
 
@@ -542,11 +542,11 @@ def update(dic_total, dic):
 
 def load_data(args, logger=None):
     # ... reaction templates
-    rxns = ReactionSet().load(args.rxns_collection_file).rxns
+    # rxns = ReactionSet().load(args.rxns_collection_file).rxns
     if logger is not None:
         logger.info(f"Successfully read {args.rxns_collection_file}.")
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)    
-
+    rxns = [Reaction(smirks) for smirks in rxn_templates]
     # # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
     # # A dict is used as lookup table for 2nd reactant during inference:

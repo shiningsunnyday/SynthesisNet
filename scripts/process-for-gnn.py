@@ -140,7 +140,6 @@ def get_parg(syntree, min_r_set, index, args):
 
 def main():
     args = get_args()
-    breakpoint()
     skeletons = load_skeletons(args)    
     sk_set = SkeletonSet().load_skeletons(skeletons)
     len_inds = np.argsort([len(skeletons[st]) for st in skeletons])
@@ -151,17 +150,19 @@ def main():
             continue
         if args.gnn_datasets is not None and index not in args.gnn_datasets:
             continue  
-        if index > 0:
-            break  
         # if len(skeletons[st]) < 100:
         #     continue   
         # figure out "a" minimal resolving set   
-        if kth_largest[index]+1 > 100:
+        # if kth_largest[index]+1 > 100:
+        #     continue                
+        sk = Skeleton(st, index)
+        rxn_graph, _, _ = sk.rxn_graph()
+        max_depth = max([rxn_graph.nodes[n]['depth'] for n in rxn_graph])
+        if max_depth > 3:
             continue
         print(f"class {index} which is {kth_largest[index]+1}th most represented")
-        sk = Skeleton(st, index)
-        # sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))
-        # print(os.path.abspath(os.path.join(args.visualize_dir, f"{index}.png")))
+        sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))
+        print(os.path.abspath(os.path.join(args.visualize_dir, f"{index}.png")))
         # check that every building block is under a bottom-most-2 reaction
         # sk_copy = deepcopy(sk)
         # sk_copy.mask = [sk_copy.tree_root]
