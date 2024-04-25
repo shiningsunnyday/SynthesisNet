@@ -12,7 +12,7 @@ from torch import nn
 import torch_geometric.nn as geom_nn
 from collections import defaultdict
 
-# from synnet.MolEmbedder import MolEmbedder
+from synnet.MolEmbedder import MolEmbedder
 from sklearn.neighbors import NearestNeighbors
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class MLP(pl.LightningModule):
         learning_rate: float = 1e-4,
         val_freq: int = 10,
         ncpu: int = 16,
-        # molembedder: MolEmbedder = None,
+        molembedder: MolEmbedder = None,
         X = None,
     ):
         super().__init__()
@@ -45,7 +45,7 @@ class MLP(pl.LightningModule):
         self.learning_rate = learning_rate
         self.ncpu = ncpu
         self.val_freq = val_freq
-        # self.X = torch.Tensor(np.load(X)) if (X is not None) else (molembedder.embeddings if molembedder is not None else None)
+        self.X = torch.Tensor(np.load(X)) if (X is not None) else (molembedder.embeddings if molembedder is not None else None)
         # self.nn = NearestNeighbors(n_neighbors=1)
         # self.nn.fit(molembedder.embeddings)
         modules = []

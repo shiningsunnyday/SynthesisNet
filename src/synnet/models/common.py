@@ -91,7 +91,7 @@ def xy_to_dataset(
     )
     dataset = torch.utils.data.TensorDataset(
         torch.Tensor(X),
-        torch.Tensor(y),
+        torch.Tensor(y) if task == 'regression' else torch.LongTensor(y),
     )
     return dataset    
 
