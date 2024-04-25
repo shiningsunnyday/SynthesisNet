@@ -265,8 +265,8 @@ class Reaction:
 
         if keep_main:
             uniqps = uniqps[:1]
-        # >>> TODO: Always return list[str] (currently depends on "keep_main")
-        uniqps = uniqps[0]
+            uniqps = uniqps[0]
+        # >>> TODO: Always return list[str] (currently depends on "keep_main")        
         # <<< ^ delete this line if resolved.
         return uniqps
 
@@ -2165,15 +2165,21 @@ class Skeleton:
                 succ = list(self.tree.successors(i))
                 if self.tree.nodes[succ[0]]['child'] == 'right':
                     succ = succ[::-1]
-                reactants = tuple(self.tree.nodes[j]['smiles'] for j in succ)
-                if len(reactants) != rxns[self.tree.nodes[i]['rxn_id']].num_reactant:
+                poss_reactants = [self.tree.nodes[j]['smiles'].split(DELIM) for j in succ]
+                poss_res = []
+                for reactants in product(*poss_reactants):
+                    # reactants = tuple(self.tree.nodes[j]['smiles'] for j in succ)
+                    if len(reactants) != rxns[self.tree.nodes[i]['rxn_id']].num_reactant:
+                        return False
+                    rxn = Reaction(rxns[self.tree.nodes[i]['rxn_id']].smirks)
+                    interms = rxn.run_reaction(reactants, keep_main=False)
+                    if interms is not None:
+                        pred = list(self.tree.predecessors(i))[0]
+                        poss_res += interms
+                if len(poss_res) == 0:
                     return False
-                interm = rxns[self.tree.nodes[i]['rxn_id']].run_reaction(reactants)              
-                pred = list(self.tree.predecessors(i))[0]
-                if interm is None:
-                    return False
-                self.tree.nodes[pred]['smiles'] = interm
-        smi1 = Chem.CanonSmiles(self.tree.nodes[self.tree_root]['smiles'])                
+                self.tree.nodes[pred]['smiles'] = DELIM.join(poss_res)
+        
 
 
     @property

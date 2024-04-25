@@ -11,9 +11,9 @@ python scripts/train-rl.py \
     --rxns_collection_file $RXN_COLLECTION_FILE \
     --embeddings_knn_file $EMBEDDINGS_KNN_FILE \
     --skeleton_class 1 \
-    --test_size 0.1 \
+    --split valid \
     --test-iters 1 \
-    --ncpu 100 \
+    --ncpu 1 \
     --method forward \
     --num-simulations 1000 \
     --lr 0.01

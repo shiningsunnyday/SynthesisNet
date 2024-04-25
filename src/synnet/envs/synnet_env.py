@@ -116,16 +116,22 @@ def get_return(sk, state, model, hash_dir, rxns, bbs, bb_emb):
             assert len(bb_lookup[key]) == 1
             indices = [bbs.index(smi) for smi in bb_lookup[key][0]]
 
-        if 'save_smiles' in sk.tree.nodes[i]:
-            assert bbs.index(sk.tree.nodes[i]['save_smiles']) in indices
+        # if 'save_smiles' in sk.tree.nodes[i]:
+        #     assert bbs.index(sk.tree.nodes[i]['save_smiles']) in indices
         
         bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=1).item()
         smiles = bbs[indices[bb_ind]]
         sk.modify_tree(i, smiles=smiles)
-    sk.reconstruct(rxns)            
-    sim = tanimoto_similarity(state[:4096], [sk.tree.nodes[sk.tree_root]['smiles']])[0]  
-    return sim
-    # return max(sims)
+    sk.reconstruct(rxns)
+    poss = []
+    for n in sk.tree:
+        if 'smiles' in sk.tree.nodes[n]:
+            poss += sk.tree.nodes[n]['smiles'].split(DELIM)
+    if len(poss):
+        sims = tanimoto_similarity(state[:4096], poss)
+        return max(sims) == 1.
+    else:        
+        return 0.
 
 
 def get_mask(sk, policy, state):

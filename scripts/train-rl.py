@@ -11,9 +11,10 @@ import multiprocessing as mp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler, ReactionTemplateFileHandler
 from synnet.policy import RxnPolicy, Trainer, ReplayMemory, execute_episode
 from synnet.envs.synnet_env import make_skeleton_class
-from synnet.utils.data_utils import Skeleton, SkeletonSet, ReactionSet
+from synnet.utils.data_utils import Skeleton, SkeletonSet, ReactionSet, Reaction
 from synnet.utils.analysis_utils import reorder_syntrees
 from synnet.models.common import load_gnn_from_ckpt
+from synnet.config import DELIM
 import torch
 import random
 import threading
@@ -24,10 +25,11 @@ random.seed(0)
 
 import pickle
 
-# skeletons = pickle.load(open('results/viz/top_1000/skeletons-top-1000.pkl', 'rb'))
-# for i, st in enumerate(skeletons):
-#     pickle.dump(skeletons[st], open(f'results/viz/top_1000/class/{i}.pkl', 'wb+'))
-#     print(i)
+# for split in ['train','valid','test']:
+#     skeletons = pickle.load(open(f'results/viz/top_1000/skeletons-top-1000-{split}.pkl', 'rb'))
+#     for i, st in enumerate(skeletons):
+#         pickle.dump(skeletons[st], open(f'results/viz/top_1000/class/{i}-{split}.pkl', 'wb+'))
+#         print(i)
 
 
 def get_args():
@@ -43,6 +45,7 @@ def get_args():
     parser.add_argument("--embeddings_knn_file")
     parser.add_argument("--skeleton_class", default=[3], nargs='+', type=int)
     parser.add_argument("--surrogate")
+    parser.add_argument("--split", choices=['train','valid','test'])
     parser.add_argument("--method", choices=['mcts', 'forward'], default='mcts')
     parser.add_argument("--test-iters", default=5, type=int)
     parser.add_argument("--num-simulations", default=20, type=int)
@@ -154,38 +157,37 @@ def evaluate(st, i, index, test_env):
 def mp_evaluate(args, sts, index, skeleton_class, network):
     def get_rxns(st):
         sk = Skeleton(st, -1)
-        rxn_id_1 = sk.tree.nodes[6]['rxn_id']
-        rxn_id_2 = sk.tree.nodes[5]['rxn_id']
-        return [91+rxn_id_1, rxn_id_2]
+        rxn_nodes = np.argwhere(sk.rxns).flatten()
+        rxn_ids = [sk.tree.nodes[n]['rxn_id'] for n in rxn_nodes]
+        for i in range(1, len(rxn_ids)):
+            rxn_ids[i] += i*91        
+        return rxn_ids[::-1]
         
     print(len(sts), "test sts")
     test_env = skeleton_class(network)
     globals()['network'] = network   
-    
-    if args.ncpu == 1:
-        total_rews = [evaluate(st, i, index, test_env) for i, st in enumerate(sts)]
-    else:        
-        # with mp.Pool(50) as p:
-        #     total_rews = p.starmap(evaluate, tqdm([(st, i, index) for i, st in enumerate(sts)]))
-        tasks = [(st, i, index, test_env) for i, st in tqdm(enumerate(sts))]
-        if args.method == 'mcts':
+          
+    # with mp.Pool(50) as p:
+    #     total_rews = p.starmap(evaluate, tqdm([(st, i, index) for i, st in enumerate(sts)]))
+    tasks = [(st, i, index, test_env) for i, st in tqdm(enumerate(sts))]
+    if args.method == 'mcts':
+        with mp.pool.ThreadPool(args.ncpu) as p:
+            total_rews = p.starmap(evaluate, tqdm(tasks))
+    else:
+        globals()['best_reward'] = 0.
+        total_rews = []
+        # poss = []
+        # for a1 in range(91, 182):
+        #     for a2 in range(91):
+        #         poss.append((a1, a2))         
+        tasks = [(st, i, index, test_env, get_rxns(st)) for i, st in enumerate(sts)]
+        if args.ncpu > 1:
             with mp.pool.ThreadPool(args.ncpu) as p:
-                total_rews = p.starmap(evaluate, tqdm(tasks))
+                all_rews = p.starmap(forward_search, tqdm(tasks))
         else:
-            globals()['best_reward'] = 0.
-            total_rews = []
-            # poss = []
-            # for a1 in range(91, 182):
-            #     for a2 in range(91):
-            #         poss.append((a1, a2))         
-            for i, st in enumerate(sts):             
-                tasks = [(st, i, index, test_env, get_rxns(st))]
-                rew = forward_search(*tasks[0])
-                # with mp.pool.ThreadPool(args.ncpu) as p:
-                #     rews = p.starmap(forward_search, tqdm(tasks))
-                # total_rews.append(max(rews))
-                total_rews.append(rew)
-        total_rews = list(total_rews)
+            all_rews = [forward_search(*task) for task in tasks]
+        total_rews += [max(rews) for rews in all_rews]
+    total_rews = list(total_rews)
     return total_rews
 
 def mp_execute(args, sts, idx, skeleton_class, network, mems):
@@ -209,29 +211,25 @@ def main(args):
     mems = {}
     bbs = BuildingBlockFileHandler().load(args.building_blocks_file)
     bb_emb = np.load(args.embeddings_knn_file)
-    bb_emb = bb_emb/np.linalg.norm(bb_emb, axis=-1, keepdims=True)
     bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)    
-    # rxns = ReactionTemplateFileHandler().load(args.rxn_templates_file)
-    rxns = ReactionSet().load(args.rxns_collection_file).rxns
+    rxns = [Reaction(smirks) for smirks in ReactionTemplateFileHandler().load(args.rxn_templates_file)]
     for idx in args.skeleton_class:
-        sts = pickle.load(open(f'results/viz/top_1000/class/{idx}.pkl', 'rb'))
+        split = args.split
+        sts = pickle.load(open(f'results/viz/top_1000/class/{idx}-{split}.pkl', 'rb'))
         # Train-test split
-        random.shuffle(sts)
-        sts, sts_test = sts[:int(len(sts)*(1-args.test_size))], sts[int(len(sts)*(1-args.test_size)):]
-        sts = sts_test
 
         # test
-        for st in tqdm(sts_test, desc="testing"):
-            sk_test = Skeleton(st, idx)
-            sk_test.visualize(f'results/viz/top_1000/class/debug/{idx}_gold.png')
-            gold = sk_test.tree.nodes[sk_test.tree_root]['smiles']
-            sk_test.reconstruct(rxns)
-            sk_test.visualize(f'results/viz/top_1000/class/debug/{idx}.png')
-            pred = sk_test.tree.nodes[sk_test.tree_root]['smiles']
-            gold = Chem.CanonSmiles(gold)
-            pred = Chem.CanonSmiles(pred)
-            if gold != pred:
-                breakpoint()
+        # for st in tqdm(sts_test, desc="testing"):
+        #     sk_test = Skeleton(st, idx)
+        #     sk_test.visualize(f'results/viz/top_1000/class/debug/{idx}_gold.png')
+        #     gold = sk_test.tree.nodes[sk_test.tree_root]['smiles']
+        #     sk_test.reconstruct(rxns)
+        #     sk_test.visualize(f'results/viz/top_1000/class/debug/{idx}.png')
+        #     pred = sk_test.tree.nodes[sk_test.tree_root]['smiles']
+        #     gold = Chem.CanonSmiles(gold)
+        #     preds = [Chem.CanonSmiles(p) for p in pred.split(DELIM)]
+        #     if gold not in preds:
+        #         breakpoint()
  
         sk = Skeleton(sts[0], idx)        
         trainer = Trainer(lambda: RxnPolicy(4096+sk.rxns.sum()*91, 20, sk.rxns.sum()*91, sk, args.hash_dir, rxns), learning_rate=args.lr)
@@ -260,7 +258,7 @@ def main(args):
                 ax.legend()
                 fig.savefig(os.path.join(args.log_path, f'{iter}_loss.png'))
                 print(os.path.abspath(os.path.join(args.log_path, f'{iter}_loss.png')))
-                total_rewards = mp_evaluate(args, sts_test, idx, skeleton_class, networks[idx])
+                total_rewards = mp_evaluate(args, sts, idx, skeleton_class, networks[idx])
                 reward_history.append(np.mean(total_rewards))
                 plot_rewards(reward_history, os.path.join(args.log_path, f'{iter}_rewards.png'))
                 print(os.path.abspath(os.path.join(args.log_path, f'{iter}_rewards.png')))
@@ -275,5 +273,4 @@ def main(args):
 
 if __name__ == '__main__':    
     args = get_args()
-    breakpoint()
     main(args)

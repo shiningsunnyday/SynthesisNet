@@ -515,9 +515,10 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
     elif method == 'postorder':
         # compute intermediates and target
 
-        smi1 = sk.reconstruct(rxns)
-        smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
-        correct = smi1 == smi2
+        sk.reconstruct(rxns)
+        smis = sk_true.tree.nodes[sk_true.tree_root]['smiles'].split(DELIM)
+        smis = [Chem.CanonSmiles(smi) for smi in smis]
+        correct = smi2 in smis
     else:
         assert method == 'reconstruct'
         sk.reconstruct(rxns)
@@ -525,7 +526,7 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
         for n in sk.tree:
             if 'smiles' in sk.tree.nodes[n]:
                 if sk.tree.nodes[n]['smiles']:
-                    smiles.append(sk.tree.nodes[n]['smiles'])
+                    smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
         sims = tanimoto_similarity(mol_fp(smi2), smiles)
         correct = int(max(sims) == 1)
