@@ -85,8 +85,12 @@ def test_surrogate(ncpu, batch):
         bt = ind.bt        
         sk = binary_tree_to_skeleton(bt)  
         pargs.append((sk, fp, oracle))
-    with ThreadPool(ncpu) as p:      
-        scores = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
+    if ncpu > 1:
+        with ThreadPool(ncpu) as p:      
+            scores = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
+    else:
+        breakpoint()
+        scores = [surrogate(*parg) for parg in pargs]
     for ind, score in zip(batch, scores):
         ind.fitness = score
 
@@ -130,7 +134,7 @@ def main(args):
         handler = logging.FileHandler(args.log_file)
     logger.addHandler(handler)    
     init_global_vars(args)    
-    config = GeneticSearchConfig(ncpu=args.ncpu, wandb=True)
+    config = GeneticSearchConfig(ncpu=args.ncpu, wandb=False)
     GeneticSearch(config).optimize(partial(test_surrogate, args.ncpu))
 
 

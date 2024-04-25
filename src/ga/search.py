@@ -10,7 +10,8 @@ import tqdm
 import wandb
 import json
 from multiprocessing.pool import ThreadPool
-
+import os
+import networkx as nx
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
 
@@ -22,12 +23,13 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def initialize(self, path='') -> Population:
-        if path:
+    def initialize(self, path='/home/msun415/SynTreeNet/indvs-qed.json') -> Population:
+        if path and os.path.exists(path):
             indvs = json.load(path)
             population = []
             for indv in indvs:
-                bt = indv['bt']
+                bt_data = indv['bt']
+                bt = nx.tree_graph(bt_data)
                 fp = indv['fp']
                 population.append(Individual(fp=fp, bt=bt))            
         else:
