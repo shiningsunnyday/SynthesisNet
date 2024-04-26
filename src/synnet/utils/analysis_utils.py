@@ -51,6 +51,9 @@ def serialize(tree, cur, ans):
         if 'child' in tree.nodes[childs[0]]:
             if tree.nodes[childs[0]]['child'] == 'right':
                 childs = childs[::-1]
+        elif 'left' in tree.edges[(cur, childs[0])]:
+            if not tree.edges[(cur, childs[0])]['left']:
+                childs = childs[::-1]
         if len(childs) == 1:
             childs += [-1]        
         for c in childs:

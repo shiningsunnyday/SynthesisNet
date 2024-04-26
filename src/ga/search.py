@@ -14,6 +14,7 @@ import os
 import networkx as nx
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
+from synnet.utils.analysis_utils import serialize_string
 
 Population = List[Individual]
 
@@ -25,12 +26,24 @@ class GeneticSearch:
 
     def initialize(self, path='/home/msun415/SynTreeNet/indvs-qed.json') -> Population:
         if path and os.path.exists(path):
-            indvs = json.load(path)
+            indvs = json.load(open(path))
             population = []
             for indv in indvs:
                 bt_data = indv['bt']
-                bt = nx.tree_graph(bt_data)
-                fp = indv['fp']
+                bt = nx.tree_graph(bt_data) # only supports node-level attributes
+                bt = nx.relabel_nodes(bt, dict(zip(list(bt.nodes), [utils.random_name() for _ in bt])))
+                for n in bt: # move child node attribute 'left' to edge attribute
+                    preds = list(bt.predecessors(n))
+                    if len(preds) == 1:
+                        pred = preds[0]
+                    else:
+                        continue
+                    if list(bt[pred]) == 1:
+                        bt.edges[(pred, n)]['left'] = True
+                    else:
+                        assert 'left' in bt.nodes[n]
+                        bt.edges[(pred, n)]['left'] = bt.nodes[n]['left']                        
+                fp = np.array(indv['fp'], dtype=bool)
                 population.append(Individual(fp=fp, bt=bt))            
         else:
             cfg = self.config
@@ -66,6 +79,15 @@ class GeneticSearch:
         return metrics
 
     def cull(self, population: Population) -> Population:
+        serials = []
+        for indv in population:
+            tree = indv.bt
+            root = next(v for v, d in tree.in_degree() if d == 0)
+            fp_str = ''.join(list(map(str, map(int, indv.fp))))
+            serial = serialize_string(tree, root) + ' ' + fp_str
+            serials.append(serial)
+        _, inds = np.unique(serials, return_index=True)
+        population = [population[ind] for ind in inds]
         population = sorted(population, key=(lambda x: x.fitness), reverse=True)
         return population[:self.config.population_size]
 
@@ -102,6 +124,11 @@ class GeneticSearch:
         k = int(np.round(k))
         mask = utils.random_bitmask(cfg.fp_bits, k=k)
         fp = np.where(mask, parents[0].fp, parents[1].fp)
+
+        # if random.random() < 0.5:
+        #     fp = parents[0].fp
+        # else:
+        #     fp = parents[1].fp
 
         # bt: random subtree swap
         trees = [parents[0].bt, parents[1].bt]
@@ -189,6 +216,8 @@ class GeneticSearch:
 
             # Scoring
             metrics = self.evaluate(population)
+            print([x.fitness for x in population])
+            print(metrics)
 
             # Logging
             if cfg.wandb:

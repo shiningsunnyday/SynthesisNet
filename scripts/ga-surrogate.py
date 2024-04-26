@@ -59,6 +59,7 @@ def get_args():
     parser.add_argument("--top-k", default=1, type=int)
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])    
     parser.add_argument("--log_file")
+    parser.add_argument("--config_file", required=True)
     # Processing
     parser.add_argument("--ncpu", type=int, help="Number of cpus")
     # Evaluation
@@ -91,6 +92,9 @@ def test_surrogate(ncpu, batch):
     else:
         scores = [surrogate(*parg) for parg in pargs]
     for ind, score in zip(batch, scores):
+        if score > globals()['best_score']:
+            globals()['best_score'] = score
+            print("best score", score)        
         ind.fitness = score
 
 
@@ -125,6 +129,7 @@ def init_global_vars(args):
     load_data(args, logger)
     oracle = set_oracle(args)
     globals()['oracle'] = oracle
+    globals()['best_score'] = float("-inf")
 
 
 
@@ -133,8 +138,9 @@ def main(args):
         handler = logging.FileHandler(args.log_file)
     logger.addHandler(handler)    
     init_global_vars(args)    
-    config = GeneticSearchConfig(ncpu=args.ncpu, wandb=False)
-    GeneticSearch(config).optimize(partial(test_surrogate, args.ncpu))
+    config_file = json.load(open(args.config_file))
+    config = GeneticSearchConfig(**config_file)
+    GeneticSearch(config).optimize(partial(test_surrogate, config.ncpu))
 
 
 

@@ -104,7 +104,6 @@ def decode(sk, smi):
     try:
         sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)    
         ans = serialize_string(sk.tree, sk.tree_root)        
-        print(f"done decoding {smi} {ans}")
     except:
         sks = None
     return sks
@@ -529,8 +528,8 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
                 if sk.tree.nodes[n]['smiles']:
                     smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
-        sims = tanimoto_similarity(mol_fp(smi2), smiles)
-        correct = int(max(sims) == 1)
+        sims = tanimoto_similarity(mol_fp(smi2, 2, 4096), smiles)
+        correct = max(sims)
     return correct
 
 
@@ -587,7 +586,7 @@ def surrogate(sk, fp, oracle):
         sk.reconstruct(rxns)
         sk.visualize('/home/msun415/test.png')
         smi = sk.tree.nodes[sk.tree_root]['smiles']
-        score = oracle(smi)
-        print(f"oracle {smi} score {score}")
-        ans = max(ans, score)    
+        for smi in smi.split(DELIM):
+            score = oracle(smi)
+            ans = max(ans, score)    
     return ans
