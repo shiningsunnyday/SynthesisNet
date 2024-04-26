@@ -40,6 +40,7 @@ def get_args():
         help="Input file for the pre-computed embeddings (*.npy).",
         default="data/assets/building-blocks/enamine_us_emb_fp_256.npy"
     )    
+    parser.add_argument("--top-bbs-file", help='if given, consider only these bbs')
     parser.add_argument("--ckpt-bb", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")    

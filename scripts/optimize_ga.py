@@ -56,6 +56,7 @@ def func(emb):
     try:
         tree, action = synthetic_tree_decoder(
             z_target=emb,
+            sk_coords=None,
             building_blocks=building_blocks,
             bb_dict=bb_dict,
             reaction_templates=rxns,

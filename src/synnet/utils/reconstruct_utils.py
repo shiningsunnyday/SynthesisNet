@@ -91,6 +91,8 @@ def decode(sk, smi):
         skviz = lambda sk: SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
     else:
         skviz = None
+    if 'bblock_inds' in globals():
+        bblock_inds = globals()['bblock_inds']
     # print(f"begin decoding {smi}")
     if 'rxn_models' in globals():
         rxn_gnn = rxn_models[sk.index]
@@ -102,7 +104,7 @@ def decode(sk, smi):
     else:
         bb_gnn = globals()['bb_gnn']
     try:
-        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz)    
+        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
         ans = serialize_string(sk.tree, sk.tree_root)        
     except:
         sks = None
@@ -293,7 +295,7 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
     return mask_imposs, paths
 
 
-def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
+def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_inds=None):
     """
     if rxn
         detect if n is within MAX_DEPTH of root
@@ -369,7 +371,10 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
             else:
                 failed = True
         if not exist or failed:
-            indices = [bbs.index(smi) for smi in bbs]
+            if bblock_inds is not None:
+                indices = bblock_inds
+            else:
+                indices = list(range(bb_emb.shape[0]))
             bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
             smiles = bbs[indices[bb_ind]]
         sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
@@ -406,7 +411,7 @@ def pick_node(sk, logits, bb_emb):
 
 
 @torch.no_grad()
-def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblocks, skviz=None):
+def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblocks, bblock_inds=None, skviz=None):
     top_k = args.top_k
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
@@ -466,10 +471,10 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 if top_k > 1 and first_bb: # first bb                
                     for k in range(1, 1+top_k):
                         sk_copy = deepcopy(sk_n)
-                        fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k)
+                        fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k, bblock_inds=bblock_inds)
                         sks.append(sk_copy)
                 else:
-                    fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1)
+                    fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1, bblock_inds=bblock_inds)
                     sks.append(sk_n)
                     if skviz is not None:
                         sk_viz_n = skviz(sk_n)
@@ -550,9 +555,8 @@ def load_data(args, logger=None):
     # # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
     if args.top_bbs_file:
-        bblocks = set([l.rstrip('\n') for l in open(args.top_bbs_file).readlines()])
-    else:
-        bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)      
+        bblock_inds = [bblocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
+        globals()['bblock_inds'] = bblock_inds
     # # A dict is used as lookup table for 2nd reactant during inference:
     # bblocks_dict = {block: i for i, block in enumerate(bblocks)}
     # logger.info(f"Successfully read {args.building_blocks_file}.")
