@@ -67,6 +67,7 @@ def wrapper_decoder(smiles: str, sk_coords=None) -> Tuple[str, float, SyntheticT
             sk_coords=sk_coords,
             building_blocks=bblocks,
             bb_dict=bblocks_dict,
+            bblock_inds=bblock_inds,
             reaction_templates=rxns,
             mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused
             action_net=act_net,
@@ -110,6 +111,11 @@ def get_args():
         "--embeddings-knn-file",
         type=str,
         help="Input file for the pre-computed embeddings (*.npy).",
+    )
+    parser.add_argument(
+        "--top-bbs-file",
+        type=str,
+        help="If given, limit to only bbs from this"
     )
     parser.add_argument(
         "--ckpt-dir", type=str, help="Directory with checkpoints for {act,rt1,rxn,rt2}-model."
@@ -161,6 +167,11 @@ if __name__ == "__main__":
     # A dict is used as lookup table for 2nd reactant during inference:
     bblocks_dict = {block: i for i, block in enumerate(bblocks)}
     logger.info(f"Successfully read {args.building_blocks_file}.")
+
+    if args.top_bbs_file:
+        bblock_inds = [bblocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
+    else:
+        bblock_inds = None
 
     # ... reaction templates
     rxns = ReactionSet().load(args.rxns_collection_file).rxns

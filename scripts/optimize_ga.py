@@ -59,6 +59,7 @@ def func(emb):
             sk_coords=None,
             building_blocks=building_blocks,
             bb_dict=bb_dict,
+            bblock_inds=bblock_inds,
             reaction_templates=rxns,
             mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
             action_net=act_net,
@@ -253,6 +254,11 @@ def get_args():
         type=str,
         help="Input file for the pre-computed embeddings (*.npy).",
     )
+    parser.add_argument(
+        "--top-bbs-file",
+        type=str,
+        help="If given, limit to only bbs from this"
+    )    
     parser.add_argument("--ckpt-versions", type=int, help="If given, use ckpt versions in ckpt-dir", nargs='+')
     parser.add_argument(
         "--ckpt-dir", type=str, help="Directory with checkpoints for {act,rt1,rxn,rt2}-model."
@@ -335,7 +341,7 @@ if __name__ == "__main__":
     # Load data
     mol_embedder = _fetch_molembedder(featurize)
 
-    # load the purchasable building block embeddings
+    # load the purchasable building block embeddings 
     bblocks_molembedder = (
         MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
     )
@@ -343,6 +349,10 @@ if __name__ == "__main__":
 
     # load the purchasable building block SMILES to a dictionary
     building_blocks = BuildingBlockFileHandler().load(args.building_blocks_file)
+    if args.top_bbs_file:
+        bblock_inds = [building_blocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
+    else:
+        bblock_inds = None       
     # A dict is used as lookup table for 2nd reactant during inference:
     bb_dict = {block: i for i, block in enumerate(building_blocks)}
 

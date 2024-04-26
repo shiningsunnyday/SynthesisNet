@@ -184,6 +184,7 @@ def synthetic_tree_decoder(
     sk_coords: np.ndarray,
     building_blocks: list[str],
     bb_dict: dict[str, int],
+    bblock_inds: list[int],
     reaction_templates: list[Reaction],
     mol_embedder,
     action_net: pl.LightningModule,
