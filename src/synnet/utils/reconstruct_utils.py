@@ -12,7 +12,7 @@ from synnet.utils.analysis_utils import serialize_string
 from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
-from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program, Reaction
+from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
 from pathlib import Path
 import numpy as np
 import networkx as nx
@@ -370,8 +370,9 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1):
             else:
                 failed = True
         if not exist or failed:
-            bb_ind = nn_search_list(emb_bb, bb_emb, top_k=top_bb).item()
-            smiles = bbs[bb_ind]
+            indices = [bbs.index(smi) for smi in bbs]
+            bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
+            smiles = bbs[indices[bb_ind]]
         sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
 
 
@@ -529,7 +530,7 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
                     smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
         smi2 = Chem.CanonSmiles(sk_true.tree.nodes[sk_true.tree_root]['smiles'])
         sims = tanimoto_similarity(mol_fp(smi2), smiles)
-        correct = max(sims)
+        correct = int(max(sims) == 1)
     return correct
 
 
@@ -542,13 +543,17 @@ def update(dic_total, dic):
 
 def load_data(args, logger=None):
     # ... reaction templates
-    # rxns = ReactionSet().load(args.rxns_collection_file).rxns
+    rxns = ReactionSet().load(args.rxns_collection_file).rxns
     if logger is not None:
         logger.info(f"Successfully read {args.rxns_collection_file}.")
     rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)    
-    rxns = [Reaction(smirks) for smirks in rxn_templates]
+
     # # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
+    if args.top_bbs_file:
+        bblocks = set([l.rstrip('\n') for l in open(args.top_bbs_file).readlines()])
+    else:
+        bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)      
     # # A dict is used as lookup table for 2nd reactant during inference:
     # bblocks_dict = {block: i for i, block in enumerate(bblocks)}
     # logger.info(f"Successfully read {args.building_blocks_file}.")

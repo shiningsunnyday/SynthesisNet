@@ -89,7 +89,6 @@ def test_surrogate(ncpu, batch):
         with ThreadPool(ncpu) as p:      
             scores = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
     else:
-        breakpoint()
         scores = [surrogate(*parg) for parg in pargs]
     for ind, score in zip(batch, scores):
         ind.fitness = score

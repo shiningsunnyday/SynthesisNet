@@ -252,6 +252,7 @@ def get_args():
         type=str,
         help="Input file for the pre-computed embeddings (*.npy).",
     )
+    parser.add_argument("--ckpt-versions", type=int, help="If given, use ckpt versions in ckpt-dir", nargs='+')
     parser.add_argument(
         "--ckpt-dir", type=str, help="Directory with checkpoints for {act,rt1,rxn,rt2}-model."
     )
@@ -305,8 +306,14 @@ def fetch_population(args) -> np.ndarray:
             population = np.ceil(np.random.random(size=(args.num_population, args.nbits)) * 2 - 1)
             print(f"Starting with {args.num_population} fps with {args.nbits} bits")
         else:
-            starting_smiles = pd.read_csv(args.input_file).sample(args.num_population)
-            starting_smiles = starting_smiles["smiles"].tolist()
+            if '.csv' in args.input_file:
+                starting_smiles = pd.read_csv(args.input_file).sample(args.num_population)
+                starting_smiles = starting_smiles["smiles"].tolist()
+            elif '.json' in args.input_file:
+                dics = json.load(open(args.input_file))
+                starting_smiles = [dic['smi'] for dic in dics]
+            else:
+                raise NotImplementedError
             population = np.array([mol_fp(smi, args.radius, args.nbits) for smi in starting_smiles])
             print(f"Starting with {len(starting_smiles)} fps from {args.input_file}")
     return population
@@ -343,7 +350,14 @@ if __name__ == "__main__":
 
     # load the pre-trained modules
     path = Path(args.ckpt_dir)
-    ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
+    if args.ckpt_versions:
+        versions = args.ckpt_versions
+    else:
+        versions = [None, None, None, None]    
+    ckpt_files = []
+    for model, version in zip("act rt1 rxn rt2".split(), versions):
+        ckpt_file = find_best_model_ckpt(path / model, version)
+        ckpt_files.append(ckpt_file)    
     act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file) for file in ckpt_files]
 
     # Get initial population
