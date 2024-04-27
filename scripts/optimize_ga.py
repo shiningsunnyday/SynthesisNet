@@ -57,9 +57,8 @@ def func(emb):
         tree, action = synthetic_tree_decoder(
             z_target=emb,
             sk_coords=None,
-            building_blocks=building_blocks,
+            building_blocks=bblocks,
             bb_dict=bb_dict,
-            bblock_inds=bblock_inds,
             reaction_templates=rxns,
             mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
             action_net=act_net,
@@ -153,11 +152,11 @@ def fitness(embs, _pool, obj):
     if obj == "qed":
         # define the oracle function from the TDC
         qed = Oracle(name="QED")
-        scores = [qed(smi) for smi in smiles]
+        scores = [qed(smi) if smi is not None else 0.0 for smi in smiles]
     elif obj == "logp":
         # define the oracle function from the TDC
         logp = Oracle(name="LogP")
-        scores = [logp(smi) for smi in smiles]
+        scores = [logp(smi) if smi is not None else 0.0 for smi in smiles]
     elif obj == "jnk":
         # define the oracle function from the TDC
         jnk = Oracle(name="JNK3")
@@ -341,23 +340,37 @@ if __name__ == "__main__":
     # Load data
     mol_embedder = _fetch_molembedder(featurize)
 
-    # load the purchasable building block embeddings 
-    bblocks_molembedder = (
-        MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-    )
-    bb_emb = bblocks_molembedder.get_embeddings()
-
     # load the purchasable building block SMILES to a dictionary
-    building_blocks = BuildingBlockFileHandler().load(args.building_blocks_file)
+    bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
     if args.top_bbs_file:
-        bblock_inds = [building_blocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
+        bblock_inds = [bblocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
+        bblock_inds = sorted(bblock_inds)
+        bblocks = [bblocks[ind] for ind in bblock_inds]
+        bb_dict = {block: i for i, block in enumerate(bblocks)}
+        emb_path = args.top_bbs_file.replace('.txt', '.npy')
+        # if not os.path.exists(emb_path):
+        data = np.load(args.embeddings_knn_file)
+        top_emb = data[bblock_inds]
+        np.save(emb_path, top_emb)        
+        bblocks_molembedder = (
+            MolEmbedder().load_precomputed(emb_path).init_balltree(cosine_distance)
+        )     
+        bb_emb = bblocks_molembedder.get_embeddings()         
     else:
-        bblock_inds = None       
-    # A dict is used as lookup table for 2nd reactant during inference:
-    bb_dict = {block: i for i, block in enumerate(building_blocks)}
+        bblock_inds = None        
+        # A dict is used as lookup table for 2nd reactant during inference:
+        bb_dict = {block: i for i, block in enumerate(bblocks)}
+        # ... building block embedding
+        bblocks_molembedder = (
+            MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
+        )
+        bb_emb = bblocks_molembedder.get_embeddings()
 
     # load the reaction templates as a ReactionSet object
     rxns = ReactionSet().load(args.rxns_collection_file).rxns
+    for rxn in rxns:
+        for i in range(len(rxn.available_reactants)):
+            rxn.available_reactants[i] = [reactant for reactant in rxn.available_reactants[i] if reactant in bblocks]    
 
     # load the pre-trained modules
     path = Path(args.ckpt_dir)

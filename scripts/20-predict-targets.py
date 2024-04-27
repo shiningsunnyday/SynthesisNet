@@ -12,6 +12,7 @@ np.random.seed(42)
 import pandas as pd
 import pdb
 import pickle
+import os
 from tqdm import tqdm
 
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES
@@ -67,7 +68,6 @@ def wrapper_decoder(smiles: str, sk_coords=None) -> Tuple[str, float, SyntheticT
             sk_coords=sk_coords,
             building_blocks=bblocks,
             bb_dict=bblocks_dict,
-            bblock_inds=bblock_inds,
             reaction_templates=rxns,
             mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused
             action_net=act_net,
@@ -164,25 +164,42 @@ if __name__ == "__main__":
 
     # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-    # A dict is used as lookup table for 2nd reactant during inference:
-    bblocks_dict = {block: i for i, block in enumerate(bblocks)}
-    logger.info(f"Successfully read {args.building_blocks_file}.")
-
     if args.top_bbs_file:
         bblock_inds = [bblocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
+        bblock_inds = sorted(bblock_inds)
+        bblocks = [bblocks[ind] for ind in bblock_inds]
+        bblocks_dict = {block: i for i, block in enumerate(bblocks)}
+        emb_path = args.top_bbs_file.replace('.txt', '.npy')
+        # if not os.path.exists(emb_path):
+        data = np.load(args.embeddings_knn_file)
+        top_emb = data[bblock_inds]
+        np.save(emb_path, top_emb)        
+        bblocks_molembedder = (
+            MolEmbedder().load_precomputed(emb_path).init_balltree(cosine_distance)
+        )     
+        bb_emb = bblocks_molembedder.get_embeddings()         
     else:
-        bblock_inds = None
+        bblock_inds = None        
+        # A dict is used as lookup table for 2nd reactant during inference:
+        bblocks_dict = {block: i for i, block in enumerate(bblocks)}
+        logger.info(f"Successfully read {args.building_blocks_file}.")        
+        # ... building block embedding
+        bblocks_molembedder = (
+            MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
+        )
+        bb_emb = bblocks_molembedder.get_embeddings()
+        logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")        
+
 
     # ... reaction templates
     rxns = ReactionSet().load(args.rxns_collection_file).rxns
+    for rxn in rxns:
+        for i in range(len(rxn.available_reactants)):
+            rxn.available_reactants[i] = [reactant for reactant in rxn.available_reactants[i] if reactant in bblocks]
+
     logger.info(f"Successfully read {args.rxns_collection_file}.")
 
-    # ... building block embedding
-    bblocks_molembedder = (
-        MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-    )
-    bb_emb = bblocks_molembedder.get_embeddings()
-    logger.info(f"Successfully read {args.embeddings_knn_file} and initialized BallTree.")
+
     logger.info("...loading data completed.")
 
     # ... models
@@ -203,10 +220,9 @@ if __name__ == "__main__":
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
 
-    # targets = np.random.choice(targets, 1000)
     if args.ncpu == 1:
         results = []
-        for smi in targets:
+        for smi in tqdm(targets):
             if args.skeleton_set_file:
                 index = sk_set.lookup[smi].index
                 sk_coords = sk_set.coords[index:index+1]

@@ -184,7 +184,6 @@ def synthetic_tree_decoder(
     sk_coords: np.ndarray,
     building_blocks: list[str],
     bb_dict: dict[str, int],
-    bblock_inds: list[int],
     reaction_templates: list[Reaction],
     mol_embedder,
     action_net: pl.LightningModule,
@@ -282,6 +281,7 @@ def synthetic_tree_decoder(
             available_list = [
                 [] for rxn in reaction_templates
             ]  # TODO: if act=merge, this is not used at all
+
 
         # If we ended up in a state where no reaction is possible, end this iteration.
         if reaction_mask is None:
