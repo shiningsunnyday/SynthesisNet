@@ -9,6 +9,7 @@ from functools import partial
 from tqdm import tqdm
 import logging
 from tdc import Oracle
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,12 @@ def get_args():
     parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")    
     parser.add_argument(
+        "--skeleton-set-file",
+        type=str,
+        required=True,
+        help="Input file for the ground-truth skeletons to lookup target smiles in",
+    )          
+    parser.add_argument(
         "--hash-dir",
         default="",
         required=True
@@ -68,6 +75,9 @@ def get_args():
         "--objective", type=str, default="qed", help="Objective function to optimize",
         choices=['qed', 'logp', 'jnk', 'gsk', 'drd2', '7l11', 'drd3']
     )    
+    # I/O
+    parser.add_argument("--sender-filename")
+    parser.add_argument("--receiver-filename")    
     return parser.parse_args()  
 
 
@@ -80,20 +90,58 @@ def test_fitness(batch):
 
 
 
-def test_surrogate(ncpu, batch):
-    pargs = []
-    for ind in batch:
-        fp = ind.fp
-        bt = ind.bt        
-        sk = binary_tree_to_skeleton(bt)  
-        pargs.append((sk, fp, oracle))
-
-    # res = [(random.random(), '') for _ in pargs]
-    if ncpu > 1:
-        with ThreadPool(ncpu) as p:      
-            res = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
+def test_surrogate(ncpu, sender_filename, receiver_filename, batch):
+    if sender_filename and receiver_filename:        
+        open(sender_filename, 'w+').close() # clear
+        open(receiver_filename, 'w+').close() # clear            
+        while(True):
+            with open(sender_filename, 'r') as fr:
+                editable = lock(fr)
+                if editable:
+                    with open(sender_filename, 'w') as fw:
+                        for ind in batch:
+                            sk = binary_tree_to_skeleton(ind.bt)
+                            tree_key = serialize_string(sk.tree, sk.tree_root)
+                            bits = list(map(str, map(int, ind.fp)))
+                            fp = ''.join(bits)
+                            index = lookup_skeleton_key(tree_key)
+                            sample = DELIM.join([fp, str(index)])
+                            fw.write('{}\n'.format(sample))
+                    break
+                fcntl.flock(fr, fcntl.LOCK_UN)     
+        num_samples = len(batch)
+        print("Waiting for reconstruct evaluation...")       
+        while(True):
+            with open(args.receiver_filename, 'r') as fr:
+                editable = lock(fr)
+                if editable:
+                    res = []
+                    lines = fr.readlines()
+                    if len(lines) == num_samples:
+                        for idx, line in enumerate(lines):
+                            splitted_line = line.strip().split()
+                            best_smi = splitted_line[1].split(DELIM)[1]
+                            score = oracle(best_smi)
+                            res.append((score, best_smi))
+                        break
+                fcntl.flock(fr, fcntl.LOCK_UN)
+            time.sleep(1)
+        assert len(batch) == len(res)
     else:
-        res = [surrogate(*parg) for parg in pargs]
+        pargs = []
+        for ind in batch:
+            fp = ind.fp
+            bt = ind.bt        
+            sk = binary_tree_to_skeleton(bt)  
+            pargs.append((sk, fp, oracle))        
+        # res = [(random.random(), '') for _ in pargs]
+        if ncpu > 1:
+            with ThreadPool(ncpu) as p:      
+                res = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
+        else:
+            res = [surrogate(*parg) for parg in pargs]
+
+
     for ind, (score, smi) in zip(batch, res):
         if score > globals()['best_score']:
             globals()['best_score'] = score
@@ -131,6 +179,11 @@ def set_oracle(args):
 def init_global_vars(args):
     set_models(args, logger)
     load_data(args, logger)
+    skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
+    skeleton_set = SkeletonSet().load_skeletons(skeletons)
+    SKELETON_INDEX = test_skeletons(args, skeleton_set)    
+    print(f"SKELETON INDEX: {SKELETON_INDEX}")
+    logger.info(f"SKELETON INDEX: {SKELETON_INDEX}")
     oracle = set_oracle(args)
     globals()['oracle'] = oracle
     globals()['best_score'] = float("-inf")
@@ -144,7 +197,7 @@ def main(args):
     init_global_vars(args)    
     config_file = json.load(open(args.config_file))
     config = GeneticSearchConfig(**config_file)
-    GeneticSearch(config).optimize(partial(test_surrogate, config.ncpu))
+    GeneticSearch(config).optimize(partial(test_surrogate, config.ncpu, args.sender_filename, args.receiver_filename))
 
 
 

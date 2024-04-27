@@ -29,6 +29,14 @@ import yaml
 import json
 import gzip
 from copy import deepcopy
+import fcntl
+
+def lock(f):
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        return False
+    return True
 
 
 def get_metrics(targets, all_sks):
@@ -108,11 +116,8 @@ def decode(sk, smi):
         bb_gnn = bb_models[sk.index]
     else:
         bb_gnn = globals()['bb_gnn']
-    try:
-        sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
-        ans = serialize_string(sk.tree, sk.tree_root)        
-    except:
-        sks = None
+    sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
+    ans = serialize_string(sk.tree, sk.tree_root)        
     return sks
 
 
@@ -167,11 +172,36 @@ def test_skeletons(args, skeleton_set):
         config_file = os.path.join(dirname, 'hparams.yaml')
         config = yaml.safe_load(open(config_file))
         SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
+
+    globals()['skeleton_index_lookup'] = {}
+    for index in SKELETON_INDEX:
+        sk = Skeleton(list(skeleton_set.skeletons)[index], index)
+        tree_key = serialize_string(sk.tree, sk.tree_root)
+        globals()['skeleton_index_lookup'][tree_key] = index
+
+    if hasattr(args, 'strategy') and args.strategy == 'topological':
+        globals()['all_topological_sorts'] = {}
+        for index in SKELETON_INDEX:
+            sk = Skeleton(list(skeleton_set.skeletons)[index], index)
+            top_sorts = nx.all_topological_sorts(sk.tree)
+            top_sort_set = set()
+            for top_sort in top_sorts:
+                top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
+                top_sort_set.add(tuple(top_sort))    
+            tree_key = serialize_string(sk.tree, sk.tree_root)
+            globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
+
     return SKELETON_INDEX
 
 
-def set_models(args, logger):
-    logger.info("Start loading models from checkpoints...")  
+def lookup_skeleton_key(tree_key):
+    return globals()['skeleton_index_lookup'][tree_key]
+
+
+
+def set_models(args, logger=None):
+    if logger is not None:
+        logger.info("Start loading models from checkpoints...")  
     if args.ckpt_dir and os.path.isdir(args.ckpt_dir):
         constraint = {'valid_loss': 'accuracy_loss'}
         rxn_models = load_from_dir(args.ckpt_dir, constraint)
@@ -197,7 +227,8 @@ def set_models(args, logger):
         config_path = os.path.join(Path(args.ckpt_recognizer).parent, 'config.json')
         config = json.load(open(config_path)        )
         globals()['skeleton_classes'] = config['datasets']
-    logger.info("...loading models completed.")    
+    if logger is not None:
+        logger.info("...loading models completed.")    
 
 
 
@@ -431,11 +462,22 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
     # Following how SynNet reports reconstruction accuracy, we decode top-3 reactants, 
     # corresponding to the first bb chosen
     # To make the code more general, we implement this with a stack
-    sks = [sk]    
-    final_sks = []
-    breakpoint()
+    if args.strategy == 'topological':
+        sks = []        
+        tree_key = serialize_string(sk.tree, sk.tree_root)
+        for top_sort in globals()['all_topological_sorts'][tree_key]:
+            sks.append((deepcopy(sk), list(top_sort)))
+    elif args.strategy == 'conf':
+        sks = [sk]    
+    else:
+        raise NotImplementedError    
+    final_sks = []    
     while len(sks):
         sk = sks.pop(-1)
+        if isinstance(sk, tuple):
+            sk, next_node = sk
+        else:
+            next_node = None
         if ((~sk.mask) & (sk.rxns | sk.leaves)).any():
             """
             while there's reaction nodes or leaf building blocks to fill in
@@ -469,14 +511,20 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             logits_rxn = model_rxn(data_rxn)
             logits_bb = model_bb(data_bb)
             logits = {}
-            frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
+            if args.strategy == 'topological':
+                frontier_nodes = [next_node[0]]
+            else:
+                frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
             for n in frontier_nodes:
                 if sk.rxns[n]:
                     logits[n] = logits_rxn[n]
                 else:                
                     assert sk.leaves[n]               
                     logits[n] = logits_bb[n]        
-            poss_n = pick_node(sk, logits, bb_emb)
+            if args.strategy =='topological':        
+                poss_n = [next_node.pop(0)]
+            else:
+                poss_n = pick_node(sk, logits, bb_emb)
             for n in poss_n:
                 logits_n = logits[n].clone()
                 sk_n = deepcopy(sk)
@@ -485,10 +533,16 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                     for k in range(1, 1+top_k):
                         sk_copy = deepcopy(sk_n)
                         fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k, bblock_inds=bblock_inds)
-                        sks.append(sk_copy)
+                        if next_node is None:
+                            sks.append(sk_copy)
+                        else:
+                            sks.append((sk_copy, deepcopy(next_node)))
                 else:
                     fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1, bblock_inds=bblock_inds)
-                    sks.append(sk_n)
+                    if next_node is None:
+                        sks.append(sk_n)
+                    else:
+                        sks.append((sk_n, next_node))
                     if skviz is not None:
                         sk_viz_n = skviz(sk_n)
                         mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
@@ -602,10 +656,30 @@ def predict_skeleton(smiles):
     return globals()['skeleton_classes'][ind]
 
 
+# For reconstruct without true skeleton
+def reconstruct(sk, smi, return_smi=False): 
+    rxns = globals()['rxns']
+    sk.reconstruct(rxns)
+    smiles = []
+    for n in sk.tree:
+        if 'smiles' in sk.tree.nodes[n]:
+            if sk.tree.nodes[n]['smiles']:
+                smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
+    if return_smi:
+        assert isinstance(smi, np.ndarray)
+        sims = tanimoto_similarity(smi, smiles)
+        correct = max(sims)                    
+        best_smi = smiles[np.argmax(sims)]
+        return correct, best_smi
+    else:
+        smi2 = Chem.CanonSmiles(smi)
+        sims = tanimoto_similarity(mol_fp(smi2, 2, 4096), smiles)
+        correct = max(sims)            
+        return correct
+
+
 
 # For surrogate within GA
-
-
 def surrogate(sk, fp, oracle):
     sks = decode(sk, fp)
     ans = 0.

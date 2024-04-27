@@ -3,6 +3,8 @@ Generate synthetic trees for a set of specified query molecules. Multiprocessing
 """  # TODO: Clean up + dont hardcode file paths
 import json
 import logging
+import time
+import fcntl
 import numpy as np
 np.random.seed(42)
 import pandas as pd
@@ -12,6 +14,7 @@ import os
 import pickle
 from synnet.utils.reconstruct_utils import *
 import multiprocessing as mp
+from multiprocessing.pool import ThreadPool
 import random
 random.seed(42)
 
@@ -76,6 +79,11 @@ def get_args():
     parser.add_argument("--top-k", default=1, type=int)
     parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
+        Strategy to decode:
+            Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
+            Topological: Decode every topological order of the rxn+bb nodes.
+    """)
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # Visualization
@@ -84,6 +92,9 @@ def get_args():
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
+    # I/O
+    parser.add_argument("--sender-filename")
+    parser.add_argument("--receiver-filename")
     return parser.parse_args()    
 
 
@@ -124,6 +135,7 @@ def main(args):
                 else:
                     syntree_set.append(syntree)       
     random.shuffle(syntree_set)
+    # syntree_set = syntree_set[:10] # debug
     targets = [syntree.root.smiles for syntree in syntree_set]
     lookup = {}
     # Use the gold skeleton or predict the skeleton
@@ -147,6 +159,7 @@ def main(args):
     targets = list(lookup)
     print(f"{len(targets)}/{len(syntree_set_all)} syntrees")
 
+    
 
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
@@ -159,38 +172,71 @@ def main(args):
     all_targets = []
     for batch in range((len(targets)+batch_size-1)//batch_size):
         target_batch = targets[batch_size*batch:batch_size*batch+batch_size]
-        target_batch = [(deepcopy(lookup[smi]), smi) for smi in target_batch]
-        if args.ncpu == 1:
-            sks_batch = []
-            for arg in tqdm(target_batch):                        
-                try:
-                    sks = decode(*arg)
-                    sks_batch.append(sks)              
-                except:
-                    sks_batch.append(None)               
+
+
+        if args.test_correct_method == 'reconstruct' and args.sender_filename and args.receiver_filename: # assume background processes
+            open(args.sender_filename, 'w+').close() # clear
+            open(args.receiver_filename, 'w+').close() # clear            
+            while(True):
+                with open(args.sender_filename, 'r') as fr:
+                    editable = lock(fr)
+                    if editable:
+                        with open(args.sender_filename, 'w') as fw:
+                            for smi in target_batch:
+                                sample = DELIM.join([smi, str(lookup[smi].index)])
+                                fw.write('{}\n'.format(sample))
+                        break
+                    fcntl.flock(fr, fcntl.LOCK_UN)     
+            num_samples = len(target_batch)
+            print("Waiting for reconstruct evaluation...")       
+            while(True):
+                with open(args.receiver_filename, 'r') as fr:
+                    editable = lock(fr)
+                    if editable:
+                        status = []
+                        lines = fr.readlines()
+                        if len(lines) == num_samples:
+                            for idx, line in enumerate(lines):
+                                splitted_line = line.strip().split()
+                                status.append((idx, splitted_line[2]))
+                            break
+                    fcntl.flock(fr, fcntl.LOCK_UN)
+                time.sleep(1)
+            assert len(target_batch) == len(status)
+            print("Batch {batch} mean score", sum([float(score) for _, score in status])/len(status))
         else:
-            with mp.Pool(args.ncpu) as p:
-                sks_batch = p.starmap(decode, tqdm(target_batch))        
-        mask = [sks is not None for sks in sks_batch]
-        target_batch = [t for (t, b) in zip(target_batch, mask) if b]
-        sks_batch = [t for (t, b) in zip(sks_batch, mask) if b]
-        all_targets += target_batch
-        all_sks += sks_batch
-        if args.forcing_eval:
-            correct_summary = get_metrics(target_batch, sks_batch)
-            logger.info(f"correct summary: {correct_summary}")
-        else:
-            batch_correct, batch_incorrect = get_metrics(target_batch, sks_batch)
-            logger.info(f"batch {batch} correct: {format_metrics(batch_correct, cum=True)}")
-            logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
-    
-        if args.forcing_eval:
-            correct_summary = get_metrics(targets, all_sks)
-            logger.info(f"correct summary: {correct_summary}")
-        else:
-            total_correct, total_incorrect = get_metrics(all_targets, all_sks)
-            logger.info(f"total correct: {format_metrics(total_correct, cum=True)}")
-            logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
+            target_batch = [(deepcopy(lookup[smi]), smi) for smi in target_batch]
+            if args.ncpu == 1:
+                sks_batch = []
+                for arg in tqdm(target_batch):                        
+                    try:
+                        sks = decode(*arg)
+                        sks_batch.append(sks)              
+                    except:
+                        sks_batch.append(None)               
+            else:
+                with ThreadPool(args.ncpu) as p:
+                    sks_batch = p.starmap(decode, tqdm(target_batch))        
+            mask = [sks is not None for sks in sks_batch]
+            target_batch = [t for (t, b) in zip(target_batch, mask) if b]
+            sks_batch = [t for (t, b) in zip(sks_batch, mask) if b]
+            all_targets += target_batch
+            all_sks += sks_batch
+            if args.forcing_eval:
+                correct_summary = get_metrics(target_batch, sks_batch)
+                logger.info(f"correct summary: {correct_summary}")
+            else:
+                batch_correct, batch_incorrect = get_metrics(target_batch, sks_batch)
+                logger.info(f"batch {batch} correct: {format_metrics(batch_correct, cum=True)}")
+                logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
+        
+            if args.forcing_eval:
+                correct_summary = get_metrics(targets, all_sks)
+                logger.info(f"correct summary: {correct_summary}")
+            else:
+                total_correct, total_incorrect = get_metrics(all_targets, all_sks)
+                logger.info(f"total correct: {format_metrics(total_correct, cum=True)}")
+                logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
         
   
     logger.info("Finished decoding.")

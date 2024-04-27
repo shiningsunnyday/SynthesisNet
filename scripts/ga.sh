@@ -1,8 +1,11 @@
 python scripts/ga-surrogate.py --log_file /home/msun415/SynTreeNet/results/viz/top_1000/log_ga.txt \
-    --ckpt-rxn /home/msun415/SynTreeNet/results/logs/gnn//gnn/version_38/ \
-    --ckpt-bb /home/msun415/SynTreeNet/results/logs/gnn//gnn/version_37/ \
+    --skeleton-set-file results/viz/top_1000/skeletons-top-1000-valid.pkl \
+    --ckpt-rxn /ssd/msun415/surrogate/version_38/ \
+    --ckpt-bb /ssd/msun415/surrogate/version_37/ \
     --filter-only rxn bb \
     --hash-dir results/hash_table-bb=1000-prods=2_new/ \
     --top-bbs-file results/viz/programs/program_cache-bb=1000-prods=2/bblocks-top-1000.txt \
     --objective drd2 \
-    --config_file /home/msun415/SynTreeNet/ga-config.json
+    --config_file /home/msun415/SynTreeNet/ga-config.json \
+    --sender-filename input_surrogate.txt \
+    --receiver-filename output_surrogate.txt
