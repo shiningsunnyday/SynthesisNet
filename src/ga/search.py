@@ -15,6 +15,7 @@ import networkx as nx
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
 from synnet.utils.analysis_utils import serialize_string
+from synnet.utils.data_utils import binary_tree_to_skeleton
 
 Population = List[Individual]
 
@@ -24,8 +25,9 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def initialize(self, path='/home/msun415/SynTreeNet/indvs-qed.json') -> Population:
-        if path and os.path.exists(path):
+    def initialize(self) -> Population:
+        path = self.config.init_path
+        if path is not None and os.path.exists(path):
             indvs = json.load(open(path))
             population = []
             for indv in indvs:
@@ -62,11 +64,7 @@ class GeneticSearch:
             assert cfg.bt_nodes_min <= ind.bt.number_of_nodes() <= cfg.bt_nodes_max
 
     def evaluate(self, population: Population) -> Dict[str, float]:
-        if self.config.ncpu > 1:
-            with ThreadPool(self.config.ncpu) as p:
-                scores = p.map(lambda ind: ind.fitness, population)
-        else:
-            scores = [ind.fitness for ind in population]
+        scores = [ind.fitness for ind in population]
         scores.sort(reverse=True)
 
         metrics = {
@@ -167,6 +165,23 @@ class GeneticSearch:
                     utils.random_remove_leaf(bt)
 
         return Individual(fp=fp, bt=bt)
+    
+
+    def save(self, population):
+        out_path = self.config.out_path
+        if out_path is not None:
+            dics = []
+            for indv in population:
+                tree = indv.bt
+                sk = binary_tree_to_skeleton(tree)
+                dics.append({
+                    'smi': indv.smi,
+                    'bt': nx.tree_data(sk.tree, sk.tree_root),
+                    'score': indv.fitness
+                })
+            json.dump(dics, open(out_path, 'w+'))
+
+
 
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -223,7 +238,8 @@ class GeneticSearch:
             if cfg.wandb:
                 wandb.log({"generation": epoch, **metrics}, step=epoch)
 
-            # TODO: save skeletons (?)
+            # TODO: save skeletons (?)            
+            self.save(population)
 
             # Early-stopping
             early_stop_queue.append(metrics["scores/mean"])

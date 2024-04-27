@@ -73,6 +73,7 @@ def get_args():
         default=f"results/logs/recognizer/{time.time()}",
         help="Input file for the generated synthetic trees (*.json.gz)",
     )   
+    parser.add_argument("--datasets", type=int, nargs='+')    
     # Training args
     parser.add_argument("--max_epochs", type=int, default=10)     
     parser.add_argument("--nbits", type=int, default=2048)   
@@ -80,6 +81,7 @@ def get_args():
     parser.add_argument("--batch_size", type=int, default=32)    
     parser.add_argument("--fp_radii", type=int, default=2)    
     parser.add_argument("--hidden_dim", type=int, default=512) 
+    parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--cuda', type=int, default=-1)
     return parser.parse_args()
 
@@ -108,7 +110,9 @@ def main(args):
         same = True
         args_dict = json.load(open(config_path, 'r'))
         for k in args_dict:
-            if args_dict[k] != getattr(args, k):
+            if k == 'work_dir':
+                continue
+            if hasattr(args, k) and args_dict[k] != getattr(args, k):
                 same = False 
     
     all_skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
@@ -117,6 +121,8 @@ def main(args):
     os.makedirs(os.path.join(args.work_dir, 'sks/'), exist_ok=True)
     skeletons = {}
     for index, k in enumerate(all_skeletons):
+        if args.datasets and index not in args.datasets:
+            continue
         if len(all_skeletons[k]) >= num_per_class:
             sk = Skeleton(k, index=index)
             ind = len(skeletons)
@@ -179,11 +185,11 @@ def main(args):
         optimizer="adam",
         learning_rate=1e-4,
         val_freq=1,
-        ncpu=0
+        ncpu=args.num_workers
     )            
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)    
-    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=True)    
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True)    
+    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)    
     
     save_dir = args.work_dir
     tb_logger = pl_loggers.TensorBoardLogger(save_dir, name="")

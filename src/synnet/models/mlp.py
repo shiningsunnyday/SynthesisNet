@@ -103,6 +103,7 @@ class MLP(pl.LightningModule):
             loss = 1 - accuracy            
         elif self.valid_loss == "multi_class_accuracy":
             mask = y.sum(axis=-1) == 1
+            num_classes = y.shape[-1]
             y_hat, y = y_hat[mask], y[mask]
             y_hat = torch.argmax(y_hat, axis=1)
             y = torch.argmax(y, axis=1)
@@ -121,13 +122,14 @@ class MLP(pl.LightningModule):
                 metrics[pred]['precision'][0] += true == pred
                 metrics[true]['recall'][1] += 1
                 metrics[true]['recall'][0] += pred == true
-            for k in metrics:                
-                for metric in ['precision', 'recall']:
-                    correct = metrics[k][metric][0]
-                    tot = metrics[k][metric][1]
-                    if tot == 0:
-                        continue
-                    self.log(f"class_{k}_{metric}", correct/tot, batch_size=tot, on_step=False, on_epoch=True, logger=True)
+            for k in range(num_classes):                
+                if k in metrics:
+                    for metric in ['precision', 'recall']:
+                        correct = metrics[k][metric][0]
+                        tot = metrics[k][metric][1]
+                        self.log(f"class_{k}_{metric}", correct/tot if tot > 0 else 0., batch_size=tot, on_step=False, on_epoch=True, logger=True)
+                else:
+                    self.log(f"class_{k}_{metric}", 0., batch_size=0, on_step=False, on_epoch=True, logger=True)
         elif self.valid_loss[:11] == "nn_accuracy":
             # NOTE: Very slow!
             # Performing the knn-search can easily take a couple of minutes,

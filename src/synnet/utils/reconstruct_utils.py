@@ -3,9 +3,14 @@ from synnet.visualize.drawers import MolDrawer, RxnDrawer
 from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
 from synnet.visualize.visualizer import SkeletonVisualizer
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import load_gnn_from_ckpt, find_best_model_ckpt
+from synnet.models.common import load_gnn_from_ckpt, find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.models.gnn import PtrDataset
 from synnet.models.mlp import nn_search_list
+from synnet.data_generation.syntrees import (
+    IdentityIntEncoder,
+    MorganFingerprintEncoder,
+    SynTreeFeaturizer,
+)
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 from synnet.utils.analysis_utils import serialize_string
@@ -185,6 +190,13 @@ def set_models(args, logger):
             setattr(args, "ckpt_bb", best_ckpt)        
         bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
         globals()['bb_gnn'] = bb_gnn    
+    if hasattr(args, 'ckpt_recognizer') and args.ckpt_recognizer:
+        recognizer = load_mlp_from_ckpt(args.ckpt_recognizer)
+        globals()['recognizer'] = recognizer
+        globals()['encoder'] = MorganFingerprintEncoder(2, 2048)
+        config_path = os.path.join(Path(args.ckpt_recognizer).parent, 'config.json')
+        config = json.load(open(config_path)        )
+        globals()['skeleton_classes'] = config['datasets']
     logger.info("...loading models completed.")    
 
 
@@ -421,6 +433,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
     # To make the code more general, we implement this with a stack
     sks = [sk]    
     final_sks = []
+    breakpoint()
     while len(sks):
         sk = sks.pop(-1)
         if ((~sk.mask) & (sk.rxns | sk.leaves)).any():
@@ -578,19 +591,34 @@ def load_data(args, logger=None):
     globals()['args'] = args
 
 
+
+def predict_skeleton(smiles):
+    assert 'recognizer' in globals()
+    model = globals()['recognizer']
+    model.eval()    
+    encoder = globals()['encoder']    
+    probs = model(torch.FloatTensor(encoder.encode(smiles)))
+    ind = probs.argmax(axis=-1).item()
+    return globals()['skeleton_classes'][ind]
+
+
+
 # For surrogate within GA
 
 
 def surrogate(sk, fp, oracle):
     sks = decode(sk, fp)
     ans = 0.
+    ans_smi = ''
     if sks is None:
-        return 0.
+        return 0., ''
     for sk in sks:
         sk.reconstruct(rxns)
         sk.visualize('/home/msun415/test.png')
         smi = sk.tree.nodes[sk.tree_root]['smiles']
         for smi in smi.split(DELIM):
             score = oracle(smi)
-            ans = max(ans, score)    
-    return ans
+            if score > ans:
+                ans = score
+                ans_smi = smi
+    return ans, ans_smi

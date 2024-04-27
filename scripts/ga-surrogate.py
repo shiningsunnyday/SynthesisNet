@@ -87,16 +87,19 @@ def test_surrogate(ncpu, batch):
         bt = ind.bt        
         sk = binary_tree_to_skeleton(bt)  
         pargs.append((sk, fp, oracle))
+
+    # res = [(random.random(), '') for _ in pargs]
     if ncpu > 1:
         with ThreadPool(ncpu) as p:      
-            scores = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
+            res = p.starmap(surrogate, tqdm(pargs, desc="test_surrogate"))
     else:
-        scores = [surrogate(*parg) for parg in pargs]
-    for ind, score in zip(batch, scores):
+        res = [surrogate(*parg) for parg in pargs]
+    for ind, (score, smi) in zip(batch, res):
         if score > globals()['best_score']:
             globals()['best_score'] = score
-            print("best score", score)        
+            print("best score", score, smi)
         ind.fitness = score
+        ind.smi = smi
 
 
 def set_oracle(args):

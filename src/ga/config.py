@@ -42,6 +42,10 @@ class GeneticSearchConfig(pydantic.BaseModel):
     early_stop_warmup: int = 30
     early_stop_patience: int = 10
 
+    # IO
+    out_path: str = None
+    init_path: str = None
+
     # WandB
     wandb: bool = False
     wandb_project: str = "syntreenet_ga"

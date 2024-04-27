@@ -49,6 +49,7 @@ def get_args():
     )    
     parser.add_argument("--ckpt-bb", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
+    parser.add_argument("--ckpt-recognizer", type=str, help="Recognizer checkpoint to use")    
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")
     parser.add_argument(
         "--skeleton-set-file",
@@ -125,8 +126,8 @@ def main(args):
     random.shuffle(syntree_set)
     targets = [syntree.root.smiles for syntree in syntree_set]
     lookup = {}
-    # Compute the gold skeleton
-    for i, target in enumerate(targets):            
+    # Use the gold skeleton or predict the skeleton
+    for i, target in tqdm(enumerate(targets), "initializing skeletons"):
         sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)             
         smile_set = [c.smiles for c in syntree_set[i].chemicals]
         if len(set(smile_set)) != len(smile_set):
@@ -137,7 +138,12 @@ def main(args):
                 if sk.tree.nodes[n]['smiles'] not in TOP_BBS:
                     good = False
         if good:
-            lookup[target] = sk
+            if args.ckpt_recognizer:
+                pred_index = predict_skeleton(target)
+                sk = Skeleton(list(skeletons)[pred_index], pred_index)
+                lookup[target] = sk
+            else:
+                lookup[target] = sk
     targets = list(lookup)
     print(f"{len(targets)}/{len(syntree_set_all)} syntrees")
 
