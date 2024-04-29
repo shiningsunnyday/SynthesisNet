@@ -1,9 +1,11 @@
+export OMP_NUM_THREADS=1
+use_case='surrogate'
 for ((i =1; i <= $1; i++));
 do
 python -u scripts/reconstruct_listener.py \
     --proc_id $i \
-    --filename input_surrogate.txt \
-    --output_filename output_surrogate.txt \
+    --filename input_${use_case}.txt \
+    --output_filename output_${use_case}.txt \
     --skeleton-set-file results/viz/top_1000/skeletons-top-1000.pkl \
     --ckpt-rxn /ssd/msun415/surrogate/version_38/ \
     --ckpt-bb /ssd/msun415/surrogate/version_37/ \

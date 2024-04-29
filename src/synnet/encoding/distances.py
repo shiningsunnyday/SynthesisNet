@@ -55,5 +55,5 @@ def tanimoto_similarity(target_fp: np.ndarray, smis: list[str]):
     Returns:
         list of np.ndarray: Contains Tanimoto similarities.
     """
-    fps = [mol_fp(smi, 2, 4096) for smi in smis]
+    fps = [mol_fp(smi, 2, len(target_fp)) for smi in smis]
     return [_tanimoto_similarity(target_fp, fp) for fp in fps]

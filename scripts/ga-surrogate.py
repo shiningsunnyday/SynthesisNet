@@ -104,7 +104,7 @@ def test_surrogate(ncpu, sender_filename, receiver_filename, batch):
                             tree_key = serialize_string(sk.tree, sk.tree_root)
                             bits = list(map(str, map(int, ind.fp)))
                             fp = ''.join(bits)
-                            index = lookup_skeleton_key(tree_key)
+                            index = lookup_skeleton_key(sk.zss_tree, tree_key)
                             sample = DELIM.join([fp, str(index)])
                             fw.write('{}\n'.format(sample))
                     break
@@ -117,16 +117,20 @@ def test_surrogate(ncpu, sender_filename, receiver_filename, batch):
                 if editable:
                     res = []
                     lines = fr.readlines()
-                    if len(lines) == num_samples:
+                    if len(lines) >= num_samples:  
+                        seen_idxes = set()                      
                         for idx, line in enumerate(lines):
                             splitted_line = line.strip().split()
+                            key = splitted_line[0]
+                            if key in seen_idxes:
+                                continue
+                            seen_idxes.add(key)
                             best_smi = splitted_line[1].split(DELIM)[1]
                             score = oracle(best_smi)
                             res.append((score, best_smi))
                         break
                 fcntl.flock(fr, fcntl.LOCK_UN)
             time.sleep(1)
-        assert len(batch) == len(res)
     else:
         pargs = []
         for ind in batch:

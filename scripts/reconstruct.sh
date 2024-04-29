@@ -1,6 +1,6 @@
 if [[ $1 -eq 1 ]]; then
-    ncpu=10;
-    batch_size=50;
+    ncpu=1;
+    batch_size=500;
 else
     ncpu=100;
     batch_size=100;

@@ -5,7 +5,7 @@ python scripts/ga-surrogate.py --log_file /home/msun415/SynTreeNet/results/viz/t
     --filter-only rxn bb \
     --hash-dir results/hash_table-bb=1000-prods=2_new/ \
     --top-bbs-file results/viz/programs/program_cache-bb=1000-prods=2/bblocks-top-1000.txt \
-    --objective drd2 \
+    --objective jnk \
     --config_file /home/msun415/SynTreeNet/ga-config.json \
     --sender-filename input_surrogate.txt \
     --receiver-filename output_surrogate.txt

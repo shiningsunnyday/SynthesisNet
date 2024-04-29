@@ -43,7 +43,11 @@ def fp_embedding(smi, _radius=2, _nBits=4096) -> list[float]:
         return np.zeros(_nBits).reshape((-1,)).tolist()
     else:
         mol = Chem.MolFromSmiles(smi)
-        features_vec = AllChem.GetMorganFingerprintAsBitVect(mol, _radius, _nBits)
+        try:
+            features_vec = AllChem.GetMorganFingerprintAsBitVect(mol, _radius, _nBits)
+        except:
+            print(smi, "smi")
+            print(mol, "mol")
         features = np.zeros((1,))
         DataStructs.ConvertToNumpyArray(features_vec, features)
         return features.reshape((-1,)).tolist()
