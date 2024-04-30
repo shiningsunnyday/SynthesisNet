@@ -16,6 +16,7 @@ from ga import utils
 from ga.config import GeneticSearchConfig, Individual
 from synnet.utils.analysis_utils import serialize_string
 from synnet.utils.data_utils import binary_tree_to_skeleton
+from synnet.encoding.fingerprints import mol_fp
 
 Population = List[Individual]
 
@@ -45,7 +46,12 @@ class GeneticSearch:
                     else:
                         assert 'left' in bt.nodes[n]
                         bt.edges[(pred, n)]['left'] = bt.nodes[n]['left']                        
-                fp = np.array(indv['fp'], dtype=bool)
+                if 'smi' in indv:
+                    fp = mol_fp(indv['smi'], _nBits=self.config.fp_bits)
+                    fp = np.array(fp, dtype=bool)
+                else:
+                    fp = indv['fp']
+                    fp = np.array(fp, dtype=bool)
                 population.append(Individual(fp=fp, bt=bt))            
         else:
             cfg = self.config

@@ -122,7 +122,10 @@ def main(proc_id, filename, output_filename):
             continue
         
         print("====Working for sample {}/{}====".format(selected_mol[0], num_samples))
-        smiles, index = selected_mol[1].split(DELIM)
+        try:
+            smiles, index = selected_mol[1].split(DELIM)
+        except:
+            print(selected_mol)
         if set([c for c in smiles]) == set(['0', '1']): # fp
             smiles = np.array(list(map(int, smiles)), dtype=bool)
         index = int(index)
@@ -137,7 +140,7 @@ def main(proc_id, filename, output_filename):
                 ans = score
                 best_smi = smi
 
-        res = DELIM.join([smiles, best_smi, str(index)])
+        res = DELIM.join([selected_mol[1].split(DELIM)[0], best_smi, str(index)])
         while(True):
             with open(output_filename, 'a') as f:
                 editable = lock(f)

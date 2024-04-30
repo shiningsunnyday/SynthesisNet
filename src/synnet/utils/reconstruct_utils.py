@@ -18,6 +18,7 @@ from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
 from synnet.utils.data_utils import ReactionSet, SyntheticTreeSet, Skeleton, SkeletonSet, Program
+from zss import simple_distance
 from pathlib import Path
 import numpy as np
 import networkx as nx
@@ -174,15 +175,16 @@ def test_skeletons(args, skeleton_set):
         SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
 
     globals()['skeleton_index_lookup'] = {}
+    sks = list(skeleton_set.skeletons)
     for index in SKELETON_INDEX:
-        sk = Skeleton(list(skeleton_set.skeletons)[index], index)
+        sk = Skeleton(sks[index], index)
         tree_key = serialize_string(sk.tree, sk.tree_root)
-        globals()['skeleton_index_lookup'][tree_key] = index
+        globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree)
 
     if hasattr(args, 'strategy') and args.strategy == 'topological':
         globals()['all_topological_sorts'] = {}
         for index in SKELETON_INDEX:
-            sk = Skeleton(list(skeleton_set.skeletons)[index], index)
+            sk = Skeleton(sks[index], index)
             top_sorts = nx.all_topological_sorts(sk.tree)
             top_sort_set = set()
             for top_sort in top_sorts:
@@ -194,8 +196,18 @@ def test_skeletons(args, skeleton_set):
     return SKELETON_INDEX
 
 
-def lookup_skeleton_key(tree_key):
-    return globals()['skeleton_index_lookup'][tree_key]
+def lookup_skeleton_key(zss_tree, tree_key):    
+    if tree_key in globals()['skeleton_index_lookup']:
+        return globals()['skeleton_index_lookup'][tree_key][0]
+    else: # return skeleton with nearest tree edit distance
+        min_dist = float("inf")
+        index = -1
+        for index, cand_zss_tree in globals()['skeleton_index_lookup'].values():
+            dist = simple_distance(zss_tree, cand_zss_tree)
+            if dist < min_dist:
+                ans = index
+        return ans
+            
 
 
 
@@ -352,7 +364,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
         cur = node_map[n]
         if rxn_graph.nodes[cur]['depth'] <= 2:
             mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
-            assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
+            # assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
             logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
         else:
             paths = []
@@ -377,8 +389,11 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
             if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
                 exist = False
             else:
-                path = sk.tree.nodes[pred]['path']     
-                exist = os.path.exists(path)
+                if 'path' in sk.tree.nodes[pred]:
+                    path = sk.tree.nodes[pred]['path']     
+                    exist = os.path.exists(path)
+                else:
+                    exist = False
         else:
             exist = False
         failed = False

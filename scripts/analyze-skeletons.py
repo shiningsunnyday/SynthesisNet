@@ -102,7 +102,8 @@ if __name__ == "__main__":
         pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))    
     if args.visualize_dir:
         os.makedirs(args.visualize_dir, exist_ok=True)
-        # count_bbs(args, skeletons)
+        count_bbs(args, skeletons)
+        breakpoint()
         # count_rxns(args, skeletons)
         vis_skeletons(args, skeletons)
         count_skeletons(args, skeletons)

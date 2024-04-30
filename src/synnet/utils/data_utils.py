@@ -1978,13 +1978,19 @@ class Skeleton:
                 elif action == 3:
                     break            
         else:
-            assert (whole_tree is not None)
-            self.zss_tree = zss_tree
+            assert (whole_tree is not None)            
 
         postorder = []    
         self.do_postorder(whole_tree, next(v for v, d in whole_tree.in_degree() if d == 0), postorder)
         whole_tree = nx.relabel_nodes(whole_tree, dict(zip(postorder, range(len(whole_tree)))))
-        self.tree = whole_tree        
+        self.tree = whole_tree  
+
+        zss_nodes = [zss.Node(i) for i in range(whole_tree.number_of_nodes())]
+        for src, dst in whole_tree.edges:
+            assert src > dst
+            zss_nodes[src].addkid(zss_nodes[dst])
+        self.zss_tree = zss_nodes[-1]        
+
         self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)            
         assert self.tree_root == len(whole_tree)-1
         self.tree_edges = np.array(self.tree.edges).T   
