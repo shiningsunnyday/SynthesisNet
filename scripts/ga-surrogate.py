@@ -7,6 +7,7 @@ from synnet.utils.data_utils import binary_tree_to_skeleton
 import pickle
 from functools import partial
 from tqdm import tqdm
+import numpy as np
 import logging
 from tdc import Oracle
 import time
@@ -116,6 +117,7 @@ def test_surrogate(ncpu, sender_filename, receiver_filename, batch):
                 editable = lock(fr)
                 if editable:
                     res = []
+                    res_idxes = []
                     lines = fr.readlines()                    
                     seen_idxes = set()                      
                     for idx, line in enumerate(lines):
@@ -125,8 +127,10 @@ def test_surrogate(ncpu, sender_filename, receiver_filename, batch):
                             continue
                         seen_idxes.add(key)
                         best_smi = splitted_line[1].split(DELIM)[1]                        
+                        res_idxes.append(int(splitted_line[0]))
                         res.append(best_smi)
                     if len(res) == len(batch):
+                        res = [res[idx] for idx in np.argsort(res_idxes)]
                         res = [(oracle(smi), smi) for smi in res]
                         break
                 fcntl.flock(fr, fcntl.LOCK_UN)
