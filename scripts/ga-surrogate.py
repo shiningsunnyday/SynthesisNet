@@ -116,18 +116,18 @@ def test_surrogate(ncpu, sender_filename, receiver_filename, batch):
                 editable = lock(fr)
                 if editable:
                     res = []
-                    lines = fr.readlines()
-                    if len(lines) >= num_samples:  
-                        seen_idxes = set()                      
-                        for idx, line in enumerate(lines):
-                            splitted_line = line.strip().split()
-                            key = splitted_line[0]
-                            if key in seen_idxes:
-                                continue
-                            seen_idxes.add(key)
-                            best_smi = splitted_line[1].split(DELIM)[1]
-                            score = oracle(best_smi)
-                            res.append((score, best_smi))
+                    lines = fr.readlines()                    
+                    seen_idxes = set()                      
+                    for idx, line in enumerate(lines):
+                        splitted_line = line.strip().split()
+                        key = splitted_line[0]
+                        if key in seen_idxes:
+                            continue
+                        seen_idxes.add(key)
+                        best_smi = splitted_line[1].split(DELIM)[1]                        
+                        res.append(best_smi)
+                    if len(res) == len(batch):
+                        res = [(oracle(smi), smi) for smi in res]
                         break
                 fcntl.flock(fr, fcntl.LOCK_UN)
             time.sleep(1)
