@@ -10,8 +10,16 @@ from tdc import Oracle
 
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
-from synnet.utils.data_utils import binary_tree_to_skeleton
-from synnet.utils.reconstruct_utils import *
+from synnet.utils.data_utils import Skeleton, SkeletonSet, binary_tree_to_skeleton
+from synnet.utils.reconstruct_utils import (
+    decode,
+    load_data,
+    lookup_skeleton_key,
+    reconstruct,
+    serialize_string,
+    set_models,
+    test_skeletons,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +80,31 @@ class OptimizeGAConfig(GeneticSearchConfig):
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
 
 
+def dock_drd3(smi):
+    # define the oracle function from the TDC
+    _drd3 = Oracle(name="drd3_docking")
+
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_drd3(smi)
+        except:
+            return 0.0
+
+
+def dock_7l11(smi):
+    # define the oracle function from the TDC
+    _7l11 = Oracle(name="7l11_docking")
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_7l11(smi)
+        except:
+            return 0.0
+
+
 def fetch_oracle(objective):
     if objective == "qed":
         # define the oracle function from the TDC
@@ -114,10 +147,13 @@ def reconstruct(ind):
     return best_smi
 
 
-def test_surrogate(batch, oracle, config: OptimizeGAConfig):
+def test_surrogate(batch, config: OptimizeGAConfig):
+    oracle = fetch_oracle(config.objective)
+
     with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
         recons = exe.map(reconstruct, batch, chunksize=config.chunksize)
-        for smi, ind in tqdm.tqdm(zip(recons, batch), total=len(batch), desc="Evaluating"):
+        pbar = tqdm.tqdm(zip(recons, batch), total=len(batch), desc="Evaluating", leave=False)
+        for smi, ind in pbar:
             ind.smi = smi
             ind.fitness = oracle(smi)
 
@@ -141,8 +177,7 @@ def main(config: OptimizeGAConfig):
     print(f"SKELETON INDEX: {SKELETON_INDEX}")
     logger.info(f"SKELETON INDEX: {SKELETON_INDEX}")
 
-    oracle = fetch_oracle(config.objective)
-    fn = functools.partial(test_surrogate, oracle=oracle, config=config)
+    fn = functools.partial(test_surrogate, config=config)
     search = GeneticSearch(config)
     search.optimize(fn)
 
