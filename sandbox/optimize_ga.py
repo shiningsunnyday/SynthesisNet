@@ -101,7 +101,7 @@ def reconstruct(ind):
     tree_key = serialize_string(sk.tree, sk.tree_root)
     index = lookup_skeleton_key(sk.zss_tree, tree_key)
 
-    st0 = globals()["skeleton_set"][index]
+    st0 = globals()["skeleton_list"][index]
     sk0 = Skeleton(st0, index)
 
     ans = 0.0
@@ -133,8 +133,8 @@ def main(config: OptimizeGAConfig):
     set_models(config, logger)
     load_data(config, logger)
     with open(config.skeleton_set_file, "rb") as f:
-        skeletons = list(pickle.load(f))
-        globals()["skeleton_set"] = skeletons
+        skeletons = pickle.load(f)
+        globals()["skeleton_list"] = list(skeletons)  # FIXME: (AL) why does this work?
     skeleton_set = SkeletonSet().load_skeletons(skeletons)
     SKELETON_INDEX = test_skeletons(config, skeleton_set)
 
