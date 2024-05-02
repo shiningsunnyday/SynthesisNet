@@ -1,0 +1,21 @@
+{
+  "seed": 10,
+  "fp_bits": 4096,
+  "bt_nodes_min": 5,
+  "bt_nodes_max": 10,
+  "generations": 200,
+  "population_size": 128,
+  "offspring_size": 512,
+  "fp_mutate_prob": 0.5,
+  "fp_mutate_bits": 24,
+  "bt_mutate_prob": 0.5,
+  "bt_mutate_edits": 2,
+  "early_stop_delta": 0.01,
+  "early_stop_warmup": 30,
+  "early_stop_patience": 10,
+  "wandb": false,
+  "wandb_project": "syntreenet_ga",
+  "wandb_dir": null,
+  "parent_temp_max": 20,
+  "parent_temp_min": 1
+}
