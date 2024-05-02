@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import List, Literal, Optional
 
 import pydantic_cli
+import torch
 import tqdm
 from tdc import Oracle
 
@@ -149,6 +150,9 @@ def get_smiles(ind):
 
 def test_surrogate(batch, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
+
+    # Needed to avoid deadlock
+    torch.set_num_threads(1)
 
     with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
         smiles = exe.map(get_smiles, batch, chunksize=config.chunksize)
