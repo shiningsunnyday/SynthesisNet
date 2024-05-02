@@ -8,4 +8,5 @@ python sandbox/optimize_ga.py \
     --hash-dir /ssd/msun415/hash_table-bb=1000-prods=2_new/ \
     --top-bbs-file /ssd/msun415/bblocks-top-1000.txt \
     --objective drd2 \
-    --out-dir $HOME/SynTreeNet/results/viz/top_1000
+    --out-dir $HOME/SynTreeNet/results/viz/top_1000 \
+    --enable_wandb
