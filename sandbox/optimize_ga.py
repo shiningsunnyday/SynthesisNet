@@ -8,7 +8,8 @@ import pydantic_cli
 import tqdm
 from tdc import Oracle
 
-from ga import GeneticSearch, GeneticSearchConfig
+from ga.config import GeneticSearchConfig
+from ga.search import GeneticSearch
 from synnet.utils.data_utils import binary_tree_to_skeleton
 from synnet.utils.reconstruct_utils import *
 
