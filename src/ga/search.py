@@ -1,22 +1,22 @@
 import collections
+import json
+import os
 import random
 from typing import Callable, Dict, List, Tuple
 
+import networkx as nx
 import numpy as np
 import pytorch_lightning as pl
 import scipy
 import torch
 import tqdm
 import wandb
-import json
-from multiprocessing.pool import ThreadPool
-import os
-import networkx as nx
+
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
+from synnet.encoding.fingerprints import mol_fp
 from synnet.utils.analysis_utils import serialize_string
 from synnet.utils.data_utils import binary_tree_to_skeleton
-from synnet.encoding.fingerprints import mol_fp
 
 Population = List[Individual]
 
@@ -33,9 +33,10 @@ class GeneticSearch:
             population = []
             for indv in indvs:
                 bt_data = indv['bt']
-                bt = nx.tree_graph(bt_data) # only supports node-level attributes
-                bt = nx.relabel_nodes(bt, dict(zip(list(bt.nodes), [utils.random_name() for _ in bt])))
-                for n in bt: # move child node attribute 'left' to edge attribute
+                bt = nx.tree_graph(bt_data)  # only supports node-level attributes
+                bt = nx.relabel_nodes(bt,
+                                      dict(zip(list(bt.nodes), [utils.random_name() for _ in bt])))
+                for n in bt:  # move child node attribute 'left' to edge attribute
                     preds = list(bt.predecessors(n))
                     if len(preds) == 1:
                         pred = preds[0]
@@ -45,14 +46,14 @@ class GeneticSearch:
                         bt.edges[(pred, n)]['left'] = True
                     else:
                         assert 'left' in bt.nodes[n]
-                        bt.edges[(pred, n)]['left'] = bt.nodes[n]['left']                        
+                        bt.edges[(pred, n)]['left'] = bt.nodes[n]['left']
                 if 'smi' in indv:
                     fp = mol_fp(indv['smi'], _nBits=self.config.fp_bits)
                     fp = np.array(fp, dtype=bool)
                 else:
                     fp = indv['fp']
                     fp = np.array(fp, dtype=bool)
-                population.append(Individual(fp=fp, bt=bt))            
+                population.append(Individual(fp=fp, bt=bt))
         else:
             cfg = self.config
             population = []
@@ -171,7 +172,6 @@ class GeneticSearch:
                     utils.random_remove_leaf(bt)
 
         return Individual(fp=fp, bt=bt)
-    
 
     def save(self, population):
         out_path = self.config.out_path
@@ -186,8 +186,6 @@ class GeneticSearch:
                     'score': indv.fitness
                 })
             json.dump(dics, open(out_path, 'w+'))
-
-
 
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -237,7 +235,6 @@ class GeneticSearch:
 
             # Scoring
             metrics = self.evaluate(population)
-            print([x.fitness for x in population])
             print(metrics)
 
             # Logging
