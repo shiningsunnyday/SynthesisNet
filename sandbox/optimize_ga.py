@@ -129,7 +129,7 @@ def fetch_oracle(objective):
         raise ValueError("Objective function not implemented")
 
 
-def reconstruct(ind):
+def get_smiles(ind):
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
     index = lookup_skeleton_key(sk.zss_tree, tree_key)
@@ -151,8 +151,8 @@ def test_surrogate(batch, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
     with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
-        recons = exe.map(reconstruct, batch, chunksize=config.chunksize)
-        pbar = tqdm.tqdm(zip(recons, batch), total=len(batch), desc="Evaluating", leave=False)
+        smiles = exe.map(get_smiles, batch, chunksize=config.chunksize)
+        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
         for smi, ind in pbar:
             ind.smi = smi
             ind.fitness = oracle(smi)
