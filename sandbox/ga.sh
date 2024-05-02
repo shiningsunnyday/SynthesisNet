@@ -9,4 +9,5 @@ python sandbox/optimize_ga.py \
     --top_bbs_file /ssd/msun415/bblocks-top-1000.txt \
     --objective drd2 \
     --out_dir $HOME/SynTreeNet/results/viz/top_1000 \
-    --enable_wandb
+    --enable_wandb \
+    --num_workers=10
