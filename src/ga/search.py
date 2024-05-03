@@ -112,13 +112,22 @@ class GeneticSearch:
         population: Population,
         epoch: int,
     ) -> List[Tuple[Individual, Individual]]:
-        population = sorted(population, key=(lambda x: x.fitness))
+        population = sorted(population, key=(lambda x: x.fitness))  # ascending
         indices = np.arange(len(population))
 
         cfg = self.config
-        t = epoch / cfg.generations
-        temp = (1 - t) * cfg.parent_temp_max + t * cfg.parent_temp_min  # LERP
-        p = scipy.special.softmax(indices / temp)
+        if cfg.parent_schedule == "anneal":
+            t = epoch / cfg.generations
+            temp = (1 - t) * cfg.parent_temp_max + t * cfg.parent_temp_min  # LERP
+            p = scipy.special.softmax(indices / temp)
+        elif cfg.parent_schedule == "synnet":
+            p = indices + 10
+            if epoch < 0.8 * cfg.generations:
+                p = p / np.sum(p)
+            else:
+                p = scipy.special.softmax(p)
+        else:
+            raise NotImplementedError()
 
         couples = []
         for _ in range(cfg.offspring_size):
