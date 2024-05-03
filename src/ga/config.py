@@ -24,6 +24,9 @@ class GeneticSearchConfig(pydantic.BaseModel):
     population_size: int = 128
     offspring_size: int = 512
 
+    freeze_fp: bool = False
+    freeze_bt: bool = False
+
     # Crossover
     parent_schedule: Literal["anneal", "synnet"] = "synnet"
     parent_temp_max = 20

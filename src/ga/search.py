@@ -143,25 +143,31 @@ class GeneticSearch:
         cfg = self.config
 
         # fp: random bit swap
-        n = cfg.fp_bits
-        k = scipy.stats.truncnorm.rvs(
-            a=(0.2 * n), b=(0.8 * n),
-            loc=(n / 2),
-            scale=(n / 10),
-            size=1,
-        )
-        k = int(np.round(k))
-        mask = utils.random_bitmask(cfg.fp_bits, k=k)
-        fp = np.where(mask, parents[0].fp, parents[1].fp)
+        if not cfg.freeze_fp:
+            n = cfg.fp_bits
+            k = scipy.stats.truncnorm.rvs(
+                a=(0.2 * n), b=(0.8 * n),
+                loc=(n / 2),
+                scale=(n / 10),
+                size=1,
+            )
+            k = int(np.round(k))
+            mask = utils.random_bitmask(cfg.fp_bits, k=k)
+            fp = np.where(mask, parents[0].fp, parents[1].fp)
+        else:
+            fp = parents[0].fp
 
         # bt: random subtree swap
-        trees = [parents[0].bt, parents[1].bt]
-        random.shuffle(trees)
-        bt = utils.random_graft(
-            *trees,
-            min_nodes=cfg.bt_nodes_min,
-            max_nodes=cfg.bt_nodes_max,
-        )
+        if not cfg.freeze_bt:
+            trees = [parents[0].bt, parents[1].bt]
+            random.shuffle(trees)
+            bt = utils.random_graft(
+                *trees,
+                min_nodes=cfg.bt_nodes_min,
+                max_nodes=cfg.bt_nodes_max,
+            )
+        else:
+            bt = parents[0].bt
 
         return Individual(fp=fp, bt=bt)
 
@@ -170,13 +176,13 @@ class GeneticSearch:
 
         # fp: random bit flip
         fp = ind.fp
-        if utils.random_boolean(cfg.fp_mutate_prob):
+        if (not cfg.freeze_fp) and utils.random_boolean(cfg.fp_mutate_prob):
             mask = utils.random_bitmask(cfg.fp_bits, k=cfg.fp_mutate_bits)
             fp = np.where(mask, ~fp, fp)
 
         # bt: random add or delete nodes
         bt = ind.bt
-        if utils.random_boolean(cfg.bt_mutate_prob):
+        if (not cfg.freeze_bt) and utils.random_boolean(cfg.bt_mutate_prob):
             bt = bt.copy()
             for _ in range(cfg.bt_mutate_edits):
                 if bt.number_of_nodes() == cfg.bt_nodes_max:
