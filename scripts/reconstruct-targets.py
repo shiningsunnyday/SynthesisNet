@@ -57,13 +57,11 @@ def get_args():
     parser.add_argument(
         "--skeleton-set-file",
         type=str,
-        required=True,
         help="Input file for the ground-truth skeletons to lookup target smiles in",
     )                
     parser.add_argument(
         "--hash-dir",
-        default="",
-        required=True
+        default=""
     )
     parser.add_argument(
         "--out-dir"        
@@ -71,9 +69,8 @@ def get_args():
     # Parameters
     parser.add_argument(
         "--data",
-        type=str,
-        default="test",
-        help="Choose from ['train', 'valid', 'test', 'chembl'] or provide a file with one SMILES per line.",
+        type=str,        
+        help="Path to list of SMILES"
     )
     parser.add_argument("--top-bbs-file", help='if given, consider only these bbs')
     parser.add_argument("--top-k", default=1, type=int)
@@ -114,41 +111,60 @@ def main(args):
     else:
         TOP_BBS = BuildingBlockFileHandler().load(args.building_blocks_file)        
 
-    # Load skeleton set
-    sk_set = None     
     skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
     skeleton_set = SkeletonSet().load_skeletons(skeletons)
     syntree_set_all = [st for v in skeletons.values() for st in v]    
-    syntree_set = []
-    SKELETON_INDEX = test_skeletons(args, skeleton_set)
-    print(f"SKELETON INDEX: {SKELETON_INDEX}")
-    if args.one_per_class:
-        rep = set()
-    for syntree in syntree_set_all:        
-        index = skeleton_set.lookup[syntree.root.smiles][0].index    
-        if len(skeleton_set.lookup[syntree.root.smiles]) == 1: # one skeleton per smiles                
-            if index in SKELETON_INDEX:
-                if args.one_per_class:
-                    if index not in rep:
-                        rep.add(index)
-                        syntree_set.append(syntree)
-                else:
-                    syntree_set.append(syntree)       
-    random.shuffle(syntree_set)
-    # syntree_set = syntree_set[:10] # debug
-    targets = [syntree.root.smiles for syntree in syntree_set]
-    lookup = {}
-    # Use the gold skeleton or predict the skeleton
+    SKELETON_INDEX = test_skeletons(args, skeleton_set)        
+
+    # Load data
+    if args.data: 
+        assert os.path.exists(args.data)
+        if 'chembl' in args.data:
+            df = pd.read_csv(args.data, sep='\t')
+            col_name = 'canonical_smiles'
+            if col_name in df:
+                return df[col_name]
+            else:
+                breakpoint()
+        else:
+            raise NotImplementedError           
+        random.shuffle(targets)
+        targets = targets[:1000]
+    else:
+        syntree_set = []        
+        print(f"SKELETON INDEX: {SKELETON_INDEX}")
+        if args.one_per_class:
+            rep = set()
+        for syntree in syntree_set_all:        
+            index = skeleton_set.lookup[syntree.root.smiles][0].index    
+            if len(skeleton_set.lookup[syntree.root.smiles]) == 1: # one skeleton per smiles                
+                if index in SKELETON_INDEX:
+                    if args.one_per_class:
+                        if index not in rep:
+                            rep.add(index)
+                            syntree_set.append(syntree)
+                    else:
+                        syntree_set.append(syntree)       
+        random.shuffle(syntree_set)
+        targets = [syntree.root.smiles for syntree in syntree_set]                
+
+    lookup = {}    
     for i, target in tqdm(enumerate(targets), "initializing skeletons"):
-        sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)             
-        smile_set = [c.smiles for c in syntree_set[i].chemicals]
-        if len(set(smile_set)) != len(smile_set):
-            continue
-        good = True     
-        for n in sk.tree:
-            if sk.leaves[n]:
-                if sk.tree.nodes[n]['smiles'] not in TOP_BBS:
-                    good = False
+        if args.data:        
+            assert args.ckpt_recognizer
+            good = True
+        else:
+            # Use the gold skeleton or predict the skeleton
+            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)             
+            smile_set = [c.smiles for c in syntree_set[i].chemicals]
+            if len(set(smile_set)) != len(smile_set):
+                continue
+            good = True     
+            for n in sk.tree:
+                if sk.leaves[n]:
+                    if sk.tree.nodes[n]['smiles'] not in TOP_BBS:
+                        good = False            
+
         if good:
             if args.ckpt_recognizer:
                 pred_index = predict_skeleton(target)
@@ -157,8 +173,7 @@ def main(args):
             else:
                 lookup[target] = sk
     targets = list(lookup)
-    print(f"{len(targets)}/{len(syntree_set_all)} syntrees")
-
+    print(f"{len(targets)} targets")
     
 
     # Decode queries, i.e. the target molecules.
@@ -203,17 +218,14 @@ def main(args):
                     fcntl.flock(fr, fcntl.LOCK_UN)
                 time.sleep(1)
             assert len(target_batch) == len(status)
-            print("Batch {batch} mean score", sum([float(score) for _, score in status])/len(status))
+            print(f"Batch {batch} mean score", sum([float(score) for _, score in status])/len(status))
         else:
             target_batch = [(deepcopy(lookup[smi]), smi) for smi in target_batch]
             if args.ncpu == 1:
                 sks_batch = []
                 for arg in tqdm(target_batch):                        
-                    try:
-                        sks = decode(*arg)
-                        sks_batch.append(sks)              
-                    except:
-                        sks_batch.append(None)               
+                    sks = decode(*arg)
+                    sks_batch.append(sks)                                      
             else:
                 with ThreadPool(args.ncpu) as p:
                     sks_batch = p.starmap(decode, tqdm(target_batch))        

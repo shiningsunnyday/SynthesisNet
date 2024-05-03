@@ -107,6 +107,8 @@ def decode(sk, smi):
         skviz = None
     if 'bblock_inds' in globals():
         bblock_inds = globals()['bblock_inds']
+    else:
+        bblock_inds = None
     # print(f"begin decoding {smi}")
     if 'rxn_models' in globals():
         rxn_gnn = rxn_models[sk.index]
@@ -267,6 +269,8 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
             mask_imposs[i] = True         
     if 'rxn' not in args.filter_only:
         return mask_imposs, None
+    else:
+        assert args.hash_dir
     rxn_imposs = deepcopy(mask_imposs)    
     attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
     # if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
@@ -358,7 +362,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
         if yes, find LCA (MAX_DEPTH from root), then use the subtree to constrain possibilities
     else
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
-    """            
+    """         
     rxn_graph, node_map, _ = sk.rxn_graph()    
     if sk.rxns[n]:  
         cur = node_map[n]
@@ -486,7 +490,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
         sks = [sk]    
     else:
         raise NotImplementedError    
-    final_sks = []    
+    final_sks = [] 
     while len(sks):
         sk = sks.pop(-1)
         if isinstance(sk, tuple):
@@ -672,7 +676,7 @@ def predict_skeleton(smiles):
 
 
 # For reconstruct without true skeleton
-def reconstruct(sk, smi, return_smi=False): 
+def reconstruct(sk, smi): 
     rxns = globals()['rxns']
     sk.reconstruct(rxns)
     smiles = []
@@ -680,17 +684,14 @@ def reconstruct(sk, smi, return_smi=False):
         if 'smiles' in sk.tree.nodes[n]:
             if sk.tree.nodes[n]['smiles']:
                 smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
-    if return_smi:
-        assert isinstance(smi, np.ndarray)
+    if isinstance(smi, np.ndarray):
         sims = tanimoto_similarity(smi, smiles)
-        correct = max(sims)                    
-        best_smi = smiles[np.argmax(sims)]
-        return correct, best_smi
     else:
         smi2 = Chem.CanonSmiles(smi)
         sims = tanimoto_similarity(mol_fp(smi2, 2, 4096), smiles)
-        correct = max(sims)            
-        return correct
+    correct = max(sims)                    
+    best_smi = smiles[np.argmax(sims)]
+    return correct, best_smi
 
 
 

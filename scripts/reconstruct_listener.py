@@ -45,13 +45,11 @@ def get_args():
     parser.add_argument(
         "--skeleton-set-file",
         type=str,
-        required=True,
         help="Input file for the ground-truth skeletons to lookup target smiles in",
     )                
     parser.add_argument(
         "--hash-dir",
-        default="",
-        required=True
+        default=""
     )
     parser.add_argument(
         "--out-dir"        
@@ -135,11 +133,11 @@ def main(proc_id, filename, output_filename):
         ans = 0.
         best_smi = ''
         for sk in sks:
-            score, smi = reconstruct(sk, smiles, return_smi=True)
+            score, smi = reconstruct(sk, smiles)
             if score > ans:
                 ans = score
-                best_smi = smi
-
+                best_smi = smi                
+    
         res = DELIM.join([selected_mol[1].split(DELIM)[0], best_smi, str(index)])
         while(True):
             with open(output_filename, 'a') as f:
