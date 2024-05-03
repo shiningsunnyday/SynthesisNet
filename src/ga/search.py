@@ -92,6 +92,10 @@ class GeneticSearch:
             distances.append(d)
         metrics["diversity"] = np.mean(distances).item()
 
+        # Uniqueness
+        unique = set(ind.smiles for ind in population)
+        metrics["unique"] = len(unique) / len(population)
+
         return metrics
 
     def cull(self, population: Population) -> Population:
