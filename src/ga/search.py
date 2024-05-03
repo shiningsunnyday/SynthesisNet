@@ -245,7 +245,7 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                wandb.log({"generation": epoch, **metrics}, step=epoch)
+                wandb.log({"generation": epoch, **metrics}, step=epoch, commit=True)
             if cfg.checkpoint_path is not None:
                 self.checkpoint(cfg.checkpoint_path, population)
 
