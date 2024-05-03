@@ -5,8 +5,6 @@ from typing import Dict
 import networkx as nx
 import numpy as np
 
-from synnet.utils.data_utils import Skeleton
-
 
 def random_boolean(p: float) -> bool:
     return np.random.random() < p

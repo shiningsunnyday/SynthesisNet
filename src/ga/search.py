@@ -1,4 +1,5 @@
 import collections
+import itertools
 import json
 import random
 from typing import Callable, Dict, List, Tuple
@@ -13,7 +14,8 @@ import wandb
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
-from synnet.encoding.fingerprints import mol_fp
+from synnet.encoding.distances import _tanimoto_similarity
+from synnet.encoding.fingerprints import fp_2048, mol_fp
 from synnet.utils.analysis_utils import serialize_string
 from synnet.utils.data_utils import binary_tree_to_skeleton
 
@@ -74,12 +76,21 @@ class GeneticSearch:
         scores = [ind.fitness for ind in population]
         scores.sort(reverse=True)
 
+        # Fitness
         metrics = {
             "scores/mean": np.mean(scores).item(),
             "scores/stdev": np.std(scores).item(),
         }
         for k in [1, 10, 100]:
             metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
+
+        # Diversity
+        distances = []
+        fps = [fp_2048(ind.smiles) for ind in population]
+        for a, b in itertools.combinations(fps, r=2):
+            d = 1 - _tanimoto_similarity(a, b)
+            distances.append(d)
+        metrics["diversity"] = np.mean(distances).item()
 
         return metrics
 
