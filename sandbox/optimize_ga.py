@@ -152,13 +152,15 @@ def test_surrogate(batch, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
     # Needed to avoid deadlock
+    # Reference:
+    #   https://github.com/pytorch/pytorch/issues/17199
     torch.set_num_threads(1)
 
     with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
         smiles = exe.map(get_smiles, batch, chunksize=config.chunksize)
         pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
         for smi, ind in pbar:
-            ind.smi = smi
+            ind.smiles = smi
             ind.fitness = oracle(smi)
 
 

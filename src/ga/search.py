@@ -1,6 +1,5 @@
 import collections
 import json
-import os
 import random
 from typing import Callable, Dict, List, Tuple
 
@@ -26,42 +25,43 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def initialize(self) -> Population:
-        path = self.config.init_path
-        if path is not None and os.path.exists(path):
-            indvs = json.load(open(path))
-            population = []
-            for indv in indvs:
-                bt_data = indv['bt']
-                bt = nx.tree_graph(bt_data)  # only supports node-level attributes
-                bt = nx.relabel_nodes(bt,
-                                      dict(zip(list(bt.nodes), [utils.random_name() for _ in bt])))
-                for n in bt:  # move child node attribute 'left' to edge attribute
-                    preds = list(bt.predecessors(n))
-                    if len(preds) == 1:
-                        pred = preds[0]
-                    else:
-                        continue
-                    if list(bt[pred]) == 1:
-                        bt.edges[(pred, n)]['left'] = True
-                    else:
-                        assert 'left' in bt.nodes[n]
-                        bt.edges[(pred, n)]['left'] = bt.nodes[n]['left']
-                if 'smi' in indv:
-                    fp = mol_fp(indv['smi'], _nBits=self.config.fp_bits)
-                    fp = np.array(fp, dtype=bool)
+    def initialize_random(self) -> Population:
+        cfg = self.config
+        population = []
+        for _ in range(cfg.population_size):
+            fp = np.random.choice([True, False], size=cfg.fp_bits)
+            bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
+            bt = utils.random_binary_tree(bt_size.item())
+            population.append(Individual(fp=fp, bt=bt))
+        return population
+
+    def initialize_load(self, path: str) -> Population:
+        raise NotImplementedError("(AL) I'm pretty sure there's a bug here")
+        with open(path, "r") as f:
+            state = json.load(f)
+
+        population = []
+        for ind in state:
+            bt = nx.tree_graph(ind["bt"])  # only supports node-level attributes
+            bt = nx.relabel_nodes(bt, {k: utils.random_name() for k in list(bt.nodes)})
+            for n in bt:  # move child node attribute "left" to edge attribute
+                preds = list(bt.predecessors(n))
+                if len(preds) == 1:
+                    pred = preds[0]
                 else:
-                    fp = indv['fp']
-                    fp = np.array(fp, dtype=bool)
-                population.append(Individual(fp=fp, bt=bt))
-        else:
-            cfg = self.config
-            population = []
-            for _ in range(cfg.population_size):
-                fp = np.random.choice([True, False], size=cfg.fp_bits)
-                bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
-                bt = utils.random_binary_tree(bt_size.item())
-                population.append(Individual(fp=fp, bt=bt))
+                    continue
+                if list(bt[pred]) == 1:   # FIXME: look into this
+                    bt.edges[(pred, n)]["left"] = True
+                else:
+                    assert "left" in bt.nodes[n]
+                    bt.edges[(pred, n)]["left"] = bt.nodes[n]["left"]
+            if "smi" in ind:
+                fp = mol_fp(ind["smi"], _nBits=self.config.fp_bits)
+                fp = np.array(fp, dtype=bool)
+            else:
+                fp = ind["fp"]
+                fp = np.array(fp, dtype=bool)
+            population.append(Individual(fp=fp, bt=bt))
         return population
 
     def validate(self, population: Population):
@@ -88,8 +88,8 @@ class GeneticSearch:
         for indv in population:
             tree = indv.bt
             root = next(v for v, d in tree.in_degree() if d == 0)
-            fp_str = ''.join(list(map(str, map(int, indv.fp))))
-            serial = serialize_string(tree, root) + ' ' + fp_str
+            fp_str = "".join(list(map(str, map(int, indv.fp))))
+            serial = serialize_string(tree, root) + " " + fp_str
             serials.append(serial)
         _, inds = np.unique(serials, return_index=True)
         population = [population[ind] for ind in inds]
@@ -130,11 +130,6 @@ class GeneticSearch:
         mask = utils.random_bitmask(cfg.fp_bits, k=k)
         fp = np.where(mask, parents[0].fp, parents[1].fp)
 
-        # if random.random() < 0.5:
-        #     fp = parents[0].fp
-        # else:
-        #     fp = parents[1].fp
-
         # bt: random subtree swap
         trees = [parents[0].bt, parents[1].bt]
         random.shuffle(trees)
@@ -173,19 +168,17 @@ class GeneticSearch:
 
         return Individual(fp=fp, bt=bt)
 
-    def save(self, population):
-        out_path = self.config.out_path
-        if out_path is not None:
-            dics = []
-            for indv in population:
-                tree = indv.bt
-                sk = binary_tree_to_skeleton(tree)
-                dics.append({
-                    'smi': indv.smi,
-                    'bt': nx.tree_data(sk.tree, sk.tree_root),
-                    'score': indv.fitness
-                })
-            json.dump(dics, open(out_path, 'w+'))
+    def checkpoint(self, path: str, population: Population) -> None:
+        ckpt = []
+        for ind in population:
+            sk = binary_tree_to_skeleton(ind.bt)
+            ckpt.append({
+                "smi": ind.smiles,
+                "bt": nx.tree_data(sk.tree, sk.tree_root),
+                "score": ind.fitness,
+            })
+        with open(path, "w+") as f:
+            json.dump(ckpt, f)
 
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -212,7 +205,10 @@ class GeneticSearch:
             )
 
         # Initialize population
-        population = self.initialize()
+        if cfg.initialize_path is None:
+            population = self.initialize_random()
+        else:
+            population = self.initialize_load(cfg.initialize_path)
 
         # Track some stats
         early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)
@@ -235,14 +231,12 @@ class GeneticSearch:
 
             # Scoring
             metrics = self.evaluate(population)
-            print(metrics)
 
             # Logging
             if cfg.wandb:
                 wandb.log({"generation": epoch, **metrics}, step=epoch)
-
-            # TODO: save skeletons (?)            
-            self.save(population)
+            if cfg.checkpoint_path is not None:
+                self.checkpoint(cfg.checkpoint_path, population)
 
             # Early-stopping
             early_stop_queue.append(metrics["scores/mean"])
