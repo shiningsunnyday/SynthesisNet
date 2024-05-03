@@ -46,9 +46,8 @@ def get_args():
         default='rset',
         help="What constitutes anchors"
     )
-    parser.add_argument(
-        "--gnn-datasets", type=int, nargs='+'
-    )
+    parser.add_argument("--gnn-datasets", type=int, nargs='+')
+    parser.add_argument("--max_depth", type=int, default=100)
     parser.add_argument("--predict_anchor", action='store_true')    
     parser.add_argument(
         "--determine_criteria",
@@ -57,6 +56,7 @@ def get_args():
                  'target_down', 
                  'rxn_target_down', 
                  'rxn_target_down_bb',
+                 'rxn_target_down_interm',
                  'rxn_frontier', 
                  'bb_frontier', 
                  'leaf_up_2',
@@ -69,6 +69,7 @@ def get_args():
             target_down: all predecessors present
             rxn_target_down: all non-rxns masked, reaction target down, predict rxns
             rxn_target_down_bb: all interms masked, reaction target down, predict rxns and bb's
+            rxn_target_down_interm: reaction target down, predict rxns, bb's and interms
             bfs_frontier: bfs frontier, expand from target only
             rxn_frontier: there exists rxn on bfs frontier, predict rxns
             bb_frontier: if there exists rxn on bfs frontier, predict rxns only; else predict all bfs frontier
@@ -158,7 +159,7 @@ def main():
         sk = Skeleton(st, index)
         rxn_graph, _, _ = sk.rxn_graph()
         max_depth = max([rxn_graph.nodes[n]['depth'] for n in rxn_graph])
-        if max_depth > 3:
+        if max_depth > args.max_depth:
             continue
         print(f"class {index} which is {kth_largest[index]+1}th most represented")
         sk.visualize(os.path.join(args.visualize_dir, f"{index}.png"))

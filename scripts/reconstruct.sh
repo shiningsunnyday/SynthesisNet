@@ -33,9 +33,9 @@ python scripts/reconstruct-targets.py \
     --test-correct-method reconstruct \
     --strategy topological \
     --ncpu $ncpu \
-    --batch-size $batch_size \
-    --sender-filename input_reconstruct.txt \
-    --receiver-filename output_reconstruct.txt
+    --batch-size $batch_size
+    # --sender-filename input_reconstruct.txt \
+    # --receiver-filename output_reconstruct.txt
 
 # python scripts/reconstruct-targets.py \
 #     --data data/assets/molecules/chembl_34_chemreps.txt \

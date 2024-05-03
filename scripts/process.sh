@@ -1,24 +1,45 @@
 # dataset=gnn_featurized_rxn_target_down_bb
-dataset=gnn_featurized_rxn_target_down_bb_postorder
-# for split in {'train','valid','test'}; do
-#     mkdir -p data/top_1000/${dataset}_${split}
+# dataset=gnn_featurized_rxn_target_down_interm_postorder
+dataset=gnn_featurized_leaves_up_postorder
+max_depth=3
+# for split in {'valid','test'}; do
+#     mkdir -p data/${dataset}_max_depth=${max_depth}_${split}
 #     python scripts/process-for-gnn.py \
-#         --determine_criteria rxn_target_down_bb \
-#         --output-dir data/top_1000/${dataset}_${split} \
+#         --determine_criteria rxn_target_down_interm \
+#         --output-dir data/${dataset}_max_depth=${max_depth}_${split} \
 #         --anchor_type target \
-#         --visualize-dir results/viz/top_1000/ \
-#         --skeleton-file results/viz/top_1000/skeletons-top-1000-${split}.pkl \
+#         --visualize-dir results/viz/ \
+#         --skeleton-file results/viz/skeletons-${split}.pkl \
+#         --max_depth 3 \
 #         --ncpu 100 \
 #         --num-trees-per-batch 5000
 # done;
 
 for split in {'train','valid','test'}; do
-    mkdir -p data/top_1000/${dataset}_split_${split}
+    # mkdir -p data/${dataset}_max_depth=${max_depth}_${split}
+    # python scripts/process-for-gnn.py \
+    #     --determine_criteria leaves_up \
+    #     --output-dir data/${dataset}_max_depth=${max_depth}_${split} \
+    #     --anchor_type target \
+    #     --visualize-dir results/viz/ \
+    #     --skeleton-file results/viz/skeletons-${split}.pkl \
+    #     --max_depth 3 \
+    #     --ncpu 100 \
+    #     --num-trees-per-batch 5000
+    mkdir -p data/${dataset}_max_depth=${max_depth}_split_${split}
     python scripts/split_data.py \
-        --in-dir data/top_1000/${dataset}_${split}/ \
-        --out-dir data/top_1000/${dataset}_split_${split}/ \
+        --in-dir data/${dataset}_max_depth=${max_depth}_${split}/ \
+        --out-dir data/${dataset}_max_depth=${max_depth}_split_${split}/ \
         --partition_size 1
 done;
+
+# for split in {'train','valid'}; do
+#     mkdir -p data/${dataset}_max_depth=${max_depth}_split_${split}
+#     python scripts/split_data.py \
+#         --in-dir data/${dataset}_max_depth=${max_depth}_${split}/ \
+#         --out-dir data/${dataset}_max_depth=${max_depth}_split_${split}/ \
+#         --partition_size 1
+# done;
 
 
 # for split in {'valid','test'}; do

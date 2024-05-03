@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
 
-all_skeletons = pickle.load(open('/home/msun415/SynTreeNet/results/viz/top_1000/skeletons-top-1000.pkl','rb'))
+all_skeletons = pickle.load(open('/home/msun415/SynTreeNet/results/viz/skeletons.pkl','rb'))
 # keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
@@ -46,6 +46,7 @@ class PtrDataset(Dataset):
         self.sks = {}
         self.num_nodes = {}
         self.pe = pe
+        self.child = {}
         for ptr in ptrs:
             _, e, _ = ptr
             if e in self.edge_index:
@@ -66,6 +67,14 @@ class PtrDataset(Dataset):
             sk = Skeleton(list(all_skeletons)[dataset_index], dataset_index)
             sk.mask = [sk.tree_root]           
             self.sks[e] = sk
+
+            # positional encoding
+            left_or_right = np.zeros((len(sk.tree), 2))
+            for i in range(len(sk.tree)):
+                if 'child' not in sk.tree.nodes[i]:
+                    continue
+                left_or_right[i][int(sk.tree.nodes[i]['child'] == 'right')] = 1
+            self.child[e] = left_or_right
       
                     
     @staticmethod
@@ -124,7 +133,6 @@ class PtrDataset(Dataset):
         """
         :param d_model: dimension of the model
         :param length: length of positions
-        :param perm_mask: canonical order of nodes
         :return: length*d_model position matrix
         """        
         if d_model % 2 != 0:
@@ -153,24 +161,36 @@ class PtrDataset(Dataset):
         # TODO: Fix these hacky tricks
 
         # simulate scenario of retrosynthesis where interms aren't known        
-        X[np.nonzero(self.interms_map[e])[0], :2048] = 0        
-        X[np.nonzero(self.interms_map[e])[0], :2048] = 0
-        if self.pe == 'sin':         
+
+        # interm_indices = [ind for ind in self.interms_map[e] if self.interms_map[e][ind]]
+        # if X[interm_indices, :2048].sum().item() > 0:
+        #     breakpoint()
+        # X[interm_indices, :2048] = 0
+        # make sure 2048:4096 is consistent
+        X[:, 2048:4096] = X[self.sks[e].tree_root, 2048:4096]
+
+        if self.pe == 'sin':                    
             pe = self.positionalencoding1d(32, num_nodes) # add to target
             X = np.concatenate((X, pe.numpy()), axis=-1)
+        elif self.pe == 'one_hot':
+            pe = np.eye(num_nodes)
+            X = np.concatenate((X, pe), axis=-1)
+        elif self.pe == 'child':
+            pe = self.child[e]
+            X = np.concatenate((X, pe), axis=-1)
         y = sparse.load_npz(base+'_ys.npz').toarray()
         y = y.reshape(-1, num_nodes, y.shape[-1])[index]
-
         # mask out y all rxns except bottom-2        
         # y[self.sks[e].rxns] = 0.
         key_val = e.split('/')[-1].split('_')[0]+''.join(list(map(str, node_mask)  ))
         data = (
             torch.tensor(self.edge_index[e], dtype=torch.int64),
             np.array([key_val for _ in node_mask]), # index
-            torch.tensor(X, dtype=torch.float32), # 2048+91
+            torch.tensor(X, dtype=torch.float32), # 2048+2048+91
             torch.tensor(y, dtype=torch.float32),
+            torch.tensor(self.sks[e].leaves)
         )
-        return Data(edge_index=data[0], key=data[1], x=data[2], y=data[3])
+        return Data(edge_index=data[0], key=data[1], x=data[2], y=data[3], bb_mask=data[4])
     
     
     def __len__(self):
@@ -180,17 +200,12 @@ class PtrDataset(Dataset):
 
 def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
     used_is = []
-    i = 0
     train_dataset_ptrs = []
     val_dataset_ptrs = []
     test_dataset_ptrs = []    
     train_frac = ratio[0]/sum(ratio)
     val_frac = (ratio[0]+ratio[1])/sum(ratio)
-    while i < 100:
-        print(i)
-        if i not in include_is:
-            i += 1
-            continue
+    for i in include_is:
         # if i not in keys:
         #     i += 1
         #     continue
@@ -225,8 +240,7 @@ def gather_ptrs(input_dir, include_is=[], ratio=[8,1,1]):
                 test_dataset_ptrs.append((os.path.join(input_dir, f"{i}_{index}"), 
                 os.path.join(input_dir, f"{i}_edge_index.npy"), j))                
             index += 1     
-        used_is.append(str(i))
-        i += 1    
+        used_is.append(str(i))  
     return train_dataset_ptrs, val_dataset_ptrs, test_dataset_ptrs, used_is
 
 
@@ -385,10 +399,17 @@ def main(args):
         train_dataloader, valid_dataloader, _, used_is = load_lazy_dataloaders(args)
     else:
         train_dataloader, valid_dataloader, _, used_is = load_dataloaders(args)
+    input_dim = 2*2048+91
     if args.pe == 'sin':
-        input_dim = 2*2048+91+32
-    else:
-        input_dim = 2*2048+91
+        input_dim += 32
+    elif args.pe == 'child':
+        input_dim += 2
+    elif args.pe == 'one_hot':
+        assert len(args.gnn_datasets) == 1
+        index = args.gnn_datasets[0]
+        st = list(all_skeletons)[index]
+        num_nodes = len(st.reactions)+len(st.chemicals)
+        input_dim += num_nodes
     out_dim = 256+91
     # molembedder = _fetch_molembedder(args)
     gnn = GNN(

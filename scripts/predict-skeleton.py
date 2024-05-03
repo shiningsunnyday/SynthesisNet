@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 from synnet.data_generation.syntrees import MorganFingerprintEncoder
+from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.models.mlp import MLP
 from synnet.utils.data_utils import Skeleton
 import torch.nn as nn
@@ -21,6 +22,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from sklearn.model_selection import train_test_split
+from sklearn.manifold import TSNE
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +75,13 @@ def get_args():
         default=f"results/logs/recognizer/{time.time()}",
         help="Input file for the generated synthetic trees (*.json.gz)",
     )   
+    parser.add_argument(
+        "--ckpt",
+        help="If given, load ckpt for analysis"
+    )
     parser.add_argument("--datasets", type=int, nargs='+')    
     # Training args
-    parser.add_argument("--max_epochs", type=int, default=10)     
+    parser.add_argument("--max_epochs", type=int, default=3)     
     parser.add_argument("--nbits", type=int, default=2048)   
     parser.add_argument("--num_per_class", type=int, default=100)        
     parser.add_argument("--batch_size", type=int, default=32)    
@@ -83,6 +89,10 @@ def get_args():
     parser.add_argument("--hidden_dim", type=int, default=512) 
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--cuda', type=int, default=-1)
+    # Analysis args
+    parser.add_argument("--top_k", type=int, help="Number of skeleton classes to visualize", default=4)
+    parser.add_argument("--vis_class_criteria", help="Which skeletons to visualize", choices=['popularity', 'size_small', 'size_large'])
+    parser.add_argument("--max_vis_per_class", type=int, default=30)
     return parser.parse_args()
 
 
@@ -119,7 +129,7 @@ def main(args):
     nbits = args.nbits    
     num_per_class = args.num_per_class
     os.makedirs(os.path.join(args.work_dir, 'sks/'), exist_ok=True)
-    skeletons = {}
+    skeletons = {}    
     for index, k in enumerate(all_skeletons):
         if args.datasets and index not in args.datasets:
             continue
@@ -172,50 +182,118 @@ def main(args):
         pickle.dump(valid_dataset, open(os.path.join(args.work_dir, 'valid_dataset.pkl'), 'wb+'))
         json.dump(args.__dict__, open(config_path, 'w+'))
 
-    mlp = MLP(
-        input_dim=args.nbits,
-        output_dim=args.num_classes,
-        hidden_dim=args.hidden_dim,
-        num_layers=5,
-        dropout=0.5,
-        num_dropout_layers=1,
-        task="classification",
-        loss="cross_entropy",
-        valid_loss="multi_class_accuracy",
-        optimizer="adam",
-        learning_rate=1e-4,
-        val_freq=1,
-        ncpu=args.num_workers
-    )            
+    if args.ckpt:
+        mlp = load_mlp_from_ckpt(args.ckpt)
+    else:
+        mlp = MLP(
+            input_dim=args.nbits,
+            output_dim=args.num_classes,
+            hidden_dim=args.hidden_dim,
+            num_layers=5,
+            dropout=0.5,
+            num_dropout_layers=1,
+            task="classification",
+            loss="cross_entropy",
+            valid_loss="multi_class_accuracy",
+            optimizer="adam",
+            learning_rate=1e-4,
+            val_freq=1,
+            ncpu=args.num_workers
+        )      
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True)    
+        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)    
+        
+        save_dir = args.work_dir
+        tb_logger = pl_loggers.TensorBoardLogger(save_dir, name="")
+        csv_logger = pl_loggers.CSVLogger(save_dir, name="", version="")
+        tqdm_callback = TQDMProgressBar(refresh_rate=int(len(train_dataloader) * 0.05))
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True)    
-    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)    
-    
-    save_dir = args.work_dir
-    tb_logger = pl_loggers.TensorBoardLogger(save_dir, name="")
-    csv_logger = pl_loggers.CSVLogger(save_dir, name="", version="")
-    tqdm_callback = TQDMProgressBar(refresh_rate=int(len(train_dataloader) * 0.05))
+        checkpoint_callback = ModelCheckpoint(
+            monitor="val_loss",
+            dirpath=save_dir,
+            filename="ckpts.{epoch}-{val_loss:.2f}",
+            save_weights_only=False,
+        )  
+        if args.cuda > -1:
+            gpu_kwargs = {'accelerator': 'gpu'}
+            gpu_kwargs = {'devices': [args.cuda]}
+        else:        
+            gpu_kwargs = {'accelerator': 'cpu'}      
+        trainer = pl.Trainer(
+            max_epochs=args.max_epochs,
+            callbacks=[checkpoint_callback, tqdm_callback],
+            logger=[tb_logger, csv_logger],
+            **gpu_kwargs
+        )
+        logger.info(f"Start training")
+        trainer.fit(mlp, train_dataloader, valid_dataloader)
+        logger.info(f"Training completed.")    
 
-    checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
-        dirpath=save_dir,
-        filename="ckpts.{epoch}-{val_loss:.2f}",
-        save_weights_only=False,
-    )  
-    if args.cuda > -1:
-        gpu_kwargs = {'accelerator': 'gpu'}
-        gpu_kwargs = {'devices': [args.cuda]}
-    else:        
-        gpu_kwargs = {'accelerator': 'cpu'}      
-    trainer = pl.Trainer(
-        max_epochs=args.max_epochs,
-        callbacks=[checkpoint_callback, tqdm_callback],
-        logger=[tb_logger, csv_logger],
-        **gpu_kwargs
-    )
-    logger.info(f"Start training")
-    trainer.fit(mlp, train_dataloader, valid_dataloader)
-    logger.info(f"Training completed.")    
+    # Analysis
+    if args.vis_class_criteria == 'popularity':
+        vis_class_criteria = lambda i:len(all_skeletons[list(all_skeletons)[i]])
+    elif args.vis_class_criteria == 'size_small':
+        vis_class_criteria = lambda i:-(len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions))
+    elif args.vis_class_criteria == 'size_large':
+        vis_class_criteria = lambda i:len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions)
+    else:
+        raise NotImplementedError
+    mlp.eval()
+    cmap = plt.get_cmap('tab10')
+    top_indices = sorted(range(len(all_skeletons)), key=vis_class_criteria)[-args.top_k:]
+    val_feats = []
+    val_indices = []
+    val_max_count = {}
+    for X_val, y_val in valid_dataset:
+        if y_val.sum().item() > 1:
+            continue
+        feats = mlp(X_val[None], return_hidden=True)
+        ind = y_val.argmax().item()
+        if ind not in top_indices:
+            continue
+        if val_max_count.get(ind, 0) >= 30:
+            continue
+        val_max_count[ind] = val_max_count.get(ind, 0)+1
+        val_indices.append(ind)
+        val_feats.append(feats)
+    train_feats = []
+    train_indices = []
+    train_max_count = {}        
+    for X_train, y_train in train_dataset:
+        if y_train.sum().item() > 1:
+            continue
+        feats = mlp(X_train[None], return_hidden=True)
+        ind = y_train.argmax().item()
+        if ind not in top_indices:
+            continue
+        if train_max_count.get(ind, 0) >= args.max_vis_per_class:
+            continue
+        train_max_count[ind] = train_max_count.get(ind, 0)+1
+        train_indices.append(ind)
+        train_feats.append(feats)        
+    val_feats = torch.cat(val_feats, dim=0)
+    val_feats = val_feats.detach().cpu().numpy()
+    train_feats = torch.cat(train_feats, dim=0)
+    train_feats = train_feats.detach().cpu().numpy()    
+    tsne = TSNE(n_components=2, verbose=1, random_state=0, init='pca')    
+    X_val = tsne.fit_transform(val_feats)   
+    X_train = tsne.fit_transform(train_feats)   
+    fig = plt.Figure(figsize=(10,5))
+    ax = fig.add_subplot(1,2,1)
+    ax.set_title("Hidden feats (val set)")
+    for ind in top_indices:
+        mask = np.array(val_indices) == ind
+        popularity = len(top_indices)-top_indices.index(ind)
+        ax.scatter(X_val[mask,0],X_val[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
+    ax.legend(title="Skeleton class")
+    ax = fig.add_subplot(1,2,2)
+    ax.set_title("Hidden feats (train set)")
+    for ind in top_indices:
+        mask = np.array(train_indices) == ind
+        popularity = len(top_indices)-top_indices.index(ind)
+        ax.scatter(X_train[mask,0],X_train[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
+    ax.legend(title="Skeleton class")    
+    fig.savefig(os.path.join(args.work_dir, 'tsne.png'))
         
 
 

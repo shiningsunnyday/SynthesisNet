@@ -41,7 +41,7 @@ def main(args):
         setattr(args, 'gnn_datasets', indices)    
         max_ind = max(indices)+1
     else:
-        max_ind = 10000
+        max_ind = 1000000
     while i < max_ind:
         if i not in args.gnn_datasets:
             i += 1

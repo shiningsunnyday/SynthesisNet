@@ -100,11 +100,10 @@ if __name__ == "__main__":
         for k, v in skeletons.items():
             print(f"count: {len(v)}") 
         pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))    
-    if args.visualize_dir:
-        os.makedirs(args.visualize_dir, exist_ok=True)
-        count_bbs(args, skeletons)
-        breakpoint()
-        # count_rxns(args, skeletons)
-        vis_skeletons(args, skeletons)
-        count_skeletons(args, skeletons)
+    # if args.visualize_dir:
+    #     os.makedirs(args.visualize_dir, exist_ok=True)
+    #     bb_counts = count_bbs(args, skeletons)
+    #     # count_rxns(args, skeletons)
+    #     vis_skeletons(args, skeletons)
+    #     count_skeletons(args, skeletons)
         

@@ -527,6 +527,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 x_input_bb = X
             data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
             data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
+            breakpoint()
             logits_rxn = model_rxn(data_rxn)
             logits_bb = model_bb(data_bb)
             logits = {}
