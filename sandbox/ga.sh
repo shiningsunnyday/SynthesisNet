@@ -1,6 +1,6 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 
-python sandbox/optimize_ga.py \
+python sandbox/optimize.py \
     --skeleton_set_file /ssd/msun415/skeletons-top-1000-valid.pkl \
     --ckpt_rxn /ssd/msun415/surrogate/version_38/ \
     --ckpt_bb /ssd/msun415/surrogate/version_37/ \
