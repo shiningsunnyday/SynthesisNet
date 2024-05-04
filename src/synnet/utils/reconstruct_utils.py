@@ -532,9 +532,12 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 x_input_bb = X
             data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
             data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
-            breakpoint()
-            logits_rxn = model_rxn(data_rxn)
-            logits_bb = model_bb(data_bb)
+            if skviz is not None and args.attn_weights:
+                logits_rxn, rxn_attns = model_rxn(data_rxn, return_attention=True)
+                logits_bb, bb_attns= model_bb(data_bb, return_attention=True)
+            else:
+                logits_rxn = model_rxn(data_rxn)
+                logits_bb = model_bb(data_bb)
             logits = {}
             if args.strategy == 'topological':
                 frontier_nodes = [next_node[0]]
@@ -573,7 +576,16 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                         mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
                         mask_str = ''.join(map(str,sk_n.mask))
                         outfile = sk_viz_n.path / f"skeleton_{sk_n.index}_{mask_str}.md"  
-                        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)      
+                        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
+                        if args.attn_weights:
+                            mask = edge_input[1] == n
+                            if sk.rxns[n]:                                
+                                attns = torch.stack([rxn_attns[layer][mask] for layer in range(len(rxn_attns))], dim=0).mean(axis=0)
+                            else:
+                                attns = torch.stack([bb_attns[layer][mask] for layer in range(len(bb_attns))], dim=0).mean(axis=0)
+                            attns = attns.mean(axis=-1)
+                            fpath = os.path.join(outfile.parent, f"{outfile.stem}.png")
+                            sk.visualize(fpath, attn=(edge_input[:, mask], attns))
                         print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
         else:
             final_sks.append(sk)

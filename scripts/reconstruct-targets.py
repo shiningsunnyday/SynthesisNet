@@ -87,6 +87,7 @@ def get_args():
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
+    parser.add_argument("--attn_weights", action='store_true', help='visualize attn weights for each step')
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
@@ -128,8 +129,7 @@ def main(args):
                 breakpoint()
         else:
             raise NotImplementedError           
-        random.shuffle(targets)
-        targets = targets[:1000]
+        random.shuffle(targets)        
     else:
         syntree_set = []        
         print(f"SKELETON INDEX: {SKELETON_INDEX}")
@@ -146,8 +146,7 @@ def main(args):
                     else:
                         syntree_set.append(syntree)       
         random.shuffle(syntree_set)
-        targets = [syntree.root.smiles for syntree in syntree_set]                
-
+        targets = [syntree.root.smiles for syntree in syntree_set]                        
     lookup = {}    
     for i, target in tqdm(enumerate(targets), "initializing skeletons"):
         if args.data:        

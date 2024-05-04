@@ -18,8 +18,8 @@ pe='--pe sin';
 datasets=''
 # dataset=gnn_featurized_rxn_target_down_bb_postorder_split
 # dataset=gnn_featurized_rxn_target_down_bb_postorder_max_depth=3_split
-# dataset=gnn_featurized_rxn_target_down_interm_postorder_max_depth=3_split
-dataset=gnn_featurized_leaves_up_postorder_max_depth=3_split
+dataset=gnn_featurized_rxn_target_down_interm_postorder_max_depth=4_split
+# dataset=gnn_featurized_leaves_up_postorder_max_depth=3_split
 
 # datasets='';
 if [[ $1 -eq 1 ]]; then
@@ -44,7 +44,7 @@ if [[ ${debug} -eq 0 ]]; then
             --ncpu ${ncpu} \
             --prefetch_factor 2 \
             --feats-split \
-            --cuda 0 \
+            --cuda 2 \
             --gnn-dp-rate 0.0 \
             --heads 8
 else

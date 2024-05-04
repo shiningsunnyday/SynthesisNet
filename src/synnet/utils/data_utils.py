@@ -2059,7 +2059,7 @@ class Skeleton:
 
 
 
-    def visualize(self, path=None, Xy=None, ax=None, labels=True):
+    def visualize(self, path=None, Xy=None, ax=None, labels=True, attn=None):
         pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
         if ax is None:
             pos_np = np.array([v for v in pos.values()])
@@ -2083,6 +2083,23 @@ class Skeleton:
         else:
             node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
 
+        widths = [1. for _ in self.tree.edges]       
+        edge_color = ['k' for _ in self.tree.edges]
+        if attn is not None:                
+            attn_edges, attn = attn            
+            attn_ind = 0
+            edge_tuples = [tuple(e) for e in np.array(self.tree.edges)]
+            attn_edge_tuples = [tuple(e) for e in attn_edges.numpy().T]
+            for e in attn_edge_tuples:
+                if e in edge_tuples:
+                    ind = edge_tuples.index(e)
+                elif e[::-1] in edge_tuples:
+                    ind = edge_tuples.index(e[::-1])
+                else:
+                    continue
+                widths[ind] = attn[attn_ind]*2
+                edge_color[ind] = 'red'
+                attn_ind += 1
         if not labels:
             nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
             if fig is not None:
@@ -2110,8 +2127,10 @@ class Skeleton:
                     node_sizes.append(1000)
             nx.draw_networkx(self.tree, pos=pos, ax=ax, 
                             node_color=node_colors, 
+                            edge_color=edge_color,
                             labels=node_labels,
-                            node_size=node_sizes)
+                            node_size=node_sizes,
+                            width=widths)
             if fig is not None:
                 if path is not None:
                     fig.savefig(path)

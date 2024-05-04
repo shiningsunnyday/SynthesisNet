@@ -232,24 +232,34 @@ class GNNModel(nn.Module):
         layers += [layer]
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, data):
+    def forward(self, data, return_attention=False):
         """Forward.
 
         Args:
             x: Input features per node
             edge_index: List of vertex index pairs representing the edges in the graph (PyTorch geometric notation)
-        """
+        """        
         x = data.x
         edge_index = data.edge_index
+        if return_attention:
+            attns = []
         for layer in self.layers:
             # For graph layers, we need to add the "edge_index" tensor as additional input
             # All PyTorch Geometric graph layer inherit the class "MessagePassing", hence
             # we can simply check the class type.
             if isinstance(layer, geom_nn.MessagePassing):
-                x = layer(x, edge_index)
+                assert not return_attention or isinstance(layer, geom_nn.TransformerConv)
+                if return_attention:
+                    x, (_, attn) = layer(x, edge_index, return_attention_weights=True)
+                    attns.append(attn)
+                else:
+                    x = layer(x, edge_index)
             else:
                 x = layer(x)
-        return x
+        if return_attention:
+            return x, attns
+        else:
+            return x
 
 
 class GNN(pl.LightningModule):
