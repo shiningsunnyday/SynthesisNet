@@ -1,12 +1,10 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 import networkx as nx
 import numpy as np
 import pydantic
 import pydantic_cli
-
-from synnet.utils.data_utils import Skeleton
 
 
 class GeneticSearchConfig(pydantic.BaseModel):
@@ -17,7 +15,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     ncpu: int = 1
 
     # Individuals
-    fp_bits: int = 4096
+    fp_bits: int = 2048
     bt_nodes_min: int = 2
     bt_nodes_max: int = 5
 
@@ -26,7 +24,11 @@ class GeneticSearchConfig(pydantic.BaseModel):
     population_size: int = 128
     offspring_size: int = 512
 
+    freeze_fp: bool = False
+    freeze_bt: bool = False
+
     # Crossover
+    parent_schedule: Literal["anneal", "synnet"] = "synnet"
     parent_temp_max = 20
     parent_temp_min = 1
 
@@ -43,8 +45,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
     early_stop_patience: int = 10
 
     # IO
-    out_path: str = None
-    init_path: str = None
+    initialize_path: str = None
+    checkpoint_path: str = None
 
     # WandB
     wandb: bool = False
@@ -67,4 +69,4 @@ class Individual:
 
     # Set by fitness function
     fitness: Optional[float] = None
-    skeleton: Optional[Skeleton] = None
+    smiles: Optional[str] = None

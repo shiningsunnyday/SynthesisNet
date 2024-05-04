@@ -11,7 +11,7 @@ do
 #     --ckpt-bb /ssd/msun415/surrogate/version_37/ \
 #     --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=3-val_loss=0.15.ckpt \
 #     --hash-dir results/hash_table-bb=1000-prods=2_new/ \
-#     --out-dir /home/msun415/SynTreeNet/results/viz/top_1000 \
+#     --out-dir ${HOME}/SynTreeNet/results/viz/top_1000 \
 #     --top-k 3 \
 #     --test-correct-method reconstruct \
 #     --strategy topological \
@@ -26,7 +26,7 @@ do
     #     --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
     #     --ckpt-bb /ssd/msun415/surrogate/version_70/ \
     #     --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
-    #     --out-dir /home/msun415/SynTreeNet/results/viz/ \
+    #     --out-dir ${HOME}/SynTreeNet/results/viz/ \
     #     --top-k 3 \
     #     --test-correct-method reconstruct \
     #     --strategy topological &
@@ -40,8 +40,9 @@ do
         --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
         --ckpt-bb /ssd/msun415/surrogate/version_70/ \
         --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
-        --out-dir /home/msun415/SynTreeNet/results/chembl/ \
+        --out-dir ${HOME}/SynTreeNet/results/chembl/ \
         --top-k 3 \
         --test-correct-method reconstruct \
         --strategy topological &    
 done
+
