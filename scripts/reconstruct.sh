@@ -23,31 +23,32 @@ fi
 #     --sender-filename input_reconstruct.txt \
 #     --receiver-filename output_reconstruct.txt
 
-python scripts/reconstruct-targets.py \
-    --skeleton-set-file results/viz/skeletons-valid.pkl \
-    --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
-    --ckpt-bb /ssd/msun415/surrogate/version_70/ \
-    --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
-    --out-dir /home/msun415/SynTreeNet/results/viz/ \
-    --top-k 3 \
-    --test-correct-method reconstruct \
-    --strategy topological \
-    --ncpu $ncpu \
-    --batch-size $batch_size
-    # --sender-filename input_reconstruct.txt \
-    # --receiver-filename output_reconstruct.txt
-
 # python scripts/reconstruct-targets.py \
-#     --data data/assets/molecules/chembl_34_chemreps.txt \
 #     --skeleton-set-file results/viz/skeletons-valid.pkl \
 #     --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
 #     --ckpt-bb /ssd/msun415/surrogate/version_70/ \
-#     --out-dir /home/msun415/SynTreeNet/results/chembl/ \
+#     --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
+#     --out-dir /home/msun415/SynTreeNet/results/viz/ \
 #     --top-k 3 \
 #     --test-correct-method reconstruct \
 #     --strategy topological \
 #     --ncpu $ncpu \
 #     --batch-size $batch_size \
-#     --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
 #     --sender-filename input_reconstruct.txt \
 #     --receiver-filename output_reconstruct.txt
+
+python scripts/reconstruct-targets.py \
+    --data data/assets/molecules/chembl_34_chemreps.tsv \
+    --skeleton-set-file results/viz/skeletons-valid.pkl \
+    --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
+    --ckpt-bb /ssd/msun415/surrogate/version_70/ \
+    --out-dir /home/msun415/SynTreeNet/results/chembl/ \
+    --top-k 3 \
+    --test-correct-method reconstruct \
+    --strategy topological \
+    --max_num_rxns 4 \
+    --ncpu $ncpu \
+    --batch-size $batch_size \
+    --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
+    --sender-filename input_reconstruct.txt \
+    --receiver-filename output_reconstruct.txt

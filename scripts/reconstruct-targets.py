@@ -53,6 +53,7 @@ def get_args():
     parser.add_argument("--ckpt-bb", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt-recognizer", type=str, help="Recognizer checkpoint to use")    
+    parser.add_argument("--max_num_rxns", type=int, help="Max number of reactions", default=-1)    
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")
     parser.add_argument(
         "--skeleton-set-file",
@@ -115,7 +116,6 @@ def main(args):
     skeleton_set = SkeletonSet().load_skeletons(skeletons)
     syntree_set_all = [st for v in skeletons.values() for st in v]    
     SKELETON_INDEX = test_skeletons(args, skeleton_set)        
-
     # Load data
     if args.data: 
         assert os.path.exists(args.data)
@@ -123,7 +123,7 @@ def main(args):
             df = pd.read_csv(args.data, sep='\t')
             col_name = 'canonical_smiles'
             if col_name in df:
-                return df[col_name]
+                targets = list(df[col_name])
             else:
                 breakpoint()
         else:
@@ -167,8 +167,10 @@ def main(args):
 
         if good:
             if args.ckpt_recognizer:
-                pred_index = predict_skeleton(target)
+                pred_index = predict_skeleton(target, max_num_rxns=args.max_num_rxns)
                 sk = Skeleton(list(skeletons)[pred_index], pred_index)
+                if args.max_num_rxns != -1:
+                    assert sk.rxns.sum() <= args.max_num_rxns
                 lookup[target] = sk
             else:
                 lookup[target] = sk

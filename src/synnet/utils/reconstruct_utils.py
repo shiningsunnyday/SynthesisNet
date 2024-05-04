@@ -177,11 +177,16 @@ def test_skeletons(args, skeleton_set):
         SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
 
     globals()['skeleton_index_lookup'] = {}
+    globals()['skeleton_index_lookup_by_num_rxns'] = {}
     sks = list(skeleton_set.skeletons)
     for index in SKELETON_INDEX:
         sk = Skeleton(sks[index], index)
+        num_rxns = sk.rxns.sum()
         tree_key = serialize_string(sk.tree, sk.tree_root)
         globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree)
+        if num_rxns not in globals()['skeleton_index_lookup_by_num_rxns']:
+            globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
+        globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree)
 
     if hasattr(args, 'strategy') and args.strategy == 'topological':
         globals()['all_topological_sorts'] = {}
@@ -666,13 +671,22 @@ def load_data(args, logger=None):
 
 
 
-def predict_skeleton(smiles):
+def predict_skeleton(smiles, max_num_rxns=-1):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
     model.eval()    
     encoder = globals()['encoder']    
-    probs = model(torch.FloatTensor(encoder.encode(smiles)))
-    ind = probs.argmax(axis=-1).item()
+    probs = model(torch.FloatTensor(encoder.encode(smiles)))    
+    if max_num_rxns == -1:
+        ind = probs.argmax(axis=-1).item()        
+    else:
+        inds = []
+        for d in range(1, max_num_rxns+1):
+            for ind, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
+                inds.append(ind)
+        inds = sorted(inds)
+        ind = probs[inds].argmax(axis=-1).item()
+        ind = inds[ind]
     return globals()['skeleton_classes'][ind]
 
 
