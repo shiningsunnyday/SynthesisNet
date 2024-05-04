@@ -124,6 +124,13 @@ def decode(sk, smi):
     return sks
 
 
+
+def mcmc(sk, smi):
+    breakpoint()
+
+
+
+
 def format_metrics(metrics, cum=False):
     res = ""
     for k, v in metrics.items():
