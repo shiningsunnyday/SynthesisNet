@@ -5,7 +5,7 @@ import fcntl
 import argparse
 import setproctitle
 from rdkit import Chem
-from synnet.utils.reconstruct_utils import set_models, load_data, decode, reconstruct, test_skeletons, lock
+from synnet.utils.reconstruct_utils import set_models, load_data, test_skeletons, lock, mcmc
 from synnet.utils.data_utils import Skeleton, SkeletonSet
 from synnet.config import DELIM
 import pickle
@@ -74,6 +74,10 @@ def get_args():
     """)
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
+    # MCMC params
+    parser.add_argument("--beta", type=float, default=1.)
+    parser.add_argument("--mcmc_timesteps", type=int, default=10)
+    parser.add_argument("--chunk_size", type=int, default=1)    
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
@@ -82,8 +86,8 @@ def get_args():
     parser.add_argument("--verbose", default=False, action="store_true")
     # For running process
     parser.add_argument('--proc_id', type=int, default=1, help="process id")
-    parser.add_argument('--filename', type=str, default="generated_samples.txt", help="file name to lister")
-    parser.add_argument('--output_filename', type=str, default="output_syn.txt", help="file name to output")
+    parser.add_argument('--sender-filename', type=str, default="input.txt", help="file name to lister")
+    parser.add_argument('--receiver-filename', type=str, default="output.txt", help="file name to output")
     return parser.parse_args()    
 
 
@@ -122,35 +126,26 @@ def main(proc_id, filename, output_filename):
             continue
         
         print("====Working for sample {}/{}====".format(selected_mol[0], num_samples))
-        try:
-            smiles, index = selected_mol[1].split(DELIM)
-        except:
-            print(selected_mol)
-        if set([c for c in smiles]) == set(['0', '1']): # fp
-            smiles = np.array(list(map(int, smiles)), dtype=bool)
+        smiles, index = selected_mol[1].split(DELIM)   
         index = int(index)
         st = list(skeletons)[index]               
         sk = Skeleton(st, index)
-        sks = decode(sk, smiles)
-        ans = 0.
-        best_smi = ''
-        for sk in sks:
-            score, smi = reconstruct(sk, smiles)
-            if score > ans:
-                ans = score
-                best_smi = smi                
-    
-        res = DELIM.join([selected_mol[1].split(DELIM)[0], best_smi, str(index)])
+        sks = mcmc(sk, smiles, args.beta, args.mcmc_timesteps)
+        # starting smiles, starting index, score history, smi history
+        score_history = ','.join([str(sk[0]) for sk in sks])
+        smi_history = ','.join([sk[1] for sk in sks])
+        index_history = ','.join([str(sk[2]) for sk in sks])
+        res = DELIM.join([selected_mol[1].split(DELIM)[0], str(index)])
         while(True):
             with open(output_filename, 'a') as f:
                 editable = lock(f)
                 if editable:
-                    f.write("{} {} {}\n".format(selected_mol[0], res, ans))
+                    f.write("{} {} {} {} {}\n".format(selected_mol[0], res, score_history, smi_history, index_history))
                     fcntl.flock(f, fcntl.LOCK_UN)
                     break
 
 
 if __name__ == "__main__":
     args = get_args()
-    setproctitle.setproctitle("reconstruct_listener")
-    main(args.proc_id, args.filename, args.output_filename)
+    setproctitle.setproctitle("mcmc_listener")
+    main(args.proc_id, args.sender_filename, args.receiver_filename)

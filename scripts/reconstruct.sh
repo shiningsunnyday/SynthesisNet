@@ -1,10 +1,6 @@
-if [[ $1 -eq 1 ]]; then
-    ncpu=1;
-    batch_size=100;
-else
-    ncpu=100;
-    batch_size=100;
-fi
+use_case='reconstruct_top_k=3_max_num_rxns=3_max_rxns=-1'
+ncpu=100;
+batch_size=100000;
 
 # python scripts/reconstruct-targets.py \
 #     --skeleton-set-file results/viz/top_1000/skeletons-top-1000-valid.pkl \
@@ -40,16 +36,17 @@ fi
     # --receiver-filename output_reconstruct.txt
 
 python scripts/reconstruct-targets.py \
-    --data data/assets/molecules/chembl_34_chemreps.txt \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
     --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
     --ckpt-bb /ssd/msun415/surrogate/version_70/ \
-    --out-dir /home/msun415/SynTreeNet/results/chembl/ \
+    --out-dir /home/msun415/SynTreeNet/results/viz/ \
     --top-k 3 \
+    --max_num_rxns 3 \
+    --max_rxns -1 \
     --test-correct-method reconstruct \
     --strategy topological \
     --ncpu $ncpu \
     --batch-size $batch_size \
     --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
-    --sender-filename input_reconstruct.txt \
-    --receiver-filename output_reconstruct.txt
+    --sender-filename input_${use_case}.txt \
+    --receiver-filename output_${use_case}.txt

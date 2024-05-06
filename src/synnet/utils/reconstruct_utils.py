@@ -31,6 +31,8 @@ import json
 import gzip
 from copy import deepcopy
 import fcntl
+import random
+from tqdm import tqdm
 
 def lock(f):
     try:
@@ -124,9 +126,62 @@ def decode(sk, smi):
     return sks
 
 
+def build_mc(): # build a markov chain    
+    tree_lookup = globals()['skeleton_index_lookup']
+    trees = list(tree_lookup)
+    dists = np.zeros((len(trees), len(trees)))
+    for i in range(dists.shape[0]):
+        for j in range(i+1, dists.shape[0]):
+            _, tree_1, _ = tree_lookup[trees[i]]
+            _, tree_2, _ = tree_lookup[trees[j]]   
+            dists[i][j] = simple_distance(tree_1, tree_2)
+            dists[j][i] = simple_distance(tree_2, tree_1)
+        dists[i][i] = float("inf")
+    adj = (dists == dists.min(axis=-1, keepdims=True)) # whether smallest possible change
+    # import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(figsize=(8, 6))
+    # cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
+    # fig.colorbar(cax)
+    # ax.set_title('Heatmap Example')
+    # fig.savefig('/home/msun415/heatmap.png')  # Save to file
+    adj = adj.astype(int) / adj.sum(axis=-1, keepdims=True)
+    return adj
 
-def mcmc(sk, smi):
-    breakpoint()
+
+
+def mcmc(sk, smi, beta=1., T=10):
+    adj = build_mc()
+    rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
+    ind = np.argmax([r[0] for r in rec])    
+    res = [(rec[ind][0], rec[ind][1], sk.index)]
+    for _ in range(1, T+1):
+        tree_key = serialize_string(sk.tree, sk.tree_root)
+        index = list(globals()['skeleton_index_lookup']).index(tree_key)        
+        nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
+        tree_key_nei = list(globals()['skeleton_index_lookup'])[nei]
+        j_xy = adj[index, nei]
+        j_yx = adj[nei, index]        
+        sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]        
+        sks_x = decode(sk, smi)
+        sks_y = decode(sk_y, smi)
+        x_rec = [reconstruct(sk, smi) for sk in sks_x]
+        y_rec = [reconstruct(sk, smi) for sk in sks_y]
+        ind_x = np.argmax([x[0] for x in x_rec])
+        ind_y = np.argmax([y[0] for y in y_rec])
+        x_smi = x_rec[ind_x][1]
+        y_smi = y_rec[ind_y][1]
+        sim_x = x_rec[ind_x][0]
+        sim_y = y_rec[ind_y][0]
+        pi_x = np.exp(-beta*(1-sim_x))
+        pi_y = np.exp(-beta*(1-sim_y))
+        a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
+        if random.random() < a_xy:
+            sk = sk_y
+            res.append((sim_y, y_smi, sk_y.index))
+        else:
+            res.append((sim_x, x_smi, sk.index))
+    return res
+
 
 
 
@@ -167,21 +222,30 @@ def load_from_dir(dir, constraint):
 
 
 
-def test_skeletons(args, skeleton_set):
-    if args.ckpt_dir:
-        SKELETON_INDEX = []
-        for ind in range(len(skeleton_set.sks)):
-            sk = skeleton_set.sks[ind]      
-            if 'rxn_models' in globals() and 'bb_models' in globals():
-                if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
+def test_skeletons(args, skeleton_set, max_rxns=0):
+    if max_rxns == 0:
+        if args.ckpt_dir:
+            SKELETON_INDEX = []
+            for ind in range(len(skeleton_set.sks)):
+                sk = skeleton_set.sks[ind]      
+                if 'rxn_models' in globals() and 'bb_models' in globals():
+                    if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
+                        SKELETON_INDEX.append(ind)
+                else:
                     SKELETON_INDEX.append(ind)
-            else:
-                SKELETON_INDEX.append(ind)
-    else:        
-        dirname = os.path.dirname(args.ckpt_rxn)
-        config_file = os.path.join(dirname, 'hparams.yaml')
-        config = yaml.safe_load(open(config_file))
-        SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
+        else:        
+            dirname = os.path.dirname(args.ckpt_rxn)
+            config_file = os.path.join(dirname, 'hparams.yaml')
+            config = yaml.safe_load(open(config_file))
+            SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
+    elif max_rxns == -1:
+        SKELETON_INDEX = list(range(len(skeleton_set.skeletons)))
+    else:
+        SKELETON_INDEX = []
+        for index, sk in enumerate(skeleton_set.skeletons):
+            sk = Skeleton(sk, index)
+            if sk.rxns.sum() <= max_rxns:
+                SKELETON_INDEX.append(index)
 
     globals()['skeleton_index_lookup'] = {}
     globals()['skeleton_index_lookup_by_num_rxns'] = {}
@@ -190,15 +254,18 @@ def test_skeletons(args, skeleton_set):
         sk = Skeleton(sks[index], index)
         num_rxns = sk.rxns.sum()
         tree_key = serialize_string(sk.tree, sk.tree_root)
-        globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree)
+        globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree, sk)
         if num_rxns not in globals()['skeleton_index_lookup_by_num_rxns']:
             globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
-        globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree)
+        globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
 
+    
     if hasattr(args, 'strategy') and args.strategy == 'topological':
         globals()['all_topological_sorts'] = {}
         for index in SKELETON_INDEX:
             sk = Skeleton(sks[index], index)
+            if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
+                continue
             top_sorts = nx.all_topological_sorts(sk.tree)
             top_sort_set = set()
             for top_sort in top_sorts:
@@ -701,10 +768,12 @@ def predict_skeleton(smiles, max_num_rxns=-1):
     else:
         inds = []
         for d in range(1, max_num_rxns+1):
-            for ind, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
+            for ind, _, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
                 inds.append(ind)
         inds = sorted(inds)
-        ind = probs[inds].argmax(axis=-1).item()
+        inds = [globals()['skeleton_classes'].index(ind) for ind in inds]
+        assert probs.shape[0] == 1
+        ind = probs[0, inds].argmax(axis=-1).item()
         ind = inds[ind]
     return globals()['skeleton_classes'][ind]
 
