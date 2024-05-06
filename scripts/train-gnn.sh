@@ -44,7 +44,7 @@ if [[ ${debug} -eq 0 ]]; then
             --ncpu ${ncpu} \
             --prefetch_factor 2 \
             --feats-split \
-            --cuda 2 \
+            --cuda 0 \
             --gnn-dp-rate 0.0 \
             --heads 8
 else
