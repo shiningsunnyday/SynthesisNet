@@ -31,6 +31,8 @@ import json
 import gzip
 from copy import deepcopy
 import fcntl
+import random
+from tqdm import tqdm
 
 def lock(f):
     try:
@@ -107,6 +109,8 @@ def decode(sk, smi):
         skviz = None
     if 'bblock_inds' in globals():
         bblock_inds = globals()['bblock_inds']
+    else:
+        bblock_inds = None
     # print(f"begin decoding {smi}")
     if 'rxn_models' in globals():
         rxn_gnn = rxn_models[sk.index]
@@ -120,6 +124,66 @@ def decode(sk, smi):
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
     ans = serialize_string(sk.tree, sk.tree_root)        
     return sks
+
+
+def build_mc(): # build a markov chain    
+    tree_lookup = globals()['skeleton_index_lookup']
+    trees = list(tree_lookup)
+    dists = np.zeros((len(trees), len(trees)))
+    for i in range(dists.shape[0]):
+        for j in range(i+1, dists.shape[0]):
+            _, tree_1, _ = tree_lookup[trees[i]]
+            _, tree_2, _ = tree_lookup[trees[j]]   
+            dists[i][j] = simple_distance(tree_1, tree_2)
+            dists[j][i] = simple_distance(tree_2, tree_1)
+        dists[i][i] = float("inf")
+    adj = (dists == dists.min(axis=-1, keepdims=True)) # whether smallest possible change
+    # import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(figsize=(8, 6))
+    # cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
+    # fig.colorbar(cax)
+    # ax.set_title('Heatmap Example')
+    # fig.savefig('/home/msun415/heatmap.png')  # Save to file
+    adj = adj.astype(int) / adj.sum(axis=-1, keepdims=True)
+    return adj
+
+
+
+def mcmc(sk, smi, beta=1., T=10):
+    adj = build_mc()
+    rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
+    ind = np.argmax([r[0] for r in rec])    
+    res = [(rec[ind][0], rec[ind][1], sk.index)]
+    for _ in range(1, T+1):
+        tree_key = serialize_string(sk.tree, sk.tree_root)
+        index = list(globals()['skeleton_index_lookup']).index(tree_key)        
+        nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
+        tree_key_nei = list(globals()['skeleton_index_lookup'])[nei]
+        j_xy = adj[index, nei]
+        j_yx = adj[nei, index]        
+        sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]        
+        sks_x = decode(sk, smi)
+        sks_y = decode(sk_y, smi)
+        x_rec = [reconstruct(sk, smi) for sk in sks_x]
+        y_rec = [reconstruct(sk, smi) for sk in sks_y]
+        ind_x = np.argmax([x[0] for x in x_rec])
+        ind_y = np.argmax([y[0] for y in y_rec])
+        x_smi = x_rec[ind_x][1]
+        y_smi = y_rec[ind_y][1]
+        sim_x = x_rec[ind_x][0]
+        sim_y = y_rec[ind_y][0]
+        pi_x = np.exp(-beta*(1-sim_x))
+        pi_y = np.exp(-beta*(1-sim_y))
+        a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
+        if random.random() < a_xy:
+            sk = sk_y
+            res.append((sim_y, y_smi, sk_y.index))
+        else:
+            res.append((sim_x, x_smi, sk.index))
+    return res
+
+
+
 
 
 def format_metrics(metrics, cum=False):
@@ -158,33 +222,50 @@ def load_from_dir(dir, constraint):
 
 
 
-def test_skeletons(args, skeleton_set):
-    if args.ckpt_dir:
-        SKELETON_INDEX = []
-        for ind in range(len(skeleton_set.sks)):
-            sk = skeleton_set.sks[ind]      
-            if 'rxn_models' in globals() and 'bb_models' in globals():
-                if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
+def test_skeletons(args, skeleton_set, max_rxns=0):
+    if max_rxns == 0:
+        if args.ckpt_dir:
+            SKELETON_INDEX = []
+            for ind in range(len(skeleton_set.sks)):
+                sk = skeleton_set.sks[ind]      
+                if 'rxn_models' in globals() and 'bb_models' in globals():
+                    if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
+                        SKELETON_INDEX.append(ind)
+                else:
                     SKELETON_INDEX.append(ind)
-            else:
-                SKELETON_INDEX.append(ind)
-    else:        
-        dirname = os.path.dirname(args.ckpt_rxn)
-        config_file = os.path.join(dirname, 'hparams.yaml')
-        config = yaml.safe_load(open(config_file))
-        SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
+        else:        
+            dirname = os.path.dirname(args.ckpt_rxn)
+            config_file = os.path.join(dirname, 'hparams.yaml')
+            config = yaml.safe_load(open(config_file))
+            SKELETON_INDEX = list(map(int, config['datasets'].split(',')))
+    elif max_rxns == -1:
+        SKELETON_INDEX = list(range(len(skeleton_set.skeletons)))
+    else:
+        SKELETON_INDEX = []
+        for index, sk in enumerate(skeleton_set.skeletons):
+            sk = Skeleton(sk, index)
+            if sk.rxns.sum() <= max_rxns:
+                SKELETON_INDEX.append(index)
 
     globals()['skeleton_index_lookup'] = {}
+    globals()['skeleton_index_lookup_by_num_rxns'] = {}
     sks = list(skeleton_set.skeletons)
     for index in SKELETON_INDEX:
         sk = Skeleton(sks[index], index)
+        num_rxns = sk.rxns.sum()
         tree_key = serialize_string(sk.tree, sk.tree_root)
-        globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree)
+        globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree, sk)
+        if num_rxns not in globals()['skeleton_index_lookup_by_num_rxns']:
+            globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
+        globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
 
+    
     if hasattr(args, 'strategy') and args.strategy == 'topological':
         globals()['all_topological_sorts'] = {}
         for index in SKELETON_INDEX:
             sk = Skeleton(sks[index], index)
+            if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
+                continue
             top_sorts = nx.all_topological_sorts(sk.tree)
             top_sort_set = set()
             for top_sort in top_sorts:
@@ -233,10 +314,16 @@ def set_models(args, logger=None):
         bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
         globals()['bb_gnn'] = bb_gnn    
     if hasattr(args, 'ckpt_recognizer') and args.ckpt_recognizer:
-        recognizer = load_mlp_from_ckpt(args.ckpt_recognizer)
+        if os.path.isfile(args.ckpt_recognizer):
+            recognizer = load_mlp_from_ckpt(args.ckpt_recognizer)
+            config_path = os.path.join(Path(args.ckpt_recognizer).parent, 'config.json')
+        else:
+            recognizer_ckpt = find_best_model_ckpt(args.ckpt_recognizer)
+            recognizer = load_mlp_from_ckpt(recognizer_ckpt)
+            config_path = os.path.join(Path(args.ckpt_recognizer), 'config.json')
         globals()['recognizer'] = recognizer
         globals()['encoder'] = MorganFingerprintEncoder(2, 2048)
-        config_path = os.path.join(Path(args.ckpt_recognizer).parent, 'config.json')
+        
         config = json.load(open(config_path)        )
         globals()['skeleton_classes'] = config['datasets']
     if logger is not None:
@@ -267,6 +354,8 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
             mask_imposs[i] = True         
     if 'rxn' not in args.filter_only:
         return mask_imposs, None
+    else:
+        assert args.hash_dir
     rxn_imposs = deepcopy(mask_imposs)    
     attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
     # if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
@@ -358,7 +447,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
         if yes, find LCA (MAX_DEPTH from root), then use the subtree to constrain possibilities
     else
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
-    """            
+    """         
     rxn_graph, node_map, _ = sk.rxn_graph()    
     if sk.rxns[n]:  
         cur = node_map[n]
@@ -433,6 +522,10 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
                 indices = bblock_inds
             else:
                 indices = list(range(bb_emb.shape[0]))
+            pred_rxn_id = sk.tree.nodes[pred]['rxn_id']            
+            if hasattr(rxns[pred_rxn_id], 'bblock_mask'):
+                second = sk.tree.nodes[n]['child'] == 'right'
+                indices = rxns[pred_rxn_id].bblock_mask[second]
             bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
             smiles = bbs[indices[bb_ind]]
         sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
@@ -486,7 +579,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
         sks = [sk]    
     else:
         raise NotImplementedError    
-    final_sks = []    
+    final_sks = [] 
     while len(sks):
         sk = sks.pop(-1)
         if isinstance(sk, tuple):
@@ -523,8 +616,12 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 x_input_bb = X
             data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
             data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
-            logits_rxn = model_rxn(data_rxn)
-            logits_bb = model_bb(data_bb)
+            if skviz is not None and args.attn_weights:
+                logits_rxn, rxn_attns = model_rxn(data_rxn, return_attention=True)
+                logits_bb, bb_attns= model_bb(data_bb, return_attention=True)
+            else:
+                logits_rxn = model_rxn(data_rxn)
+                logits_bb = model_bb(data_bb)
             logits = {}
             if args.strategy == 'topological':
                 frontier_nodes = [next_node[0]]
@@ -563,7 +660,16 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                         mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
                         mask_str = ''.join(map(str,sk_n.mask))
                         outfile = sk_viz_n.path / f"skeleton_{sk_n.index}_{mask_str}.md"  
-                        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)      
+                        SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
+                        if args.attn_weights:
+                            mask = edge_input[1] == n
+                            if sk.rxns[n]:                                
+                                attns = torch.stack([rxn_attns[layer][mask] for layer in range(len(rxn_attns))], dim=0).mean(axis=0)
+                            else:
+                                attns = torch.stack([bb_attns[layer][mask] for layer in range(len(bb_attns))], dim=0).mean(axis=0)
+                            attns = attns.mean(axis=-1)
+                            fpath = os.path.join(outfile.parent, f"{outfile.stem}.png")
+                            sk.visualize(fpath, attn=(edge_input[:, mask], attns))
                         print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
         else:
             final_sks.append(sk)
@@ -652,7 +758,18 @@ def load_data(args, logger=None):
     bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
     if logger is not None:
         logger.info(f"Successfully read {args.embeddings_knn_file}.")    
-        logger.info("...loading data completed.")        
+        logger.info("...loading data completed.")            
+    # remember indices of bblocks
+    bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
+    for i, r in tqdm(enumerate(rxns)):
+        bblock_mask = []
+        for j in range(len(r.available_reactants)):
+            mask = [False for _ in bblocks]            
+            for k in range(len(r.available_reactants[j])):
+                bb_index = bb_index_lookup[r.available_reactants[j][k]]
+                mask[bb_index] = True
+            bblock_mask.append(np.argwhere(mask).flatten())
+        setattr(r, 'bblock_mask', bblock_mask)
     globals()['rxns'] = rxns
     globals()['rxn_templates'] = rxn_templates    
     globals()['bblocks'] = bblocks
@@ -661,18 +778,29 @@ def load_data(args, logger=None):
 
 
 
-def predict_skeleton(smiles):
+def predict_skeleton(smiles, max_num_rxns=-1):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
     model.eval()    
     encoder = globals()['encoder']    
-    probs = model(torch.FloatTensor(encoder.encode(smiles)))
-    ind = probs.argmax(axis=-1).item()
+    probs = model(torch.FloatTensor(encoder.encode(smiles)))    
+    if max_num_rxns == -1:
+        ind = probs.argmax(axis=-1).item()        
+    else:
+        inds = []
+        for d in range(1, max_num_rxns+1):
+            for ind, _, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
+                inds.append(ind)
+        sorted_inds = sorted(inds)
+        inds = [globals()['skeleton_classes'].index(ind) for ind in sorted_inds]
+        assert probs.shape[0] == 1
+        ind = probs[0, inds].argmax(axis=-1).item()
+        ind = inds[ind]
     return globals()['skeleton_classes'][ind]
 
 
 # For reconstruct without true skeleton
-def reconstruct(sk, smi, return_smi=False): 
+def reconstruct(sk, smi): 
     rxns = globals()['rxns']
     sk.reconstruct(rxns)
     smiles = []
@@ -680,17 +808,14 @@ def reconstruct(sk, smi, return_smi=False):
         if 'smiles' in sk.tree.nodes[n]:
             if sk.tree.nodes[n]['smiles']:
                 smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
-    if return_smi:
-        assert isinstance(smi, np.ndarray)
+    if isinstance(smi, np.ndarray):
         sims = tanimoto_similarity(smi, smiles)
-        correct = max(sims)                    
-        best_smi = smiles[np.argmax(sims)]
-        return correct, best_smi
     else:
         smi2 = Chem.CanonSmiles(smi)
         sims = tanimoto_similarity(mol_fp(smi2, 2, 4096), smiles)
-        correct = max(sims)            
-        return correct
+    correct = max(sims)                    
+    best_smi = smiles[np.argmax(sims)]
+    return correct, best_smi
 
 
 

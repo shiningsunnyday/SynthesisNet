@@ -12,6 +12,8 @@ tmp/
 .notes/
 .aliases
 
+population*.npy
+
 # === template ===
 
 # Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,jupyternotebooks

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Tuple
 
 import numpy as np
+import random
+random.seed(42)
 np.random.seed(42)
 import pandas as pd
 import pdb
@@ -38,9 +40,16 @@ def _fetch_data_from_file(name: str) -> list[str]:
         syntree_collection = SyntheticTreeSet().load(name)
         smiles = [syntree.root.smiles for syntree in syntree_collection]        
         return smiles
+    elif '.tsv' in name:
+        df = pd.read_csv(name, sep='\t')
+        col_name = 'canonical_smiles'
+        if col_name in df:
+            return df[col_name]
+        else:
+            breakpoint()
     else:
         with open(name, "rt") as f:
-            smis_query = [line.strip() for line in f]
+            smis_query = [line.strip() for line in f]        
         return smis_query
 
 
@@ -159,6 +168,7 @@ if __name__ == "__main__":
     logger.info("Start loading data...")
     # ... query molecules (i.e. molecules to decode)
     targets = _fetch_data(args.data)
+    random.shuffle(targets)
     if args.num > 0:  # Select only n queries
         targets = targets[: args.num]
 

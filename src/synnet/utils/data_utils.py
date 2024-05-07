@@ -34,7 +34,7 @@ from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 from networkx.algorithms import weisfeiler_lehman_graph_hash
 from networkx.algorithms.traversal.depth_first_search import dfs_tree
 import networkx as nx
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 from copy import deepcopy
@@ -2059,7 +2059,7 @@ class Skeleton:
 
 
 
-    def visualize(self, path=None, Xy=None, ax=None, labels=True):
+    def visualize(self, path=None, Xy=None, ax=None, labels=True, attn=None):
         pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
         if ax is None:
             pos_np = np.array([v for v in pos.values()])
@@ -2083,6 +2083,23 @@ class Skeleton:
         else:
             node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
 
+        widths = [1. for _ in self.tree.edges]       
+        edge_color = ['k' for _ in self.tree.edges]
+        if attn is not None:                
+            attn_edges, attn = attn            
+            attn_ind = 0
+            edge_tuples = [tuple(e) for e in np.array(self.tree.edges)]
+            attn_edge_tuples = [tuple(e) for e in attn_edges.numpy().T]
+            for e in attn_edge_tuples:
+                if e in edge_tuples:
+                    ind = edge_tuples.index(e)
+                elif e[::-1] in edge_tuples:
+                    ind = edge_tuples.index(e[::-1])
+                else:
+                    continue
+                widths[ind] = attn[attn_ind]*2
+                edge_color[ind] = 'red'
+                attn_ind += 1
         if not labels:
             nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
             if fig is not None:
@@ -2110,8 +2127,10 @@ class Skeleton:
                     node_sizes.append(1000)
             nx.draw_networkx(self.tree, pos=pos, ax=ax, 
                             node_color=node_colors, 
+                            edge_color=edge_color,
                             labels=node_labels,
-                            node_size=node_sizes)
+                            node_size=node_sizes,
+                            width=widths)
             if fig is not None:
                 if path is not None:
                     fig.savefig(path)
@@ -2251,16 +2270,21 @@ class Skeleton:
         self.rxn_target_down = not non_target_interms.any() # all non-rxn nodes masked out, and rxns target_down
         non_target_interms[self.leaves] = 0
         self.rxn_target_down_bb = not non_target_interms.any() # all interm nodes masked out, and rxns target_down
-
+        self.rxn_target_down_interm = not non_target_interms.any() # all interms masked out
         for n in np.argwhere((self.mask & self.rxns)).flatten().tolist(): # check rxns
             if self.pred(n) == self.tree_root: continue
             parent_rxn = self.pred(self.pred(n))
             if not (self.mask & self.rxns)[parent_rxn]:
                 self.rxn_target_down = False
                 self.rxn_target_down_bb = False
-        for n in np.argwhere((self.mask & self.leaves)).flatten().tolist():
+                self.rxn_target_down_interm = False
+        interm_or_bb = ~self.rxns
+        interm_or_bb[self.tree_root] = 0
+        for n in np.argwhere((self.mask & interm_or_bb)).flatten().tolist(): # for all interm/leaves, parent must be filled
             if not self.mask[self.pred(n)]:
-                self.rxn_target_down_bb = False
+                if self.leaves[n]:
+                    self.rxn_target_down_bb = False
+                self.rxn_target_down_interm = False
         
         # test if mask satisfies precomputed criteria
         mask_inds = np.argwhere(self.mask).flatten().tolist()
@@ -2293,7 +2317,14 @@ class Skeleton:
             print("bad node")
 
            
-    def get_state(self, leaves_up=False, rxn_frontier=False, bb_frontier=False, target_down=False, rxn_target_down=False, rxn_target_down_bb=False, bfs=False):
+    def get_state(self, leaves_up=False, 
+                        rxn_frontier=False, 
+                        bb_frontier=False, 
+                        target_down=False, 
+                        rxn_target_down=False, 
+                        rxn_target_down_bb=False, 
+                        rxn_target_down_interm=False,
+                        bfs=False):
         """
         Return the partial graph with self.mask determining which nodes are available
         If leaves_up is true, further zero out y at nodes where there is an un-filled child
@@ -2305,7 +2336,9 @@ class Skeleton:
         rxn_frontier: whether to set targets to be rxn nodes on bfs frontier
         bb_frontier: whether to set targets to be rxn nodes on bfs frontier if present, else bb nodes
         target_down: same as leaves_up but from target down
-        rxn_target_down: same as leaves_up but from target down, and for reactions only
+        rxn_target_down: same as leaves_up but from target down, and for reactions
+        rxn_target_down_bb: same as leaves_up but from target down, and for reactions and leaves only
+        rxn_target_down_interm: same as leaves_up but from target down, and for reactions and interms/leaves
         bfs: predict the next node in binary tree bfs order
         """        
         X = np.zeros((len(self.tree), 2*2048+91))
@@ -2315,6 +2348,8 @@ class Skeleton:
             rxn_parent = (n == self.tree_root) or self.pred(n) == self.tree_root or (self.mask & self.rxns)[self.pred(self.pred(n))]
             # if is rxn, then rxn_parent; if is leaf, then parent is fulfilled        
             rxn_parent_bb = (not self.rxns[n] or rxn_parent) and (not self.leaves[n] or self.mask[self.pred(n)]) and (self.rxns[n] or self.leaves[n])
+            # if is rxn, then rxn_parent; if is interm/leaf, then parent is fulfilled
+            rxn_parent_interm = (not self.rxns[n] or rxn_parent_bb) and (self.rxns[n] or n == self.tree_root or self.mask[self.pred(n)])
             leaves_filled = self.mask[list(self.tree.neighbors(n))].all()
             is_frontier = n in self.frontier_nodes
             is_frontier_rxn = is_frontier and self.rxns[n]
@@ -2348,13 +2383,14 @@ class Skeleton:
                 if bb_frontier:
                     if is_frontier_bb:
                         self.fill_node(n, y)                
-                if rxn_target_down:        
-                    if rxn_target_down_bb and rxn_parent_bb:
+                if rxn_target_down:    
+                    if rxn_parent: # is rxn
+                        self.fill_node(n, y)
+                    elif rxn_target_down_bb and rxn_parent_bb: # is bb
                         # accomodate bb's
                         self.fill_node(n, y)
-                    if not rxn_target_down_bb and rxn_parent:
-                        # don't accomodate bb's
-                        self.fill_node(n, y)
+                    elif rxn_target_down_interm and rxn_parent_interm: # is bb/interm
+                        self.fill_node(n, y)                    
                 if target_down:
                     if is_frontier:
                         self.fill_node(n, y)                    
@@ -2726,8 +2762,11 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
     elif args.determine_criteria == 'rxn_target_down_bb':
         kwargs['rxn_target_down'] = True
         kwargs['rxn_target_down_bb'] = True
+    elif args.determine_criteria == 'rxn_target_down_interm':
+        kwargs['rxn_target_down'] = True
+        kwargs['rxn_target_down_interm'] = True
     elif args.determine_criteria == 'bfs':
-        kwargs['bfs'] = True
+        kwargs['bfs'] = True    
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])

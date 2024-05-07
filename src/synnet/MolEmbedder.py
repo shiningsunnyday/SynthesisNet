@@ -4,7 +4,6 @@ from typing import Callable, Union
 
 import numpy as np
 from sklearn.neighbors import BallTree
-import faiss
 
 from synnet.config import MAX_PROCESSES
 

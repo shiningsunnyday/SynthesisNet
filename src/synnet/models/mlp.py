@@ -59,13 +59,16 @@ class MLP(pl.LightningModule):
             modules.append(nn.ReLU())
             if i > num_layers - 3 - num_dropout_layers:
                 modules.append(nn.Dropout(dropout))
-
-        modules.append(nn.Linear(hidden_dim, output_dim))
+        self.final_layer = nn.Linear(hidden_dim, output_dim)
         self.layers = nn.Sequential(*modules)
 
-    def forward(self, x):
+    def forward(self, x, return_hidden=False):
         """Forward step for inference only."""
         y_hat = self.layers(x)
+        if return_hidden: 
+            return y_hat
+        else:
+            y_hat = self.final_layer(y_hat)
         if (
             self.hparams.task == "classification"
         ):  # during training, `cross_entropy` loss expects raw logits
@@ -76,6 +79,7 @@ class MLP(pl.LightningModule):
         """The complete training loop."""
         x, y = batch
         y_hat = self.layers(x)
+        y_hat = self.final_layer(y_hat)
         if self.loss == "cross_entropy":            
             loss = F.cross_entropy(y_hat, y)
         elif self.loss == "mse":
@@ -95,6 +99,7 @@ class MLP(pl.LightningModule):
             return None
         x, y = batch
         y_hat = self.layers(x)
+        y_hat = self.final_layer(y_hat)
         if self.valid_loss == "cross_entropy":
             loss = F.cross_entropy(y_hat, y.long())
         elif self.valid_loss == "accuracy":
@@ -129,7 +134,8 @@ class MLP(pl.LightningModule):
                         tot = metrics[k][metric][1]
                         self.log(f"class_{k}_{metric}", correct/tot if tot > 0 else 0., batch_size=tot, on_step=False, on_epoch=True, logger=True)
                 else:
-                    self.log(f"class_{k}_{metric}", 0., batch_size=0, on_step=False, on_epoch=True, logger=True)
+                    for metric in ['precision', 'recall']:
+                        self.log(f"class_{k}_{metric}", 0., batch_size=0, on_step=False, on_epoch=True, logger=True)
         elif self.valid_loss[:11] == "nn_accuracy":
             # NOTE: Very slow!
             # Performing the knn-search can easily take a couple of minutes,
@@ -203,33 +209,57 @@ class GNNModel(nn.Module):
         layers = []
         in_channels, out_channels = c_in, c_hidden
         for l_idx in range(num_layers - 1):
+            if layer_name == 'Transformer':
+                layer = gnn_layer(in_channels=in_channels, out_channels=out_channels, **kwargs)
+            else:
+                act = nn.ReLU()
+                lin_i_1 = nn.Linear(in_channels, in_channels)
+                lin_i_2 = nn.Linear(in_channels, out_channels)
+                layer = gnn_layer(nn=nn.Sequential(lin_i_1, act, lin_i_2))
             layers += [
-                gnn_layer(in_channels=in_channels, out_channels=out_channels, **kwargs),
+                layer,
                 nn.ReLU(inplace=True),
                 nn.Dropout(dp_rate),
             ]
             in_channels = c_hidden
-        layers += [gnn_layer(in_channels=in_channels, out_channels=c_out, **kwargs)]
+        if layer_name == 'Transformer':
+            layer = gnn_layer(in_channels=in_channels, out_channels=c_out, **kwargs)
+        else:
+            act = nn.ReLU()
+            lin_i_1 = nn.Linear(in_channels, in_channels)
+            lin_i_2 = nn.Linear(in_channels, out_channels)
+            layer = gnn_layer(nn=nn.Sequential(lin_i_1, act, lin_i_2))            
+        layers += [layer]
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, data):
+    def forward(self, data, return_attention=False):
         """Forward.
 
         Args:
             x: Input features per node
             edge_index: List of vertex index pairs representing the edges in the graph (PyTorch geometric notation)
-        """
+        """        
         x = data.x
         edge_index = data.edge_index
+        if return_attention:
+            attns = []
         for layer in self.layers:
             # For graph layers, we need to add the "edge_index" tensor as additional input
             # All PyTorch Geometric graph layer inherit the class "MessagePassing", hence
             # we can simply check the class type.
             if isinstance(layer, geom_nn.MessagePassing):
-                x = layer(x, edge_index)
+                assert not return_attention or isinstance(layer, geom_nn.TransformerConv)
+                if return_attention:
+                    x, (_, attn) = layer(x, edge_index, return_attention_weights=True)
+                    attns.append(attn)
+                else:
+                    x = layer(x, edge_index)
             else:
                 x = layer(x)
-        return x
+        if return_attention:
+            return x, attns
+        else:
+            return x
 
 
 class GNN(pl.LightningModule):
@@ -311,9 +341,9 @@ class GNN(pl.LightningModule):
         data_key = np.array([k for data_key in data.key for k in data_key])
         y_hat = self.model(data)
         # only building blocks
-        mask_bb = (y[:, :256] != 0).any(axis=-1)
+        mask_bb = (y[:, :256] != 0).any(axis=-1) & data.bb_mask
         y_bb = y[mask_bb, :256]
-        y_hat_bb = y_hat[mask_bb, :256]
+        y_hat_bb = y_hat[mask_bb, :256]        
         # only reactions
         mask_rxn = (y[:, 256:] != 0).any(axis=-1)        
         y_rxn = y[mask_rxn, 256:]        
@@ -353,7 +383,7 @@ class GNN(pl.LightningModule):
                              
                 
         if "nn_accuracy" in self.valid_loss:
-            if y_bb.shape[0]:
+            if y_bb.shape[0]:                
                 y = nn_search_list(y_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))
                 y_hat = nn_search_list(y_hat_bb, torch.as_tensor(self.X, dtype=torch.float32).to(y.device))            
                 accuracy = (y_hat == y).sum() / len(y)

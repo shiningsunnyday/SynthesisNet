@@ -17,8 +17,10 @@ import multiprocessing as mp
 from multiprocessing.pool import ThreadPool
 import random
 random.seed(42)
-
+import matplotlib.pyplot as plt
 logger = logging.getLogger(__name__)
+from concurrent.futures import ProcessPoolExecutor
+import torch
 
 
 
@@ -85,10 +87,13 @@ def get_args():
     """)
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
+    # MCMC params
+    parser.add_argument("--beta", type=float, default=1.)
+    parser.add_argument("--mcmc_timesteps", type=int, default=10)
+    parser.add_argument("--chunk_size", type=int, default=1)
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
-    parser.add_argument("--attn_weights", action='store_true', help='visualize attn weights for each step')
     # Processing
     parser.add_argument("--ncpu", type=int, default=1, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
@@ -130,7 +135,8 @@ def main(args):
                 breakpoint()
         else:
             raise NotImplementedError           
-        random.shuffle(targets)        
+        random.shuffle(targets)
+        targets = targets[:1000]
     else:
         syntree_set = []        
         print(f"SKELETON INDEX: {SKELETON_INDEX}")
@@ -147,7 +153,8 @@ def main(args):
                     else:
                         syntree_set.append(syntree)       
         random.shuffle(syntree_set)
-        targets = [syntree.root.smiles for syntree in syntree_set]                    
+        targets = [syntree.root.smiles for syntree in syntree_set]                
+
     lookup = {}    
     for i, target in tqdm(enumerate(targets), "initializing skeletons"):
         if args.data:        
@@ -180,19 +187,18 @@ def main(args):
 
     # Decode queries, i.e. the target molecules.
     logger.info(f"Start to decode {len(targets)} target molecules.")
- 
+
+    # targets = targets[:10]     
     batch_size = args.batch_size        
     # decode('CC(Nc1ccc(I)cc1-c1nc(-c2cc(F)ccc2N=C=O)n[nH]1)c1ccc(N)c(O)c1')
     # decode('CC(C)(N=C=O)C1=Cc2cc(Br)c(C(=O)O)c(N)c2O1')
-    all_sks = []
-    all_targets = []
+    all_sks = []    
+    all_smiles = []
     for batch in range((len(targets)+batch_size-1)//batch_size):
-        target_batch = targets[batch_size*batch:batch_size*batch+batch_size]
-
-
-        if args.test_correct_method == 'reconstruct' and args.sender_filename and args.receiver_filename: # assume background processes
+        target_batch = targets[batch_size*batch:batch_size*batch+batch_size]        
+        if args.sender_filename and args.receiver_filename:
             open(args.sender_filename, 'w+').close() # clear
-            open(args.receiver_filename, 'w+').close() # clear            
+            open(args.receiver_filename, 'w+').close() # clear  
             while(True):
                 with open(args.sender_filename, 'r') as fr:
                     editable = lock(fr)
@@ -204,72 +210,72 @@ def main(args):
                         break
                     fcntl.flock(fr, fcntl.LOCK_UN)     
             num_samples = len(target_batch)
-            print("Waiting for reconstruct evaluation...")       
+            print("Waiting for batch mcmc...")       
             while(True):
                 with open(args.receiver_filename, 'r') as fr:
                     editable = lock(fr)
-                    if editable:                        
+                    if editable:
+                        status = []
                         lines = fr.readlines()
-                        if len(lines) >= num_samples:
-                            status = [None for _ in range(num_samples)]
+                        if len(lines) == num_samples:
                             for idx, line in enumerate(lines):
                                 splitted_line = line.strip().split()
-                                key = int(splitted_line[0])                                
-                                status[key] = (splitted_line[0], splitted_line[1], splitted_line[2])
-                            if np.all([x is not None for x in status]):
-                                break
+                                status.append((splitted_line[0], splitted_line[2], splitted_line[3], splitted_line[4]))
+                            break
                     fcntl.flock(fr, fcntl.LOCK_UN)
                 time.sleep(1)
-            assert len(target_batch) == len(status)            
-            mean_score = sum([float(score) for _, _, score in status])/len(status)
-            logger.info(f"Batch {batch} mean score {str(mean_score)}")
-            all_sks += status
-            all_targets += target_batch
-            data = []
-            for res, target in zip(all_sks, all_targets):
-                smiles, best_smi, index = res[1].split(DELIM)
-                assert smiles == target
-                score = res[2]
-                data_dict = {'target': target, 'smiles': best_smi, 'index': index, 'sim': score}
-                data.append(data_dict)
-            df = pd.DataFrame(data)
-            path = os.path.join(args.out_dir, 'reconstruct.csv')
-            df.to_csv(path)
-            print(os.path.abspath(path))
+            assert len(target_batch) == len(status)
+            status = sorted(status, key=lambda tup: int(tup[0]))
+            sks_batch = []
+            for tup in status:
+                sks = []
+                for score, smi, index in zip(tup[1].split(','), tup[2].split(','), tup[3].split(',')):
+                    sks.append((float(score), smi, index))
+                sks_batch.append(sks)
         else:
-            target_batch = [(deepcopy(lookup[smi]), smi) for smi in target_batch]
             if args.ncpu == 1:
                 sks_batch = []
-                for arg in tqdm(target_batch):                        
-                    sks = decode(*arg)
+                for smi in tqdm(target_batch):                        
+                    sks = mcmc(deepcopy(lookup[smi]), smi, args.beta, args.mcmc_timesteps)
                     sks_batch.append(sks)                                      
             else:
-                with ThreadPool(args.ncpu) as p:
-                    sks_batch = p.starmap(decode, tqdm(target_batch))        
-            mask = [sks is not None for sks in sks_batch]
-            target_batch = [t for (t, b) in zip(target_batch, mask) if b]
-            sks_batch = [t for (t, b) in zip(sks_batch, mask) if b]
-            all_targets += target_batch
-            all_sks += sks_batch
-            if args.forcing_eval:
-                correct_summary = get_metrics(target_batch, sks_batch)
-                logger.info(f"correct summary: {correct_summary}")
-            else:
-                batch_correct, batch_incorrect = get_metrics(target_batch, sks_batch)
-                logger.info(f"batch {batch} correct: {format_metrics(batch_correct, cum=True)}")
-                logger.info(f"batch {batch} incorrect: {format_metrics(batch_incorrect)}")
-        
-            if args.forcing_eval:
-                correct_summary = get_metrics(targets, all_sks)
-                logger.info(f"correct summary: {correct_summary}")
-            else:
-                total_correct, total_incorrect = get_metrics(all_targets, all_sks)
-                logger.info(f"total correct: {format_metrics(total_correct, cum=True)}")
-                logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
-        
-  
-    logger.info("Finished decoding.")
+                torch.set_num_threads(1)
+                with ProcessPoolExecutor(max_workers=args.ncpu) as exe:      
+                    batch_future = exe.map(mcmc, tqdm([deepcopy(lookup[smi]) for smi in target_batch]),
+                                            target_batch,
+                                            [args.beta for _ in target_batch],
+                                            [args.mcmc_timesteps for _ in target_batch],
+                                            chunksize=args.chunk_size)
+                    sks_batch = []
+                    for sks in tqdm(batch_future, total=len(target_batch), desc="MCMC"):
+                        sks_batch.append(sks)
+        all_sks += sks_batch
+        all_smiles += target_batch
 
+        # plot average scores per iter
+        fig = plt.Figure((10, 10))
+        ax = fig.add_subplot(1,1,1)
+        scores = [[r[0] for r in res] for res in all_sks]
+        ax.plot(np.mean(scores, axis=0))
+        path = os.path.join(args.out_dir, 'mcmc.png')
+        fig.savefig(path)
+        print(os.path.abspath(path))
+
+        # save results
+        data = []
+        for res, smiles in zip(all_sks, all_smiles):
+            data_dict = {'smiles': smiles}
+            for iter, (score, smi, index) in enumerate(res):
+                data_dict[f'score_{iter+1}'] = score
+                data_dict[f'smiles_{iter+1}'] = smi
+                data_dict[f'sk_{iter+1}'] = index
+            data_dict = {k: data_dict[k] for k in sorted(data_dict)}
+            data.append(data_dict)
+        path = os.path.join(args.out_dir, 'mcmc.csv')
+        df = pd.DataFrame(data)
+        df.to_csv(path)
+  
+    logger.info("Finished mcmc.")
     return
 
 

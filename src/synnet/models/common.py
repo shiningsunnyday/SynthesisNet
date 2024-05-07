@@ -21,7 +21,7 @@ def get_args():
 
     # for training gnn
     parser.add_argument("--gnn-input-feats", type=str, help="Where to load featurized data to train GNN")
-    parser.add_argument("--pe", choices=['sin'], help='pos encoding')
+    parser.add_argument("--pe", choices=['sin', 'one_hot', 'child'], help='pos encoding')
     parser.add_argument("--feats-split", action='store_true', help="add _{train|valid|test} suffix to gnn-input-feats")
     parser.add_argument("--rewire-edges", action='store_true', help="whether to rewire skeleton edges")
         
@@ -57,6 +57,9 @@ def get_args():
 
     # gnn args
     parser.add_argument('--gnn-layer', default='GCN')
+    parser.add_argument('--heads', type=int, default=1, help="For TransformerConv")
+    parser.add_argument('--concat', default=False)
+    
     parser.add_argument('--gnn-dp-rate', default=0.5, type=float)
     parser.add_argument('--gnn-valid-loss', default='nn_accuracy')
     parser.add_argument('--gnn-loss', default='mse')
