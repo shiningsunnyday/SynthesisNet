@@ -79,8 +79,14 @@ class OptimizeGAConfig(GeneticSearchConfig):
     mermaid: bool = False
     out_dir: str
     top_k: int = 3
+
+    # Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to
+    # syntrees whose skleeton class was trained on by ckpt_dir)
     max_rxns: int = 0
+
+    # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1
+
     filter_only: List[Literal["rxn", "bb"]] = []
 
     # Objective function to optimize
