@@ -12,7 +12,6 @@ class GeneticSearchConfig(pydantic.BaseModel):
     """
 
     seed: int = 10
-    ncpu: int = 1
 
     # Individuals
     fp_bits: int = 2048
