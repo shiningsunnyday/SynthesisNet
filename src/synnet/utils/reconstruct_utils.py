@@ -314,10 +314,16 @@ def set_models(args, logger=None):
         bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
         globals()['bb_gnn'] = bb_gnn    
     if hasattr(args, 'ckpt_recognizer') and args.ckpt_recognizer:
-        recognizer = load_mlp_from_ckpt(args.ckpt_recognizer)
+        if os.path.isfile(args.ckpt_recognizer):
+            recognizer = load_mlp_from_ckpt(args.ckpt_recognizer)
+            config_path = os.path.join(Path(args.ckpt_recognizer).parent, 'config.json')
+        else:
+            recognizer_ckpt = find_best_model_ckpt(args.ckpt_recognizer)
+            recognizer = load_mlp_from_ckpt(recognizer_ckpt)
+            config_path = os.path.join(Path(args.ckpt_recognizer), 'config.json')
         globals()['recognizer'] = recognizer
         globals()['encoder'] = MorganFingerprintEncoder(2, 2048)
-        config_path = os.path.join(Path(args.ckpt_recognizer).parent, 'config.json')
+        
         config = json.load(open(config_path)        )
         globals()['skeleton_classes'] = config['datasets']
     if logger is not None:
@@ -785,8 +791,8 @@ def predict_skeleton(smiles, max_num_rxns=-1):
         for d in range(1, max_num_rxns+1):
             for ind, _, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
                 inds.append(ind)
-        inds = sorted(inds)
-        inds = [globals()['skeleton_classes'].index(ind) for ind in inds]
+        sorted_inds = sorted(inds)
+        inds = [globals()['skeleton_classes'].index(ind) for ind in sorted_inds]
         assert probs.shape[0] == 1
         ind = probs[0, inds].argmax(axis=-1).item()
         ind = inds[ind]

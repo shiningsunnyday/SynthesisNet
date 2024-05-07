@@ -139,7 +139,6 @@ def main(args):
             path = os.path.join(os.path.join(args.work_dir, 'sks/'), f'{index}_{ind}.png')
             sk.visualize(path=path)
             skeletons[k] = all_skeletons[k]
-
     print(f"{len(skeletons)} classes with >= {num_per_class} per class")
     num_classes = len(skeletons)
     setattr(args, 'num_classes', num_classes)    
@@ -184,6 +183,73 @@ def main(args):
 
     if args.ckpt:
         mlp = load_mlp_from_ckpt(args.ckpt)
+
+        # Analysis
+        if args.vis_class_criteria == 'popularity':
+            vis_class_criteria = lambda i:len(all_skeletons[list(all_skeletons)[i]])
+        elif args.vis_class_criteria == 'size_small':
+            vis_class_criteria = lambda i:-(len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions))
+        elif args.vis_class_criteria == 'size_large':
+            vis_class_criteria = lambda i:len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions)
+        else:
+            raise NotImplementedError
+        mlp.eval()
+        cmap = plt.get_cmap('tab10')
+        top_indices = sorted(range(len(all_skeletons)), key=vis_class_criteria)[-args.top_k:]
+        val_feats = []
+        val_indices = []
+        val_max_count = {}
+        for X_val, y_val in valid_dataset:
+            if y_val.sum().item() > 1:
+                continue
+            feats = mlp(X_val[None], return_hidden=True)
+            ind = y_val.argmax().item()
+            if ind not in top_indices:
+                continue
+            if val_max_count.get(ind, 0) >= 30:
+                continue
+            val_max_count[ind] = val_max_count.get(ind, 0)+1
+            val_indices.append(ind)
+            val_feats.append(feats)
+        train_feats = []
+        train_indices = []
+        train_max_count = {}        
+        for X_train, y_train in train_dataset:
+            if y_train.sum().item() > 1:
+                continue
+            feats = mlp(X_train[None], return_hidden=True)
+            ind = y_train.argmax().item()
+            if ind not in top_indices:
+                continue
+            if train_max_count.get(ind, 0) >= args.max_vis_per_class:
+                continue
+            train_max_count[ind] = train_max_count.get(ind, 0)+1
+            train_indices.append(ind)
+            train_feats.append(feats)        
+        val_feats = torch.cat(val_feats, dim=0)
+        val_feats = val_feats.detach().cpu().numpy()
+        train_feats = torch.cat(train_feats, dim=0)
+        train_feats = train_feats.detach().cpu().numpy()    
+        tsne = TSNE(n_components=2, verbose=1, random_state=0, init='pca')    
+        X_val = tsne.fit_transform(val_feats)   
+        X_train = tsne.fit_transform(train_feats)   
+        fig = plt.Figure(figsize=(10,5))
+        ax = fig.add_subplot(1,2,1)
+        ax.set_title("Hidden feats (val set)")
+        for ind in top_indices:
+            mask = np.array(val_indices) == ind
+            popularity = len(top_indices)-top_indices.index(ind)
+            ax.scatter(X_val[mask,0],X_val[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
+        ax.legend(title="Skeleton class")
+        ax = fig.add_subplot(1,2,2)
+        ax.set_title("Hidden feats (train set)")
+        for ind in top_indices:
+            mask = np.array(train_indices) == ind
+            popularity = len(top_indices)-top_indices.index(ind)
+            ax.scatter(X_train[mask,0],X_train[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
+        ax.legend(title="Skeleton class")    
+        fig.savefig(os.path.join(args.work_dir, 'tsne.png'))
+
     else:
         mlp = MLP(
             input_dim=args.nbits,
@@ -227,77 +293,10 @@ def main(args):
         )
         logger.info(f"Start training")
         trainer.fit(mlp, train_dataloader, valid_dataloader)
-        logger.info(f"Training completed.")    
-
-    # Analysis
-    if args.vis_class_criteria == 'popularity':
-        vis_class_criteria = lambda i:len(all_skeletons[list(all_skeletons)[i]])
-    elif args.vis_class_criteria == 'size_small':
-        vis_class_criteria = lambda i:-(len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions))
-    elif args.vis_class_criteria == 'size_large':
-        vis_class_criteria = lambda i:len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions)
-    else:
-        raise NotImplementedError
-    mlp.eval()
-    cmap = plt.get_cmap('tab10')
-    top_indices = sorted(range(len(all_skeletons)), key=vis_class_criteria)[-args.top_k:]
-    val_feats = []
-    val_indices = []
-    val_max_count = {}
-    for X_val, y_val in valid_dataset:
-        if y_val.sum().item() > 1:
-            continue
-        feats = mlp(X_val[None], return_hidden=True)
-        ind = y_val.argmax().item()
-        if ind not in top_indices:
-            continue
-        if val_max_count.get(ind, 0) >= 30:
-            continue
-        val_max_count[ind] = val_max_count.get(ind, 0)+1
-        val_indices.append(ind)
-        val_feats.append(feats)
-    train_feats = []
-    train_indices = []
-    train_max_count = {}        
-    for X_train, y_train in train_dataset:
-        if y_train.sum().item() > 1:
-            continue
-        feats = mlp(X_train[None], return_hidden=True)
-        ind = y_train.argmax().item()
-        if ind not in top_indices:
-            continue
-        if train_max_count.get(ind, 0) >= args.max_vis_per_class:
-            continue
-        train_max_count[ind] = train_max_count.get(ind, 0)+1
-        train_indices.append(ind)
-        train_feats.append(feats)        
-    val_feats = torch.cat(val_feats, dim=0)
-    val_feats = val_feats.detach().cpu().numpy()
-    train_feats = torch.cat(train_feats, dim=0)
-    train_feats = train_feats.detach().cpu().numpy()    
-    tsne = TSNE(n_components=2, verbose=1, random_state=0, init='pca')    
-    X_val = tsne.fit_transform(val_feats)   
-    X_train = tsne.fit_transform(train_feats)   
-    fig = plt.Figure(figsize=(10,5))
-    ax = fig.add_subplot(1,2,1)
-    ax.set_title("Hidden feats (val set)")
-    for ind in top_indices:
-        mask = np.array(val_indices) == ind
-        popularity = len(top_indices)-top_indices.index(ind)
-        ax.scatter(X_val[mask,0],X_val[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
-    ax.legend(title="Skeleton class")
-    ax = fig.add_subplot(1,2,2)
-    ax.set_title("Hidden feats (train set)")
-    for ind in top_indices:
-        mask = np.array(train_indices) == ind
-        popularity = len(top_indices)-top_indices.index(ind)
-        ax.scatter(X_train[mask,0],X_train[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
-    ax.legend(title="Skeleton class")    
-    fig.savefig(os.path.join(args.work_dir, 'tsne.png'))
+        logger.info(f"Training completed.")            
         
 
 
 if __name__ == "__main__":
     args = get_args()
-    breakpoint()
     main(args)

@@ -1,5 +1,7 @@
-use_case='reconstruct_top_k=3_max_num_rxns=3_max_rxns=-1'
-ncpu=1;
+MAX_NUM_RXNS=6
+
+use_case="reconstruct_top_k=3_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=-1"
+ncpu=100;
 batch_size=100000;
 
 # python scripts/reconstruct-targets.py \
@@ -37,16 +39,16 @@ batch_size=100000;
 
 python scripts/reconstruct-targets.py \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
-    --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
-    --ckpt-bb /ssd/msun415/surrogate/version_70/ \
+    --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
+    --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --out-dir /home/msun415/SynTreeNet/results/viz/ \
     --top-k 3 \
-    --max_num_rxns 3 \
+    --max_num_rxns ${MAX_NUM_RXNS} \
     --max_rxns -1 \
     --test-correct-method reconstruct \
     --strategy topological \
     --ncpu $ncpu \
     --batch-size $batch_size \
-    --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
+    --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
     --sender-filename input_${use_case}.txt \
     --receiver-filename output_${use_case}.txt

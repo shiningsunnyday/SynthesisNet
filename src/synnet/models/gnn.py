@@ -16,7 +16,7 @@ import torch
 import pickle
 import os
 import networkx as nx
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 from scipy import sparse
 from tqdm import tqdm
