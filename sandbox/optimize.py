@@ -77,12 +77,19 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     forcing_eval: bool = False
     mermaid: bool = False
+    one_per_class: bool = False
+
     out_dir: str
+
+    # Beam width for first bb
     top_k: int = 3
 
+    # Beam width for first rxn
+    top_k_rxn: int = 3
+
     # Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to
-    # syntrees whose skleeton class was trained on by ckpt_dir)
-    max_rxns: int = 0
+    # syntrees whose skeleton class was trained on by ckpt_dir)
+    max_rxns: int = -1
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1
@@ -95,6 +102,8 @@ class OptimizeGAConfig(GeneticSearchConfig):
     num_workers: int = 1
     chunksize: int = 32
 
+    # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
+    # Topological: Decode every topological order of the rxn+bb nodes.
     strategy: Literal["conf", "topological"] = "topological"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
 
