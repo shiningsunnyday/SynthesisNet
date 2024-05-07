@@ -79,6 +79,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     mermaid: bool = False
     out_dir: str
     top_k: int = 3
+    max_num_rxns: int = -1
     filter_only: List[Literal["rxn", "bb"]] = []
 
     # Objective function to optimize
