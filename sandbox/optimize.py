@@ -307,7 +307,7 @@ def main(config: OptimizeGAConfig):
     else:
         raise NotImplementedError()
 
-    fn = functools.partial(test_surrogate, converter, config=config)
+    fn = functools.partial(test_surrogate, converter=converter, config=config)
     search = GeneticSearch(config)
     search.optimize(fn)
 
