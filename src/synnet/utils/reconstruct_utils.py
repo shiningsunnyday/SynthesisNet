@@ -283,7 +283,7 @@ def lookup_skeleton_key(zss_tree, tree_key):
     else: # return skeleton with nearest tree edit distance
         min_dist = float("inf")
         index = -1
-        for index, cand_zss_tree in globals()['skeleton_index_lookup'].values():
+        for index, cand_zss_tree, _ in globals()['skeleton_index_lookup'].values():
             dist = simple_distance(zss_tree, cand_zss_tree)
             if dist < min_dist:
                 ans = index
