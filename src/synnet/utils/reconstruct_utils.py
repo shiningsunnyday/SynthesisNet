@@ -768,7 +768,7 @@ def load_data(args, logger=None):
         logger.info("...loading data completed.")            
     # remember indices of bblocks
     bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
-    for i, r in tqdm(enumerate(rxns)):
+    for i, r in tqdm(enumerate(rxns), desc="Loading reaction data"):
         bblock_mask = []
         for j in range(len(r.available_reactants)):
             mask = [False for _ in bblocks]            
