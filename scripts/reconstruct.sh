@@ -44,6 +44,8 @@ python scripts/reconstruct-targets.py \
     --out-dir /home/msun415/SynTreeNet/results/viz/ \
     --top-k 3 \
     --max_num_rxns ${MAX_NUM_RXNS} \
+    --top-k-rxn 3 \
+    --max_num_rxns 3 \
     --max_rxns -1 \
     --test-correct-method reconstruct \
     --strategy topological \
