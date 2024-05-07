@@ -439,7 +439,7 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
     return mask_imposs, paths
 
 
-def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_inds=None):
+def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, top_rxn=1, bblock_inds=None):
     """
     if rxn
         detect if n is within MAX_DEPTH of root
@@ -451,13 +451,10 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
     rxn_graph, node_map, _ = sk.rxn_graph()    
     if sk.rxns[n]:  
         cur = node_map[n]
-        if rxn_graph.nodes[cur]['depth'] <= 2:
-            mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
-            # assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
-            logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
-        else:
-            paths = []
-        rxn_id = logits_n[-NUM_POSS:].argmax(axis=-1).item()     
+        mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
+        # assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
+        logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
+        rxn_id = logits_n[-NUM_POSS:].argsort(axis=-1)[-top_rxn].item()     
         # Sanity check for forcing eval
         sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
         sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
@@ -563,7 +560,8 @@ def pick_node(sk, logits, bb_emb):
 
 @torch.no_grad()
 def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblocks, bblock_inds=None, skviz=None):
-    top_k = args.top_k
+    top_k_bb = args.top_k
+    top_k_rxn = args.top_k_rxn
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
     model_bb.eval()
@@ -641,14 +639,23 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 logits_n = logits[n].clone()
                 sk_n = deepcopy(sk)
                 first_bb = sk_n.leaves[n] and (sk_n.leaves)[sk_n.mask == 1].sum() == 0
-                if top_k > 1 and first_bb: # first bb                
-                    for k in range(1, 1+top_k):
+                first_rxn = sk_n.rxns[n] and (sk_n.rxns)[sk_n.mask == 1].sum() == 0
+                if top_k_bb > 1 and first_bb: # first bb                
+                    for k in range(1, 1+top_k_bb):
                         sk_copy = deepcopy(sk_n)
                         fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k, bblock_inds=bblock_inds)
                         if next_node is None:
                             sks.append(sk_copy)
                         else:
                             sks.append((sk_copy, deepcopy(next_node)))
+                elif top_k_rxn > 1 and first_rxn:
+                    for k in range(1, 1+top_k_rxn):
+                        sk_copy = deepcopy(sk_n)
+                        fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_rxn=k, bblock_inds=bblock_inds)
+                        if next_node is None:
+                            sks.append(sk_copy)
+                        else:
+                            sks.append((sk_copy, deepcopy(next_node)))                    
                 else:
                     fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1, bblock_inds=bblock_inds)
                     if next_node is None:
