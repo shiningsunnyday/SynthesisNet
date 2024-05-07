@@ -516,6 +516,10 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, bblock_
                 indices = bblock_inds
             else:
                 indices = list(range(bb_emb.shape[0]))
+            pred_rxn_id = sk.tree.nodes[pred]['rxn_id']            
+            if hasattr(rxns[pred_rxn_id], 'bblock_mask'):
+                second = sk.tree.nodes[n]['child'] == 'right'
+                indices = rxns[pred_rxn_id].bblock_mask[second]
             bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
             smiles = bbs[indices[bb_ind]]
         sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
@@ -748,7 +752,18 @@ def load_data(args, logger=None):
     bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
     if logger is not None:
         logger.info(f"Successfully read {args.embeddings_knn_file}.")    
-        logger.info("...loading data completed.")        
+        logger.info("...loading data completed.")            
+    # remember indices of bblocks
+    bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
+    for i, r in tqdm(enumerate(rxns)):
+        bblock_mask = []
+        for j in range(len(r.available_reactants)):
+            mask = [False for _ in bblocks]            
+            for k in range(len(r.available_reactants[j])):
+                bb_index = bb_index_lookup[r.available_reactants[j][k]]
+                mask[bb_index] = True
+            bblock_mask.append(np.argwhere(mask).flatten())
+        setattr(r, 'bblock_mask', bblock_mask)
     globals()['rxns'] = rxns
     globals()['rxn_templates'] = rxn_templates    
     globals()['bblocks'] = bblocks

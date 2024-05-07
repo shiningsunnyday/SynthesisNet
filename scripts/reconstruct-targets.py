@@ -147,7 +147,7 @@ def main(args):
                     else:
                         syntree_set.append(syntree)       
         random.shuffle(syntree_set)
-        targets = [syntree.root.smiles for syntree in syntree_set]                        
+        targets = [syntree.root.smiles for syntree in syntree_set]                    
     lookup = {}    
     for i, target in tqdm(enumerate(targets), "initializing skeletons"):
         if args.data:        
