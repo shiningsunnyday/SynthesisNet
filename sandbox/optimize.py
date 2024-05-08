@@ -229,6 +229,7 @@ def test_surrogate(batch, converter, config: OptimizeGAConfig):
 def main(config: OptimizeGAConfig):
     global args
     args = config  # Hack so reconstruct_utils.py works
+    config.top_bbs_file = None
 
     if config.log_file:
         handler = logging.FileHandler(config.log_file)
