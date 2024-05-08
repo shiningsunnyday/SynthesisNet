@@ -1,4 +1,5 @@
 MAX_NUM_RXNS=6
+export PYTHONPATH="${HOME}/SynTreeNet/src"
 export OMP_NUM_THREADS=1
 use_case="ga"
 for ((i =1; i <= $1; i++));
