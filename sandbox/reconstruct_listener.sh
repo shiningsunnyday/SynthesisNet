@@ -8,7 +8,7 @@ do
         --proc_id $i \
         --filename input_${use_case}.txt \
         --output_filename output_${use_case}.txt \
-        --skeleton-set-file results/viz/skeletons-valid.pkl \
+        --skeleton-set-file /ssd/msun415/skeletons/skeletons-valid.pkl \
         --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
         --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
         --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
