@@ -109,7 +109,7 @@ class GeneticSearch:
         metrics["unique"] = len(unique) / N
 
         # Novelty
-        metrics["novelty"] = len(unique - set(self.background_smiles)) / len(unique)
+        metrics["novelty"] = len(unique - self.background_smiles) / len(unique)
 
         return metrics
 
