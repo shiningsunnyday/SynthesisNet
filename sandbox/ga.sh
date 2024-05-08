@@ -6,7 +6,7 @@ python sandbox/optimize.py \
     --ckpt_rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
     --ckpt_bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --ckpt_recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
-    --max_rxns 0 \
+    --max_rxns -1 \
     --max_num_rxns ${MAX_NUM_RXNS} \
     --top_k 3 \
     --top_k_rxn 3 \
