@@ -12,6 +12,7 @@ import scipy
 import torch
 import tqdm
 import wandb
+from rdkit import Chem
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -29,7 +30,10 @@ class GeneticSearch:
         self.config = config
 
         with open(config.background_set_file, "rb") as f:
-            self.background_smiles = set(st.root.smiles for st in pickle.load(f).keys())
+            self.background_smiles = set(
+                Chem.CanonSmiles(st.root.smiles)
+                for st in pickle.load(f).keys()
+            )
 
     def initialize_random(self) -> Population:
         cfg = self.config
