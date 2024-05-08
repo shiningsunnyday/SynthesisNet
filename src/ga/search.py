@@ -90,6 +90,8 @@ class GeneticSearch:
         }
         for k in [1, 10, 100]:
             metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
+        for k in range(1, 4):
+            metrics[f"scores/top{k}"] = scores[k - 1]
 
         # Diversity
         distances = []
