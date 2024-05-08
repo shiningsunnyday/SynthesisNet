@@ -64,7 +64,8 @@ def get_args():
         help="Choose from ['train', 'valid', 'test', 'chembl'] or provide a file with one SMILES per line.",
     )
     parser.add_argument("--top-bbs-file", help='if given, consider only these bbs')
-    parser.add_argument("--top-k", default=1, type=int)
+    parser.add_argument("--top-k", default=1, type=int, help="Beam width for first bb")
+    parser.add_argument("--top-k-rxn", default=1, type=int, help="Beam width for first rxn")
     parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
     parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
