@@ -51,9 +51,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Input file for the pre-computed embeddings (*.npy)
     embeddings_knn_file: str = "data/assets/building-blocks/enamine_us_emb_fp_256.npy"
 
-    # If given, consider only these bbs
-    top_bbs_file: Optional[str] = "/ssd/msun415/bblocks-top-1000.txt"
-
     # Model checkpoint to use
     ckpt_bb: Optional[str] = None
 
@@ -69,8 +66,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
-
-    hash_dir: str
 
     # Input file for the skeletons of syntree-file
     skeleton_file: str = "results/viz/top_1000/skeletons-top-1000.pkl"
@@ -259,29 +254,14 @@ def main(config: OptimizeGAConfig):
 
         # load the purchasable building block SMILES to a dictionary
         bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-        if args.top_bbs_file:
-            bblock_inds = [bblocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
-            bblock_inds = sorted(bblock_inds)
-            bblocks = [bblocks[ind] for ind in bblock_inds]
-            bb_dict = {block: i for i, block in enumerate(bblocks)}
-            emb_path = args.top_bbs_file.replace('.txt', '.npy')
-            # if not os.path.exists(emb_path):
-            data = np.load(args.embeddings_knn_file)
-            top_emb = data[bblock_inds]
-            np.save(emb_path, top_emb)
-            bblocks_molembedder = (
-                MolEmbedder().load_precomputed(emb_path).init_balltree(cosine_distance)
-            )
-            bb_emb = bblocks_molembedder.get_embeddings()
-        else:
-            bblock_inds = None
-            # A dict is used as lookup table for 2nd reactant during inference:
-            bb_dict = {block: i for i, block in enumerate(bblocks)}
-            # ... building block embedding
-            bblocks_molembedder = (
-                MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-            )
-            bb_emb = bblocks_molembedder.get_embeddings()
+        bblock_inds = None
+        # A dict is used as lookup table for 2nd reactant during inference:
+        bb_dict = {block: i for i, block in enumerate(bblocks)}
+        # ... building block embedding
+        bblocks_molembedder = (
+            MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
+        )
+        bb_emb = bblocks_molembedder.get_embeddings()
 
         # load the reaction templates as a ReactionSet object
         rxns = ReactionSet().load(args.rxns_collection_file).rxns
