@@ -53,7 +53,7 @@ def get_args():
     parser.add_argument("--ckpt-bb", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt-rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt-recognizer", type=str, help="Recognizer checkpoint to use")    
-    parser.add_argument("--max_rxns", type=int, help="Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to syntrees whose skleeton class was trained on by ckpt_dir)", default=-1)
+    parser.add_argument("--max_rxns", type=int, help="Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to syntrees whose skleton class was trained on by ckpt_dir)", default=-1)
     parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)    
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")
     parser.add_argument(

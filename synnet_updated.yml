@@ -3,7 +3,6 @@ channels:
   - pytorch
   - nvidia
   - conda-forge
-  - defaults
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_kmp_llvm
@@ -22,6 +21,12 @@ dependencies:
   - colorama=0.4.6=pyhd8ed1ab_0
   - comm=0.2.2=pyhd8ed1ab_0
   - contourpy=1.1.1=py39h7633fee_1
+  - cuda-cudart=11.8.89=0
+  - cuda-cupti=11.8.87=0
+  - cuda-libraries=11.8.0=0
+  - cuda-nvrtc=11.8.89=0
+  - cuda-nvtx=11.8.86=0
+  - cuda-runtime=11.8.0=0
   - cudatoolkit=11.4.1=h8ab8bb3_9
   - cycler=0.11.0=pyhd8ed1ab_0
   - debugpy=1.8.1=py39h3d6467e_0
@@ -42,6 +47,8 @@ dependencies:
   - fsspec=2023.9.2=pyh1a96a4e_0
   - future=0.18.3=pyhd8ed1ab_0
   - gettext=0.21.1=h27087fc_0
+  - gmp=6.3.0=h59595ed_1
+  - gmpy2=2.1.5=py39h03b5d36_0
   - greenlet=2.0.2=py39h3d6467e_1
   - icu=69.1=h9c3ff4c_0
   - importlib-resources=6.1.0=pyhd8ed1ab_0
@@ -61,6 +68,12 @@ dependencies:
   - libbrotlidec=1.1.0=hd590300_0
   - libbrotlienc=1.1.0=hd590300_0
   - libcblas=3.9.0=12_linux64_mkl
+  - libcublas=11.11.3.6=0
+  - libcufft=10.9.0.58=0
+  - libcufile=1.9.1.3=0
+  - libcurand=10.3.5.147=0
+  - libcusolver=11.4.1.48=0
+  - libcusparse=11.7.5.86=0
   - libdeflate=1.19=hd590300_0
   - libexpat=2.5.0=hcb278e6_1
   - libfaiss=1.7.4=h13c3c6d_0_cuda11.4
@@ -73,7 +86,9 @@ dependencies:
   - libiconv=1.17=h166bdaf_0
   - libjpeg-turbo=2.1.5.1=hd590300_1
   - liblapack=3.9.0=12_linux64_mkl
+  - libnpp=11.8.0.86=0
   - libnsl=2.0.0=h7f98852_0
+  - libnvjpeg=11.9.0.86=0
   - libopenblas=0.3.24=pthreads_h413a1c8_0
   - libpng=1.6.39=h753d276_0
   - libprotobuf=3.18.3=h6239696_0
@@ -90,6 +105,9 @@ dependencies:
   - matplotlib-base=3.8.0=py39he9076e7_1
   - matplotlib-inline=0.1.7=pyhd8ed1ab_0
   - mkl=2021.4.0=h8d4b97c_729
+  - mpc=1.3.1=hfe3b2da_0
+  - mpfr=4.2.1=h9458935_1
+  - mpmath=1.3.0=pyhd8ed1ab_0
   - munkres=1.1.4=pyh9f0ad1d_0
   - ncurses=6.4=hcb278e6_0
   - nest-asyncio=1.6.0=pyhd8ed1ab_0
@@ -120,6 +138,8 @@ dependencies:
   - python-dateutil=2.8.2=pyhd8ed1ab_0
   - python-tzdata=2023.3=pyhd8ed1ab_0
   - python_abi=3.9=4_cp39
+  - pytorch-cuda=11.8=h7e8668a_5
+  - pytorch-mutex=1.0=cuda
   - pytz=2023.3.post1=pyhd8ed1ab_0
   - pyyaml=6.0.1=py39hd1e30aa_1
   - pyzmq=26.0.2=py39ha1047a2_0
@@ -132,6 +152,7 @@ dependencies:
   - sleef=3.5.1=h9b69904_2
   - sqlalchemy=2.0.21=py39hd1e30aa_0
   - stack_data=0.6.2=pyhd8ed1ab_0
+  - sympy=1.12=pypyh9d50eac_103
   - tbb=2021.7.0=h924138e_0
   - tk=8.6.13=h2797004_0
   - torchmetrics=1.2.0=pyhd8ed1ab_0
@@ -189,7 +210,6 @@ dependencies:
       - markdown==3.5
       - markdown-mermaid-to-images==0.3.0.post1
       - markupsafe==2.1.3
-      - mpmath==1.3.0
       - multidict==6.0.4
       - multiprocess==0.70.15
       - networkx==3.1
@@ -225,7 +245,7 @@ dependencies:
       - scikit-learn==1.3.1
       - scipy==1.11.2
       - seaborn==0.12.2
-      - sympy==1.12
+      - setproctitle==1.3.3
       - tensorboard==2.15.0
       - tensorboard-data-server==0.7.2
       - tensorboardx==2.6.2.2
@@ -237,4 +257,4 @@ dependencies:
       - werkzeug==3.0.1
       - yarl==1.9.2
       - zss==1.2.0
-prefix: /home/msun415/miniconda3/envs/synnet
+prefix: /home/msun415/miniforge3/envs/synnet
