@@ -51,6 +51,9 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Input file for the pre-computed embeddings (*.npy)
     embeddings_knn_file: str = "data/assets/building-blocks/enamine_us_emb_fp_256.npy"
 
+    # If given, consider only these bbs
+    top_bbs_file: Optional[str] = None
+
     # Model checkpoint to use
     ckpt_bb: Optional[str] = None
 
@@ -229,7 +232,6 @@ def test_surrogate(batch, converter, config: OptimizeGAConfig):
 def main(config: OptimizeGAConfig):
     global args
     args = config  # Hack so reconstruct_utils.py works
-    config.top_bbs_file = None
 
     if config.log_file:
         handler = logging.FileHandler(config.log_file)
