@@ -216,6 +216,15 @@ def get_smiles_synnet(
 def test_surrogate(batch, converter, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
+    # Debug option
+    if config.num_workers <= 0:
+        smiles = map(converter, batch)
+        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
+        for smi, ind in pbar:
+            ind.smiles = smi
+            ind.fitness = oracle(smi)
+        return
+
     # Needed to avoid deadlock
     # Reference:
     #   https://github.com/pytorch/pytorch/issues/17199
