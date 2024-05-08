@@ -18,7 +18,6 @@ from ga import utils
 from ga.config import GeneticSearchConfig, Individual
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
-from synnet.utils.analysis_utils import serialize_string
 from synnet.utils.data_utils import binary_tree_to_skeleton
 
 Population = List[Individual]
@@ -114,17 +113,26 @@ class GeneticSearch:
         return metrics
 
     def cull(self, population: Population) -> Population:
-        serials = []
-        for indv in population:
-            tree = indv.bt
-            root = next(v for v, d in tree.in_degree() if d == 0)
-            fp_str = "".join(list(map(str, map(int, indv.fp))))
-            serial = serialize_string(tree, root) + " " + fp_str
-            serials.append(serial)
-        _, inds = np.unique(serials, return_index=True)
-        population = [population[ind] for ind in inds]
-        population = sorted(population, key=(lambda x: x.fitness), reverse=True)
-        return population[:self.config.population_size]
+        N = self.config.population_size
+
+        filtered = []
+        leftover = []
+        seen_smiles = set()
+        for ind in population:
+            if ind.smiles not in seen_smiles:
+                filtered.append(ind)
+                seen_smiles.add(ind.smiles)
+            else:
+                leftover.append(ind)
+        filtered.sort(key=(lambda x: x.fitness), reverse=True)
+        filtered = filtered[:N]
+
+        # Add random selection of leftover
+        if len(filtered) < N:
+            filtered += random.sample(leftover, k=(N - len(filtered)))
+            filtered.sort(key=(lambda x: x.fitness), reverse=True)
+
+        return filtered
 
     def choose_couples(
         self,
