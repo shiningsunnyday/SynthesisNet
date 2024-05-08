@@ -46,6 +46,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     # IO
     initialize_path: str = None
     checkpoint_path: str = None
+    background_set_file: str
 
     # WandB
     wandb: bool = False

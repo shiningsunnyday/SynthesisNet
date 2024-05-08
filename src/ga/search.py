@@ -1,6 +1,7 @@
 import collections
 import itertools
 import json
+import pickle
 import random
 from typing import Callable, Dict, List, Tuple
 
@@ -26,6 +27,9 @@ class GeneticSearch:
 
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
+
+        with open(config.background_set_file, "rb") as f:
+            self.background_smiles = set(st.root.smiles for st in pickle.load(f).keys())
 
     def initialize_random(self) -> Population:
         cfg = self.config
@@ -92,9 +96,16 @@ class GeneticSearch:
             distances.append(d)
         metrics["diversity"] = np.mean(distances).item()
 
+        # Population size
+        N = len(population)
+        metrics["population_size"] = N
+
         # Uniqueness
         unique = set(ind.smiles for ind in population)
-        metrics["unique"] = len(unique) / len(population)
+        metrics["unique"] = len(unique) / N
+
+        # Novelty
+        metrics["novelty"] = len(unique - set(self.background_smiles)) / len(unique)
 
         return metrics
 

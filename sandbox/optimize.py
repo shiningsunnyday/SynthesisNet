@@ -8,6 +8,7 @@ from typing import List, Literal, Optional
 import numpy as np
 import pydantic_cli
 import tqdm
+from rdkit import Chem
 from tdc import Oracle
 
 from ga.config import GeneticSearchConfig
@@ -236,6 +237,7 @@ def test_surrogate(batch, converter, config: OptimizeGAConfig):
         smiles = exe.map(converter, batch, chunksize=config.chunksize)
         pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
         for smi, ind in pbar:
+            smi = Chem.CanonSmiles(smi)
             ind.smiles = smi
             ind.fitness = oracle(smi)
 
