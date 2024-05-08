@@ -127,9 +127,10 @@ class GeneticSearch:
         filtered.sort(key=(lambda x: x.fitness), reverse=True)
         filtered = filtered[:N]
 
-        # Add random selection of leftover
+        # Add top individuals of leftover
         if len(filtered) < N:
-            filtered += random.sample(leftover, k=(N - len(filtered)))
+            leftover.sort(key=(lambda x: x.fitness), reverse=True)
+            filtered += leftover[:(N - len(filtered))]
             filtered.sort(key=(lambda x: x.fitness), reverse=True)
 
         return filtered
