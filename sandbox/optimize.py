@@ -102,7 +102,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
     # Topological: Decode every topological order of the rxn+bb nodes.
-    strategy: Literal["conf", "topological"] = "topological"
+    strategy: Literal["conf", "topological"] = "conf"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
 
 
@@ -227,19 +227,14 @@ def test_surrogate(batch, converter, config: OptimizeGAConfig):
     # Debug option
     if config.num_workers <= 0:
         smiles = map(converter, batch)
-        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
-        for smi, ind in pbar:
-            ind.smiles = smi
-            ind.fitness = oracle(smi)
-        return
-
-    with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
+    else:
         smiles = exe.map(converter, batch, chunksize=config.chunksize)
-        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
-        for smi, ind in pbar:
-            smi = Chem.CanonSmiles(smi)
-            ind.smiles = smi
-            ind.fitness = oracle(smi)
+
+    pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
+    for smi, ind in pbar:
+        smi = Chem.CanonSmiles(smi)
+        ind.smiles = smi
+        ind.fitness = oracle(smi)
 
 
 def main(config: OptimizeGAConfig):
@@ -310,11 +305,13 @@ def main(config: OptimizeGAConfig):
 
     else:
         raise NotImplementedError()
-    
+
+    exe = ProcessPoolExecutor(max_workers=config.num_workers)
     converter = functools.partial(thread_quarantine, converter=converter)
-    fn = functools.partial(test_surrogate, converter=converter, config=config)
+    fn = functools.partial(test_surrogate, converter=converter, config=config, exe=exe)
     search = GeneticSearch(config)
     search.optimize(fn)
+    exe.shutdown()
 
     return 0
 
