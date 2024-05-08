@@ -7,7 +7,6 @@ from typing import List, Literal, Optional
 
 import numpy as np
 import pydantic_cli
-import torch
 import tqdm
 from tdc import Oracle
 
