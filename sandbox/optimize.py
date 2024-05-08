@@ -167,7 +167,7 @@ def get_smiles_ours(ind):
     ans = 0.0
     best_smi = ""
     for sk in decode(sk0, ind.fp):
-        score, smi = reconstruct(sk, ind.fp, return_smi=True)
+        score, smi = reconstruct(sk, ind.fp)
         if score > ans:
             ans = score
             best_smi = smi
