@@ -2,7 +2,7 @@ import functools
 import logging
 import pathlib
 import pickle
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import List, Literal, Optional
 
 import numpy as np
@@ -157,8 +157,6 @@ def fetch_oracle(objective):
 
 
 def get_smiles_ours(ind):
-    torch.set_num_threads(1)
-
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
     index = lookup_skeleton_key(sk.zss_tree, tree_key)
@@ -215,6 +213,14 @@ def get_smiles_synnet(
         return tree.chemicals[max_score_idx].smiles, tree
 
 
+# Needed to avoid deadlock
+# Reference:
+#   https://github.com/pytorch/pytorch/issues/17199
+def thread_quarantine(ind, converter):
+    with ThreadPoolExecutor(max_workers=1) as exe:
+        return exe.submit(converter, ind).result()
+
+
 def test_surrogate(batch, converter, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
@@ -226,11 +232,6 @@ def test_surrogate(batch, converter, config: OptimizeGAConfig):
             ind.smiles = smi
             ind.fitness = oracle(smi)
         return
-
-    # Needed to avoid deadlock
-    # Reference:
-    #   https://github.com/pytorch/pytorch/issues/17199
-    torch.set_num_threads(1)
 
     with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
         smiles = exe.map(converter, batch, chunksize=config.chunksize)
@@ -308,7 +309,8 @@ def main(config: OptimizeGAConfig):
 
     else:
         raise NotImplementedError()
-
+    
+    converter = functools.partial(thread_quarantine, converter=converter)
     fn = functools.partial(test_surrogate, converter=converter, config=config)
     search = GeneticSearch(config)
     search.optimize(fn)
