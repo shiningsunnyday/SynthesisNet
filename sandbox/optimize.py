@@ -1,14 +1,14 @@
+import fcntl
 import functools
 import logging
 import pathlib
 import pickle
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Literal, Optional
 
 import numpy as np
 import pydantic_cli
-import tqdm
-from rdkit import Chem
 from tdc import Oracle
 
 from ga.config import GeneticSearchConfig
@@ -17,13 +17,13 @@ from synnet.MolEmbedder import MolEmbedder
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
-from synnet.utils.data_utils import ReactionSet, Skeleton, SkeletonSet, binary_tree_to_skeleton
+from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
 from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
-    decode,
+    DELIM,
     load_data,
+    lock,
     lookup_skeleton_key,
-    reconstruct,
     serialize_string,
     set_models,
     test_skeletons,
@@ -105,6 +105,9 @@ class OptimizeGAConfig(GeneticSearchConfig):
     strategy: Literal["conf", "topological"] = "topological"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
 
+    sender_filename: str = "input_ga.txt"
+    receiver_filename: str = "output_ga.txt"
+
 
 def dock_drd3(smi):
     # define the oracle function from the TDC
@@ -156,22 +159,8 @@ def fetch_oracle(objective):
         raise ValueError("Objective function not implemented")
 
 
-def get_smiles_ours(ind):
-    sk = binary_tree_to_skeleton(ind.bt)
-    tree_key = serialize_string(sk.tree, sk.tree_root)
-    index = lookup_skeleton_key(sk.zss_tree, tree_key)
-
-    st0 = globals()["skeleton_list"][index]
-    sk0 = Skeleton(st0, index)
-
-    ans = 0.0
-    best_smi = ""
-    for sk in decode(sk0, ind.fp):
-        score, smi = reconstruct(sk, ind.fp)
-        if score > ans:
-            ans = score
-            best_smi = smi
-    return best_smi
+def get_smiles_ours(ind, config):
+    raise NotImplementedError()
 
 
 def get_smiles_synnet(
@@ -221,25 +210,56 @@ def thread_quarantine(ind, converter):
         return exe.submit(converter, ind).result()
 
 
-def test_surrogate(batch, converter, config: OptimizeGAConfig):
+def test_surrogate(batch, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
-    # Debug option
-    if config.num_workers <= 0:
-        smiles = map(converter, batch)
-        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
-        for smi, ind in pbar:
-            ind.smiles = smi
-            ind.fitness = oracle(smi)
-        return
+    open(config.sender_filename, "w+").close()  # clear
+    open(config.receiver_filename, "w+").close()  # clear
 
-    with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
-        smiles = exe.map(converter, batch, chunksize=config.chunksize)
-        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
-        for smi, ind in pbar:
-            smi = Chem.CanonSmiles(smi)
-            ind.smiles = smi
-            ind.fitness = oracle(smi)
+    while True:
+        with open(config.sender_filename, "r") as fr:
+            editable = lock(fr)
+            if editable:
+                with open(config.sender_filename, "w") as fw:
+                    for ind in batch:
+                        sk = binary_tree_to_skeleton(ind.bt)
+                        tree_key = serialize_string(sk.tree, sk.tree_root)
+                        bits = list(map(str, map(int, ind.fp)))
+                        fp = "".join(bits)
+                        index = lookup_skeleton_key(sk.zss_tree, tree_key)
+                        sample = DELIM.join([fp, str(index)])
+                        fw.write("{}\n".format(sample))
+                break
+            fcntl.flock(fr, fcntl.LOCK_UN)
+
+    print("Waiting for reconstruct evaluation...")
+    while True:
+        with open(config.receiver_filename, 'r') as fr:
+            editable = lock(fr)
+            if editable:
+                res = []
+                res_idxes = []
+                lines = fr.readlines()
+                seen_idxes = set()
+                for idx, line in enumerate(lines):
+                    splitted_line = line.strip().split()
+                    key = splitted_line[0]
+                    if key in seen_idxes:
+                        continue
+                    seen_idxes.add(key)
+                    best_smi = splitted_line[1].split(DELIM)[1]
+                    res_idxes.append(int(splitted_line[0]))
+                    res.append(best_smi)
+                if len(res) == len(batch):
+                    res = [res[idx] for idx in np.argsort(res_idxes)]
+                    res = [(oracle(smi), smi) for smi in res]
+                    break
+            fcntl.flock(fr, fcntl.LOCK_UN)
+        time.sleep(1)
+
+    for ind, (score, smi) in zip(batch, res):
+        ind.fitness = score
+        ind.smi = smi
 
 
 def main(config: OptimizeGAConfig):
@@ -310,7 +330,7 @@ def main(config: OptimizeGAConfig):
 
     else:
         raise NotImplementedError()
-    
+
     converter = functools.partial(thread_quarantine, converter=converter)
     fn = functools.partial(test_surrogate, converter=converter, config=config)
     search = GeneticSearch(config)
