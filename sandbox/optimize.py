@@ -157,6 +157,8 @@ def fetch_oracle(objective):
 
 
 def get_smiles_ours(ind):
+    torch.set_num_threads(1)
+
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
     index = lookup_skeleton_key(sk.zss_tree, tree_key)
