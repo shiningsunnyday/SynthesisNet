@@ -33,6 +33,7 @@ from copy import deepcopy
 import fcntl
 import random
 from tqdm import tqdm
+import contextlib
 
 def lock(f):
     try:
@@ -40,6 +41,16 @@ def lock(f):
     except IOError:
         return False
     return True
+
+
+@contextlib.contextmanager
+def torch_single_threaded():
+    old_num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        yield None 
+    finally: 
+        torch.set_num_threads(old_num_threads)
 
 
 def get_metrics(targets, all_sks):
@@ -612,8 +623,9 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 x_input_bb = np.concatenate((X, pe), axis=-1)            
             else:
                 x_input_bb = X
-            data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
-            data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
+            with torch_single_threaded():
+                data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
+                data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
             if skviz is not None and args.attn_weights:
                 logits_rxn, rxn_attns = model_rxn(data_rxn, return_attention=True)
                 logits_bb, bb_attns= model_bb(data_bb, return_attention=True)

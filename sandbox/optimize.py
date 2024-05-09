@@ -10,6 +10,7 @@ import pydantic_cli
 import tqdm
 from rdkit import Chem
 from tdc import Oracle
+from torch.multiprocessing import Pool
 
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
@@ -156,7 +157,9 @@ def fetch_oracle(objective):
         raise ValueError("Objective function not implemented")
 
 
-def get_smiles_ours(ind):
+def get_smiles_ours(idx_and_ind):
+    idx, ind = idx_and_ind
+
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
     index = lookup_skeleton_key(sk.zss_tree, tree_key)
@@ -171,11 +174,11 @@ def get_smiles_ours(ind):
         if score > ans:
             ans = score
             best_smi = smi
-    return best_smi
+    return idx, best_smi
 
 
 def get_smiles_synnet(
-    ind,
+    idx_and_ind,
     bblocks, bb_dict,
     rxns,
     bblocks_molembedder,
@@ -184,6 +187,8 @@ def get_smiles_synnet(
     rxn_template,
     nbits
 ):
+    idx, ind = idx_and_ind
+
     emb = ind.fp.reshape((1, -1))
     try:
         tree, action = synthetic_tree_decoder(
@@ -206,32 +211,34 @@ def get_smiles_synnet(
         print(e)
         action = -1
     if action != 3:
-        return None, None
+        return idx, None
     else:
         scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
         max_score_idx = np.where(scores == np.max(scores))[0][0]
-        return tree.chemicals[max_score_idx].smiles, tree
+        return idx, tree.chemicals[max_score_idx].smiles
 
 
 # Needed to avoid deadlock
 # Reference:
 #   https://github.com/pytorch/pytorch/issues/17199
-def thread_quarantine(ind, converter):
+def thread_quarantine(idx_and_ind, converter):
     with ThreadPoolExecutor(max_workers=1) as exe:
-        return exe.submit(converter, ind).result()
+        return exe.submit(converter, idx_and_ind).result()
 
 
-def test_surrogate(batch, converter, config: OptimizeGAConfig):
+def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
     # Debug option
+    indexed_batch = list(enumerate(batch))
     if config.num_workers <= 0:
-        smiles = map(converter, batch)
+        indexed_smiles = map(converter, indexed_batch)
     else:
-        smiles = exe.map(converter, batch, chunksize=config.chunksize)
+        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
-    pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
-    for smi, ind in pbar:
+    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating", leave=False)
+    for idx, smi in pbar:
+        ind = batch[idx]
         smi = Chem.CanonSmiles(smi)
         ind.smiles = smi
         ind.fitness = oracle(smi)
@@ -306,12 +313,13 @@ def main(config: OptimizeGAConfig):
     else:
         raise NotImplementedError()
 
-    exe = ProcessPoolExecutor(max_workers=config.num_workers)
+    pool = Pool(processes=config.num_workers)
     converter = functools.partial(thread_quarantine, converter=converter)
-    fn = functools.partial(test_surrogate, converter=converter, config=config, exe=exe)
+    fn = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
     search = GeneticSearch(config)
     search.optimize(fn)
-    exe.shutdown()
+    pool.close()
+    pool.join()
 
     return 0
 
