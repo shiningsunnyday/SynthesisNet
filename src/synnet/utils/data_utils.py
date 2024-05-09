@@ -34,7 +34,7 @@ from networkx.algorithms.isomorphism import rooted_tree_isomorphism
 from networkx.algorithms import weisfeiler_lehman_graph_hash
 from networkx.algorithms.traversal.depth_first_search import dfs_tree
 import networkx as nx
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 from copy import deepcopy

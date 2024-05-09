@@ -1,4 +1,4 @@
-MAX_NUM_RXNS=4
+MAX_NUM_RXNS=3
 
 use_case="reconstruct_top_k=3_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=-1"
 ncpu=1;
@@ -42,9 +42,11 @@ python scripts/reconstruct-targets.py \
     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --out-dir /home/msun415/SynTreeNet/results/viz/ \
-    --top-k 3 \
+    --mermaid \
+    --one-per-class \
+    --top-k 1 \
     --max_num_rxns ${MAX_NUM_RXNS} \
-    --top-k-rxn 3 \
+    --top-k-rxn 1 \
     --max_rxns -1 \
     --test-correct-method reconstruct \
     --strategy topological \

@@ -149,6 +149,7 @@ def main(args):
                         syntree_set.append(syntree)       
         random.shuffle(syntree_set)
         targets = [syntree.root.smiles for syntree in syntree_set]                    
+    
     lookup = {}    
     for i, target in tqdm(enumerate(targets), "initializing skeletons"):
         if args.data:        
@@ -267,6 +268,9 @@ def main(args):
                 total_correct, total_incorrect = get_metrics(all_targets, all_sks)
                 logger.info(f"total correct: {format_metrics(total_correct, cum=True)}")
                 logger.info(f"total incorrect: {format_metrics(total_incorrect)}")        
+            
+            if args.mermaid:
+                breakpoint()
         
   
     logger.info("Finished decoding.")
