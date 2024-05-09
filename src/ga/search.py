@@ -173,7 +173,6 @@ class GeneticSearch:
             n = cfg.fp_bits
             k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
             k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
-            k = int(np.round(k))
             mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
             fp = np.where(mask, parents[0].fp, parents[1].fp)
         else:
