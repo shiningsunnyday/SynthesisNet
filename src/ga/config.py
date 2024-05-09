@@ -14,9 +14,9 @@ class GeneticSearchConfig(pydantic.BaseModel):
     seed: int = 10
 
     # Individuals
-    fp_bits: int = 4096
+    fp_bits: int = 2048
     bt_nodes_min: int = 2
-    bt_nodes_max: int = 5
+    bt_nodes_max: int = 10
 
     # Search parameters
     generations: int = 200
@@ -26,14 +26,9 @@ class GeneticSearchConfig(pydantic.BaseModel):
     freeze_fp: bool = False
     freeze_bt: bool = False
 
-    # Crossover
-    parent_schedule: Literal["anneal", "synnet"] = "synnet"
-    parent_temp_max = 20
-    parent_temp_min = 1
-
     # Mutation
     fp_mutate_prob: float = 0.5
-    fp_mutate_bits: int = 24
+    fp_mutate_frac: float = (24 / 4096)
 
     bt_mutate_prob: float = 0.5
     bt_mutate_edits: int = 2

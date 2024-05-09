@@ -251,6 +251,8 @@ def main(config: OptimizeGAConfig):
         logger.addHandler(handler)
 
     if config.method == "ours":
+        assert config.fp_bits == 2048
+
         set_models(config, logger)
         load_data(config, logger)
         with open(config.skeleton_set_file, "rb") as f:
@@ -263,6 +265,8 @@ def main(config: OptimizeGAConfig):
         converter = get_smiles_ours
 
     elif config.method == "synnet":
+        assert config.fp_bits == 4096
+
         # Load the purchasable building block embeddings
         bblocks_molembedder = (
             MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
@@ -298,13 +302,16 @@ def main(config: OptimizeGAConfig):
     else:
         raise NotImplementedError()
 
-    pool = Pool(processes=config.num_workers)
+    pool = Pool(processes=config.num_workers) if (config.num_workers > 0) else None
+
     converter = functools.partial(thread_quarantine, converter=converter)
     fn = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
     search = GeneticSearch(config)
     search.optimize(fn)
-    pool.close()
-    pool.join()
+
+    if pool is not None:
+        pool.close()
+        pool.join()
 
     return 0
 

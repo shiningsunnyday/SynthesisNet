@@ -146,18 +146,11 @@ class GeneticSearch:
         indices = np.arange(len(population))
 
         cfg = self.config
-        if cfg.parent_schedule == "anneal":
-            t = epoch / cfg.generations
-            temp = (1 - t) * cfg.parent_temp_max + t * cfg.parent_temp_min  # LERP
-            p = scipy.special.softmax(indices / temp)
-        elif cfg.parent_schedule == "synnet":
-            p = indices + 10
-            if epoch < 0.8 * cfg.generations:
-                p = p / np.sum(p)
-            else:
-                p = scipy.special.softmax(p)
+        p = indices + 10
+        if epoch < 0.8 * cfg.generations:
+            p = p / np.sum(p)
         else:
-            raise NotImplementedError()
+            p = scipy.special.softmax(p)
 
         couples = []
         for _ in range(cfg.offspring_size):
@@ -198,7 +191,7 @@ class GeneticSearch:
         # fp: random bit flip
         fp = ind.fp
         if (not cfg.freeze_fp) and utils.random_boolean(cfg.fp_mutate_prob):
-            mask = utils.random_bitmask(cfg.fp_bits, k=cfg.fp_mutate_bits)
+            mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
             fp = np.where(mask, ~fp, fp)
 
         # bt: random add or delete nodes
