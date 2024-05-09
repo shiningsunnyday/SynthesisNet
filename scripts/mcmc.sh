@@ -1,4 +1,4 @@
-MAX_NUM_RXNS=4
+MAX_NUM_RXNS=3
 use_case="mcmc_top_k=3_max_num_rxns=${MAX_NUM_RXNS}.txt"
 batch_size=1000
 
@@ -19,6 +19,6 @@ python scripts/mcmc.py \
     --beta 1. \
     --mcmc_timesteps 20 \
     --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.txt \
+    --receiver-filename output_${use_case}.tx
     # --chunk_size 5 \
     # --ncpu $ncpu \    
