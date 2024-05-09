@@ -95,7 +95,7 @@ class GeneticSearch:
 
         # Diversity
         distances = []
-        fps = [mol_fp(ind.smiles, _nBits=4096) for ind in population]
+        fps = [mol_fp(ind.smiles, _nBits=4096) for ind in population if ind.smiles is not None]
         for a, b in itertools.combinations(fps, r=2):
             d = 1 - _tanimoto_similarity(a, b)
             distances.append(d)
@@ -106,11 +106,14 @@ class GeneticSearch:
         metrics["population_size"] = N
 
         # Uniqueness
-        unique = set(ind.smiles for ind in population)
+        unique = set(ind.smiles for ind in population if ind.smiles is not None)
         metrics["unique"] = len(unique) / N
 
         # Novelty
-        metrics["novelty"] = len(unique - self.background_smiles) / len(unique)
+        if unique:
+            metrics["novelty"] = len(unique - self.background_smiles) / len(unique)
+        else:
+            metrics["novelty"] = 0.0
 
         return metrics
 
@@ -121,7 +124,7 @@ class GeneticSearch:
         leftover = []
         seen_smiles = set()
         for ind in population:
-            if ind.smiles not in seen_smiles:
+            if (ind.smiles is not None) and (ind.smiles not in seen_smiles):
                 filtered.append(ind)
                 seen_smiles.add(ind.smiles)
             else:

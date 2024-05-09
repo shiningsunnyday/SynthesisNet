@@ -1,3 +1,4 @@
+import argparse
 import functools
 import logging
 import pathlib
@@ -6,7 +7,6 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import List, Literal, Optional
 
 import numpy as np
-import pydantic_cli
 import tqdm
 from rdkit import Chem
 from tdc import Oracle
@@ -97,13 +97,42 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Objective function to optimize
     objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
 
-    num_workers: int = 1
-    chunksize: int = 32
+    num_workers: int = 0
+    chunksize: int = 1
 
     # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
     # Topological: Decode every topological order of the rxn+bb nodes.
     strategy: Literal["conf", "topological"] = "conf"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--background_set_file", type=str)  
+    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")   
+    parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
+    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")    
+    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")    
+    parser.add_argument("--max_rxns", type=int, help="Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to syntrees whose skleeton class was trained on by ckpt_dir)", default=-1)
+    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)        
+    parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
+    parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
+        Strategy to decode:
+            Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
+            Topological: Decode every topological order of the rxn+bb nodes."""
+    )
+    parser.add_argument("--objective", type=str, default="qed", help="Objective function to optimize")
+    parser.add_argument("--out_dir", type=str)
+    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--method", type=str, choices=["ours", "synnet"])
+    parser.add_argument("--num_workers", type=int)
+    parser.add_argument("--bt_nodes_max", type=int)
+    parser.add_argument("--offspring_size", type=int)
+    parser.add_argument("--fp_bits", type=int)
+
+    return parser.parse_args()
 
 
 def dock_drd3(smi):
@@ -192,6 +221,7 @@ def get_smiles_synnet(
     try:
         tree, action = synthetic_tree_decoder(
             z_target=emb,
+            sk_coords=None,
             building_blocks=building_blocks,
             bb_dict=bb_dict,
             reaction_templates=rxns,
@@ -237,12 +267,17 @@ def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating", leave=False)
     for idx, smi in pbar:
         ind = batch[idx]
-        smi = Chem.CanonSmiles(smi)
-        ind.smiles = smi
-        ind.fitness = oracle(smi)
+        if smi is None:
+            ind.smiles = None
+            ind.fitness = 0.0
+        else:
+            ind.smiles = Chem.CanonSmiles(smi)
+            ind.fitness = oracle(smi)
 
 
-def main(config: OptimizeGAConfig):
+def main():
+    config = OptimizeGAConfig(**vars(get_args()))
+
     global args
     args = config  # Hack so reconstruct_utils.py works
 
@@ -260,7 +295,6 @@ def main(config: OptimizeGAConfig):
             globals()["skeleton_list"] = list(skeletons)  # FIXME: (AL) why does this work?
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
         SKELETON_INDEX = test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
-        logger.info(f"SKELETON INDEX: {SKELETON_INDEX}")
 
         converter = get_smiles_ours
 
@@ -317,4 +351,4 @@ def main(config: OptimizeGAConfig):
 
 
 if __name__ == "__main__":
-    pydantic_cli.run_and_exit(OptimizeGAConfig, main)
+    main()

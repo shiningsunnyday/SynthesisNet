@@ -4,12 +4,13 @@ from typing import Literal, Optional
 import networkx as nx
 import numpy as np
 import pydantic
-import pydantic_cli
 
 
 class GeneticSearchConfig(pydantic.BaseModel):
     """Configuration object for a genetic search.
     """
+
+    model_config = pydantic.ConfigDict(extra="forbid")
 
     seed: int = 10
 
@@ -47,10 +48,6 @@ class GeneticSearchConfig(pydantic.BaseModel):
     wandb: bool = False
     wandb_project: str = "syntreenet_ga"
     wandb_dir: Optional[str] = None
-
-    class Config(pydantic_cli.DefaultConfig):
-        extra = "forbid"
-        CLI_BOOL_PREFIX = ("--enable_", "--disable_")
 
 
 @dataclass
