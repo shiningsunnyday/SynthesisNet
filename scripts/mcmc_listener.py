@@ -101,7 +101,7 @@ def main(proc_id, filename, output_filename):
     load_data(args)
     skeletons = pickle.load(open(args.skeleton_set_file, 'rb'))
     skeleton_set = SkeletonSet().load_skeletons(skeletons)
-    SKELETON_INDEX = test_skeletons(args, skeleton_set)
+    SKELETON_INDEX = test_skeletons(args, skeleton_set, args.max_rxns)
     print(f"SKELETON INDEX: {SKELETON_INDEX}")    
     while(True):        
         selected_mol = None
@@ -131,7 +131,7 @@ def main(proc_id, filename, output_filename):
         index = int(index)
         st = list(skeletons)[index]               
         sk = Skeleton(st, index)
-        sks = mcmc(sk, smiles, args.beta, args.mcmc_timesteps)
+        sks = mcmc(sk, smiles, args.max_num_rxns, args.beta, args.mcmc_timesteps)
         # starting smiles, starting index, score history, smi history
         score_history = ','.join([str(sk[0]) for sk in sks])
         smi_history = ','.join([sk[1] for sk in sks])

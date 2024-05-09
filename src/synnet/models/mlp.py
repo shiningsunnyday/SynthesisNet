@@ -60,15 +60,17 @@ class MLP(pl.LightningModule):
             if i > num_layers - 3 - num_dropout_layers:
                 modules.append(nn.Dropout(dropout))
         self.final_layer = nn.Linear(hidden_dim, output_dim)
+        # modules.append(nn.Linear(hidden_dim, output_dim))
         self.layers = nn.Sequential(*modules)
 
     def forward(self, x, return_hidden=False):
         """Forward step for inference only."""
         y_hat = self.layers(x)
-        if return_hidden: 
-            return y_hat
-        else:
-            y_hat = self.final_layer(y_hat)
+        if hasattr(self, 'final_layer'):
+            if return_hidden: 
+                return y_hat
+            else:
+                y_hat = self.final_layer(y_hat)
         if (
             self.hparams.task == "classification"
         ):  # during training, `cross_entropy` loss expects raw logits

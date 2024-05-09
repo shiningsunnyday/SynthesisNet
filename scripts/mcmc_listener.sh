@@ -1,5 +1,5 @@
 export OMP_NUM_THREADS=1
-MAX_NUM_RXNS=4
+MAX_NUM_RXNS=3
 use_case="mcmc_top_k=3_max_num_rxns=${MAX_NUM_RXNS}.txt"
 for ((i =1; i <= $1; i++));
 do

@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.neighbors import BallTree
 
 from synnet.config import MAX_PROCESSES
+import faiss
 
 logger = logging.getLogger(__name__)
 

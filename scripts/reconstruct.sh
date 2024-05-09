@@ -1,7 +1,7 @@
-MAX_NUM_RXNS=6
+MAX_NUM_RXNS=4
 
 use_case="reconstruct_top_k=3_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=-1"
-ncpu=100;
+ncpu=1;
 batch_size=100000;
 
 # python scripts/reconstruct-targets.py \
@@ -51,5 +51,5 @@ python scripts/reconstruct-targets.py \
     --ncpu $ncpu \
     --batch-size $batch_size \
     --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
-    --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.txt
+    # --sender-filename input_${use_case}.txt \
+    # --receiver-filename output_${use_case}.txt

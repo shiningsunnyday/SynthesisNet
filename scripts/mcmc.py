@@ -237,13 +237,14 @@ def main(args):
             if args.ncpu == 1:
                 sks_batch = []
                 for smi in tqdm(target_batch):                        
-                    sks = mcmc(deepcopy(lookup[smi]), smi, args.beta, args.mcmc_timesteps)
+                    sks = mcmc(deepcopy(lookup[smi]), smi, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                     sks_batch.append(sks)                                      
             else:
                 torch.set_num_threads(1)
                 with ProcessPoolExecutor(max_workers=args.ncpu) as exe:      
                     batch_future = exe.map(mcmc, tqdm([deepcopy(lookup[smi]) for smi in target_batch]),
                                             target_batch,
+                                            [args.max_num_rxns for _ in target_batch],
                                             [args.beta for _ in target_batch],
                                             [args.mcmc_timesteps for _ in target_batch],
                                             chunksize=args.chunk_size)

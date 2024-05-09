@@ -137,42 +137,46 @@ def decode(sk, smi):
     return sks
 
 
-def build_mc(): # build a markov chain    
+def build_mc(max_num_rxns=-1): # build a markov chain    
     tree_lookup = globals()['skeleton_index_lookup']
-    trees = list(tree_lookup)
+    inds = get_skeleton_inds_within_depth(max_num_rxns)
+    all_trees = list(tree_lookup)
+    trees = [all_trees[ind] for ind in inds]
     dists = np.zeros((len(trees), len(trees)))
-    for i in range(dists.shape[0]):
-        for j in range(i+1, dists.shape[0]):
+    for i in tqdm(range(dists.shape[0])):
+        for j in tqdm(range(i+1, dists.shape[0])):
             _, tree_1, _ = tree_lookup[trees[i]]
             _, tree_2, _ = tree_lookup[trees[j]]   
             dists[i][j] = simple_distance(tree_1, tree_2)
             dists[j][i] = simple_distance(tree_2, tree_1)
         dists[i][i] = float("inf")
-    adj = (dists == dists.min(axis=-1, keepdims=True)) # whether smallest possible change
-    # import matplotlib.pyplot as plt
-    # fig, ax = plt.subplots(figsize=(8, 6))
-    # cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
-    # fig.colorbar(cax)
-    # ax.set_title('Heatmap Example')
-    # fig.savefig('/home/msun415/heatmap.png')  # Save to file
-    adj = adj.astype(int) / adj.sum(axis=-1, keepdims=True)
+    adj = np.exp(-dists)
+    # adj = (dists == dists.min(axis=-1, keepdims=True)) # whether smallest possible change
+    adj = adj / adj.sum(axis=-1, keepdims=True)
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
+    fig.colorbar(cax)
+    ax.set_title('Heatmap Example')
+    fig.savefig('/home/msun415/heatmap.png')  # Save to file    
     return adj
 
 
 
-def mcmc(sk, smi, beta=1., T=10):
-    adj = build_mc()
+def mcmc(sk, smi, max_num_rxns=-1, beta=1., T=10):
+    inds = get_skeleton_inds_within_depth(max_num_rxns)
+    adj = globals()['mc_adj']
     rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
     ind = np.argmax([r[0] for r in rec])    
     res = [(rec[ind][0], rec[ind][1], sk.index)]
     for _ in range(1, T+1):
-        tree_key = serialize_string(sk.tree, sk.tree_root)
-        index = list(globals()['skeleton_index_lookup']).index(tree_key)        
+        tree_key = serialize_string(sk.tree, sk.tree_root)        
+        index = inds.index(sk.index)
         nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
-        tree_key_nei = list(globals()['skeleton_index_lookup'])[nei]
+        tree_key_nei = globals()['skeleton_keys'][inds[nei]]
         j_xy = adj[index, nei]
         j_yx = adj[nei, index]        
-        sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]        
+        sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]
         sks_x = decode(sk, smi)
         sks_y = decode(sk_y, smi)
         x_rec = [reconstruct(sk, smi) for sk in sks_x]
@@ -260,12 +264,14 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
 
     globals()['skeleton_index_lookup'] = {}
     globals()['skeleton_index_lookup_by_num_rxns'] = {}
+    globals()['skeleton_keys'] = {}
     sks = list(skeleton_set.skeletons)
     for index in SKELETON_INDEX:
         sk = Skeleton(sks[index], index)
         num_rxns = sk.rxns.sum()
         tree_key = serialize_string(sk.tree, sk.tree_root)
         globals()['skeleton_index_lookup'][tree_key] = (index, sk.zss_tree, sk)
+        globals()['skeleton_keys'][index] = tree_key
         if num_rxns not in globals()['skeleton_index_lookup_by_num_rxns']:
             globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
         globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
@@ -284,7 +290,8 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
                 top_sort_set.add(tuple(top_sort))    
             tree_key = serialize_string(sk.tree, sk.tree_root)
             globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
-
+    
+    globals()['mc_adj'] = build_mc(args.max_num_rxns)
     return SKELETON_INDEX
 
 
@@ -675,6 +682,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                     else:
                         sks.append((sk_n, next_node))
                     if skviz is not None:
+                        breakpoint()
                         sk_viz_n = skviz(sk_n)
                         mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
                         mask_str = ''.join(map(str,sk_n.mask))
@@ -797,6 +805,15 @@ def load_data(args, logger=None):
 
 
 
+def get_skeleton_inds_within_depth(max_num_rxns):
+    inds = []
+    for d in range(1, max_num_rxns+1):
+        for ind, _, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
+            inds.append(ind)    
+    return inds
+
+
+
 def predict_skeleton(smiles, max_num_rxns=-1):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
@@ -807,9 +824,7 @@ def predict_skeleton(smiles, max_num_rxns=-1):
         ind = probs.argmax(axis=-1).item()        
     else:
         inds = []
-        for d in range(1, max_num_rxns+1):
-            for ind, _, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
-                inds.append(ind)
+        inds = get_skeleton_inds_within_depth(max_num_rxns)
         sorted_inds = sorted(inds)
         inds = [globals()['skeleton_classes'].index(ind) for ind in sorted_inds]
         assert probs.shape[0] == 1
