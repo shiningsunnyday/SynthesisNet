@@ -12,9 +12,9 @@ python sandbox/optimize.py \
     --top_k 1 \
     --top_k_rxn 1 \
     --strategy conf \
-    --objective gsk \
+    --objective jnk \
     --out_dir $HOME/SynTreeNet/results/viz/ours \
-    --enable_wandb \
+    --wandb \
     --method=ours \
-    --num_workers=32 --chunksize=1 \
+    --num_workers=10 \
     --bt_nodes_max=10 --offspring_size=512 --fp_bits=2048

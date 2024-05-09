@@ -1,5 +1,6 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
-MAX_NUM_RXNS=6
+MAX_NUM_RXNS=4
+CUDA_VISIBLE_DEVICES=-1
 
 python sandbox/optimize.py \
     --background_set_file /ssd/msun415/skeletons/skeletons-train.pkl \
@@ -12,9 +13,9 @@ python sandbox/optimize.py \
     --top_k 1 \
     --top_k_rxn 1 \
     --strategy conf \
-    --objective gsk \
-    --out_dir $HOME/SynTreeNet/results/viz/top_1000 \
-    --enable_wandb \
+    --objective jnk \
+    --out_dir $HOME/SynTreeNet/results/viz/synnet \
+    --wandb \
     --method=synnet \
-    --num_workers=0 --chunksize=1 \
+    --num_workers=0 \
     --bt_nodes_max=10 --offspring_size=512 --fp_bits=4096
