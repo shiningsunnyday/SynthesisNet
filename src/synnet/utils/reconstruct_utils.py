@@ -670,6 +670,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                     else:
                         sks.append((sk_n, next_node))
                     if skviz is not None:
+                        breakpoint()
                         sk_viz_n = skviz(sk_n)
                         mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
                         mask_str = ''.join(map(str,sk_n.mask))
