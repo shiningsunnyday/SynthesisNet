@@ -66,7 +66,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Model checkpoint dir, if given assume one ckpt per class
     ckpt_dir: str = None
-    ckpt_versions: Optional[List[int]] = None
 
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
@@ -179,7 +178,7 @@ def get_smiles_ours(idx_and_ind):
 
 def get_smiles_synnet(
     idx_and_ind,
-    bblocks, bb_dict,
+    building_blocks, bb_dict,
     rxns,
     bblocks_molembedder,
     act_net, rt1_net, rxn_net, rt2_net,
@@ -193,8 +192,7 @@ def get_smiles_synnet(
     try:
         tree, action = synthetic_tree_decoder(
             z_target=emb,
-            sk_coords=None,
-            building_blocks=bblocks,
+            building_blocks=building_blocks,
             bb_dict=bb_dict,
             reaction_templates=rxns,
             mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
@@ -265,49 +263,36 @@ def main(config: OptimizeGAConfig):
         converter = get_smiles_ours
 
     elif config.method == "synnet":
-        # define some constants (here, for the Hartenfeller-Button test set)
-        nbits = 4096
-        rxn_template = "hb"
-
-        # load the purchasable building block SMILES to a dictionary
-        bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-        bblock_inds = None
-        # A dict is used as lookup table for 2nd reactant during inference:
-        bb_dict = {block: i for i, block in enumerate(bblocks)}
-        # ... building block embedding
+        # Load the purchasable building block embeddings
         bblocks_molembedder = (
             MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
         )
         bb_emb = bblocks_molembedder.get_embeddings()
 
-        # load the reaction templates as a ReactionSet object
-        rxns = ReactionSet().load(args.rxns_collection_file).rxns
-        for rxn in rxns:
-            for i in range(len(rxn.available_reactants)):
-                rxn.available_reactants[i] = [reactant for reactant in rxn.available_reactants[i] if
-                                              reactant in bblocks]
+        # Load the purchasable building block SMILES to a dictionary
+        building_blocks = BuildingBlockFileHandler().load(args.building_blocks_file)
+        
+        # A dict is used as lookup table for 2nd reactant during inference:
+        bb_dict = {block: i for i, block in enumerate(building_blocks)}
 
-        # load the pre-trained modules
-        path = pathlib.Path(args.ckpt_dir)
-        if args.ckpt_versions:
-            versions = args.ckpt_versions
-        else:
-            versions = [None, None, None, None]
-        ckpt_files = []
-        for model, version in zip("act rt1 rxn rt2".split(), versions):
-            ckpt_file = find_best_model_ckpt(path / model, version)
-            ckpt_files.append(ckpt_file)
+        # Load the reaction templates as a ReactionSet object
+        rxns = ReactionSet().load(args.rxns_collection_file).rxns
+
+        # Load the pre-trained modules
+        path = pathlib.Path(__file__).parent / "checkpoints"
+        ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
         act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file) for file in ckpt_files]
 
         converter = functools.partial(
             get_smiles_synnet,
-            bblocks=bblocks, bb_dict=bb_dict,
+            building_blocks=building_blocks, 
+            bb_dict=bb_dict,
             rxns=rxns,
             bblocks_molembedder=bblocks_molembedder,
             act_net=act_net, rt1_net=rt1_net, rxn_net=rxn_net, rt2_net=rt2_net,
             bb_emb=bb_emb,
-            rxn_template=rxn_template,
-            nbits=nbits,
+            rxn_template="hb",
+            nbits=config.fp_bits,
         )
 
     else:

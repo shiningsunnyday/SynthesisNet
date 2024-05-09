@@ -95,7 +95,7 @@ class GeneticSearch:
 
         # Diversity
         distances = []
-        fps = [mol_fp(ind.smiles, _nBits=2048) for ind in population]
+        fps = [mol_fp(ind.smiles, _nBits=4096) for ind in population]
         for a, b in itertools.combinations(fps, r=2):
             d = 1 - _tanimoto_similarity(a, b)
             distances.append(d)
