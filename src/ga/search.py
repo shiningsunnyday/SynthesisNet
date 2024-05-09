@@ -171,14 +171,10 @@ class GeneticSearch:
         # fp: random bit swap
         if not cfg.freeze_fp:
             n = cfg.fp_bits
-            k = scipy.stats.truncnorm.rvs(
-                a=(0.2 * n), b=(0.8 * n),
-                loc=(n / 2),
-                scale=(n / 10),
-                size=1,
-            )
+            k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
+            k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
             k = int(np.round(k))
-            mask = utils.random_bitmask(cfg.fp_bits, k=k)
+            mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
             fp = np.where(mask, parents[0].fp, parents[1].fp)
         else:
             fp = parents[0].fp
@@ -270,10 +266,10 @@ class GeneticSearch:
         early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)
 
         # Main loop
-        for epoch in tqdm.trange(cfg.generations + 1, desc="Searching"):
+        for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
 
             # Crossover & mutation
-            if epoch > 0:
+            if epoch >= 0:
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover(parents)
