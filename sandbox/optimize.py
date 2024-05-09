@@ -259,7 +259,7 @@ def main(config: OptimizeGAConfig):
             skeletons = pickle.load(f)
             globals()["skeleton_list"] = list(skeletons)  # FIXME: (AL) why does this work?
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
-        SKELETON_INDEX = test_skeletons(config, skeleton_set)
+        SKELETON_INDEX = test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
         logger.info(f"SKELETON INDEX: {SKELETON_INDEX}")
 
         converter = get_smiles_ours
