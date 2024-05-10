@@ -161,7 +161,7 @@ class SynTreeVisualizer:
 class SkeletonVisualizer:
     outfolder: Union[str, Path]
 
-    def __init__(self, skeleton: Skeleton, outfolder: str = "./syntree-viz/st"):
+    def __init__(self, skeleton: Skeleton, outfolder: str = "./syntree-viz/st", version=None):
         self.skeleton = skeleton
         # Placeholder for images for molecues.
         self.mol_drawer: Union[MolDrawer, None]
@@ -171,11 +171,15 @@ class SkeletonVisualizer:
 
         # Folders
         outfolder = Path(outfolder)
-        self.version = self._get_next_version(outfolder)
+        if version is not None:
+            self.version = version
+        else:
+            self.version = self._get_next_version(outfolder)
         self.path = outfolder.with_name(outfolder.name + f"_{self.version}")
         return None
 
-    def _get_next_version(self, dir: str) -> int:
+    @staticmethod
+    def _get_next_version(dir: str) -> int:
         root_dir = Path(dir).parent
         name = Path(dir).name
 
@@ -274,7 +278,7 @@ class SkeletonVisualizer:
         NODE_PREFIX = "n"
         r1, r2 = reactants
         out = [f"{NODE_PREFIX}{r1} --> {NODE_PREFIX}{product}"]
-        if r2:
+        if r2 is not None:
             out += [f"{NODE_PREFIX}{r2} --> {NODE_PREFIX}{product}"]
         return out
 
@@ -297,6 +301,8 @@ class SkeletonVisualizer:
                 continue
             succ = list(tree.successors(node))
             if len(succ) == 2:
+                if tree.nodes[succ[0]]['child'] == 'right':
+                    succ = succ[::-1]
                 reactant1, reactant2 = succ
             elif len(succ) == 1:
                 reactant1, reactant2 = succ[0], None
