@@ -31,6 +31,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     fp_mutate_prob: float = 0.5
     fp_mutate_frac: float = (24 / 4096)
 
+    bt_crossover: Literal["graft", "inherit"] = "inherit"
     bt_mutate_prob: float = 0.5
     bt_mutate_edits: int = 2
 

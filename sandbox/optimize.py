@@ -77,7 +77,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     mermaid: bool = False
     one_per_class: bool = False
 
-    out_dir: str
+    out_dir: Optional[str] = None
 
     # Beam width for first bb
     top_k: int = 3
@@ -131,6 +131,7 @@ def get_args():
     parser.add_argument("--bt_nodes_max", type=int)
     parser.add_argument("--offspring_size", type=int)
     parser.add_argument("--fp_bits", type=int)
+    parser.add_argument("--freeze_bt", action="store_true")
 
     return parser.parse_args()
 
@@ -319,7 +320,7 @@ def main():
         # Load the pre-trained modules
         path = pathlib.Path(__file__).parent / "checkpoints"
         ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
-        act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file) for file in ckpt_files]
+        act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file).cpu() for file in ckpt_files]
 
         converter = functools.partial(
             get_smiles_synnet,
@@ -336,9 +337,12 @@ def main():
     else:
         raise NotImplementedError()
 
-    pool = Pool(processes=config.num_workers) if (config.num_workers > 0) else None
+    if config.num_workers > 0:
+        pool = Pool(processes=config.num_workers)
+        converter = functools.partial(thread_quarantine, converter=converter)
+    else:
+        pool = None
 
-    converter = functools.partial(thread_quarantine, converter=converter)
     fn = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
     search = GeneticSearch(config)
     search.optimize(fn)
