@@ -61,7 +61,6 @@ class MLP(pl.LightningModule):
                 modules.append(nn.Dropout(dropout))
         self.final_layer = nn.Linear(hidden_dim, output_dim)
         # modules.append(nn.Linear(hidden_dim, output_dim))
-
         self.layers = nn.Sequential(*modules)
 
     def forward(self, x, return_hidden=False):
@@ -82,6 +81,7 @@ class MLP(pl.LightningModule):
         """The complete training loop."""
         x, y = batch
         y_hat = self.layers(x)
+        y_hat = self.final_layer(y_hat)
         if self.loss == "cross_entropy":            
             loss = F.cross_entropy(y_hat, y)
         elif self.loss == "mse":
@@ -101,6 +101,7 @@ class MLP(pl.LightningModule):
             return None
         x, y = batch
         y_hat = self.layers(x)
+        y_hat = self.final_layer(y_hat)
         if self.valid_loss == "cross_entropy":
             loss = F.cross_entropy(y_hat, y.long())
         elif self.valid_loss == "accuracy":

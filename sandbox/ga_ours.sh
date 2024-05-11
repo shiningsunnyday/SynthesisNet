@@ -1,5 +1,5 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
-MAX_NUM_RXNS=4
+MAX_NUM_RXNS=6
 export OMP_NUM_THREADS=1
 
 python sandbox/optimize.py \
@@ -14,8 +14,9 @@ python sandbox/optimize.py \
     --top_k_rxn 1 \
     --strategy conf \
     --objective $1 \
-    --out_dir $HOME/SynTreeNet/results/viz/ours \
     --wandb \
     --method=ours \
     --num_workers=10 \
-    --bt_nodes_max=10 --offspring_size=512 --fp_bits=2048
+    --bt_nodes_max=10 \
+    --offspring_size=512 \
+    --fp_bits=2048
