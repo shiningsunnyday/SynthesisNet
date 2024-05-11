@@ -2190,7 +2190,7 @@ class Skeleton:
         self.reset()
 
     
-    def reconstruct(self, rxns):
+    def reconstruct(self, rxns, keep_main=False):
         postorder = list(nx.dfs_postorder_nodes(self.tree, source=self.tree_root))
         for i in self.tree:
             if not self.leaves[i]:
@@ -2208,8 +2208,10 @@ class Skeleton:
                     if len(reactants) != rxns[self.tree.nodes[i]['rxn_id']].num_reactant:
                         return False
                     rxn = Reaction(rxns[self.tree.nodes[i]['rxn_id']].smirks)
-                    interms = rxn.run_reaction(reactants, keep_main=False)
+                    interms = rxn.run_reaction(reactants, keep_main=keep_main)
                     if interms is not None:
+                        if not isinstance(interms, list):
+                            interms = [interms]                        
                         pred = list(self.tree.predecessors(i))[0]
                         poss_res += interms
                 if len(poss_res) == 0:

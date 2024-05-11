@@ -92,6 +92,7 @@ def get_args():
     parser.add_argument("--beta", type=float, default=1.)
     parser.add_argument("--mcmc_timesteps", type=int, default=10)
     parser.add_argument("--chunk_size", type=int, default=1)
+    parser.add_argument("--obj", default='sim', choices=['sim','qed','logp','jnk','gsk','drd2'])
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
@@ -221,7 +222,7 @@ def main(args):
                         if len(lines) == num_samples:
                             for idx, line in enumerate(lines):
                                 splitted_line = line.strip().split()
-                                status.append((splitted_line[0], splitted_line[2], splitted_line[3], splitted_line[4]))
+                                status.append((splitted_line[j] for j in range(len(splitted_line))))
                             break
                     fcntl.flock(fr, fcntl.LOCK_UN)
                 time.sleep(1)
@@ -236,14 +237,16 @@ def main(args):
         else:
             if args.ncpu == 1:
                 sks_batch = []
+                sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                 for smi in tqdm(target_batch):                        
-                    sks = mcmc(deepcopy(lookup[smi]), smi, args.max_num_rxns, args.beta, args.mcmc_timesteps)
+                    sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                     sks_batch.append(sks)                                      
             else:
                 torch.set_num_threads(1)
                 with ProcessPoolExecutor(max_workers=args.ncpu) as exe:      
                     batch_future = exe.map(mcmc, tqdm([deepcopy(lookup[smi]) for smi in target_batch]),
                                             target_batch,
+                                            [args.obj for _ in target_batch],
                                             [args.max_num_rxns for _ in target_batch],
                                             [args.beta for _ in target_batch],
                                             [args.mcmc_timesteps for _ in target_batch],

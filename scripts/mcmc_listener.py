@@ -79,6 +79,7 @@ def get_args():
     parser.add_argument("--beta", type=float, default=1.)
     parser.add_argument("--mcmc_timesteps", type=int, default=10)
     parser.add_argument("--chunk_size", type=int, default=1)    
+    parser.add_argument("--obj", default='sim', choices=['sim','qed','logp','jnk','gsk','drd2'])
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
@@ -131,17 +132,29 @@ def main(proc_id, filename, output_filename):
         index = int(index)
         st = list(skeletons)[index]               
         sk = Skeleton(st, index)
-        sks = mcmc(sk, smiles, args.max_num_rxns, args.beta, args.mcmc_timesteps)
+        try:
+            sks = mcmc(sk, smiles, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
+        except:
+            print(smiles, sk.index, "needs debug")
         # starting smiles, starting index, score history, smi history
         score_history = ','.join([str(sk[0]) for sk in sks])
         smi_history = ','.join([sk[1] for sk in sks])
         index_history = ','.join([str(sk[2]) for sk in sks])
+        no_surrogate_call_history = ','.join([str(sk[3]) for sk in sks])
+        no_oracle_call_history = ','.join([str(sk[4]) for sk in sks])
         res = DELIM.join([selected_mol[1].split(DELIM)[0], str(index)])
         while(True):
             with open(output_filename, 'a') as f:
                 editable = lock(f)
                 if editable:
-                    f.write("{} {} {} {} {}\n".format(selected_mol[0], res, score_history, smi_history, index_history))
+                    f.write("{} {} {} {} {} {} {}\n".format(
+                        selected_mol[0], 
+                        res, 
+                        score_history, 
+                        smi_history, 
+                        index_history,
+                        no_surrogate_call_history,
+                        no_oracle_call_history))
                     fcntl.flock(f, fcntl.LOCK_UN)
                     break
 

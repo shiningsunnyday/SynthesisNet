@@ -35,7 +35,6 @@ if __name__ == "__main__":
     # Parse input args
     args = get_args()
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
-
     # Keep track of successfully and unsuccessfully recovered molecules in 2 df's
     # NOTE: column names must match input dataframe...
     recovered = pd.DataFrame({"targets": [], "decoded": [], "similarity": []})
@@ -61,6 +60,7 @@ if __name__ == "__main__":
         n_recovered += len(recovered)
         n_unrecovered += len(unrecovered)
         similarity += unrecovered["similarity"].tolist()
+        similarity += recovered["similarity"].tolist()
 
     # Print general info
     print(f"N total {n_total}")
@@ -71,23 +71,25 @@ if __name__ == "__main__":
     n_unfinished = n_total - n_finished
     print(f"N finished tree {n_finished} ({n_finished/n_total:.2f})")
     print(f"N unfinished trees (NaN) {n_unfinished} ({n_unfinished/n_total:.2f})")
-    print(f"Average similarity (unrecovered only) {np.mean(similarity)}")
-
+    print(f"Average similarity {np.mean(similarity)}")
     # Evaluate on TDC evaluators
-    for metric in "KL_divergence FCD_Distance Novelty Validity Uniqueness".split():
-        evaluator = Evaluator(name=metric)
-        try:
-            score_recovered = evaluator(recovered["targets"], recovered["decoded"])
-            score_unrecovered = evaluator(unrecovered["targets"], unrecovered["decoded"])
-        except TypeError:
-            # Some evaluators only take 1 input args, try that.
-            score_recovered = evaluator(recovered["decoded"])
-            score_unrecovered = evaluator(unrecovered["decoded"])
-        except Exception as e:
-            logger.error(f"{e.__class__.__name__}: {str(e)}")
-            logger.error(e)
-            score_recovered, score_unrecovered = np.nan, np.nan
+    # for metric in "KL_divergence FCD_Distance Novelty Validity Uniqueness".split():
+    #     evaluator = Evaluator(name=metric)
+    #     try:
+    #         score = evaluator(list(recovered["decoded"])+list(unrecovered['decoded']), list(recovered["targets"])+list(unrecovered['targets']))
+    #         # score_unrecovered = evaluator(unrecovered["decoded"], unrecovered["targets"])
+    #     except TypeError:
+    #         # Some evaluators only take 1 input args, try that.
+    #         # score = evaluator(recovered["decoded"])
+    #         # score_unrecovered = evaluator(unrecovered["decoded"])
+    #         score = evaluator(list(recovered['decoded'])+list(unrecovered['decoded']))
+    #     except Exception as e:
+    #         logger.error(f"{e.__class__.__name__}: {str(e)}")
+    #         logger.error(e)
+    #         # score_recovered, score_unrecovered = np.nan, np.nan
+    #         score = np.nan
 
-        print(f"Evaluation metric for {evaluator.name}:")
-        print(f"    Recovered score: {score_recovered:.2f}")
-        print(f"  Unrecovered score: {score_unrecovered:.2f}")
+    #     print(f"Evaluation metric for {evaluator.name}:")
+    #     # print(f"    Recovered score: {score_recovered:.2f}")
+    #     # print(f"  Unrecovered score: {score_unrecovered:.2f}")
+    #     print(f"score: {score}")

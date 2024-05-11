@@ -68,7 +68,7 @@ def _fetch_data(name: str) -> list[str]:
     return smiles
 
 
-def wrapper_decoder(smiles: str, sk_coords=None) -> Tuple[str, float, SyntheticTree]:
+def wrapper_decoder(smiles: str, sk_coords=None, beam_width=3, analogs=False) -> Tuple[str, float, SyntheticTree]:
     """Generate a synthetic tree for the input molecular embedding."""
     emb = mol_fp(smiles)
     try:
@@ -86,18 +86,32 @@ def wrapper_decoder(smiles: str, sk_coords=None) -> Tuple[str, float, SyntheticT
             bb_emb=bb_emb,
             rxn_template="hb",  # TODO: Do not hard code
             n_bits=4096,  # TODO: Do not hard code
-            beam_width=3,
+            beam_width=beam_width,
+            analogs=analogs,
             max_step=15,
         )
     except Exception as e:
         logger.error(e, exc_info=e)
         action = -1
 
-    if action != 3:  # aka tree has not been properly ended
-        smi = None
-        similarity = 0
-        tree = None
+    if analogs:        
+        smis, similarities, trees, actions = smi, similarity, tree, action
+        smi, similarity, tree = [], [], []
+        for s, sim, tr, action in zip(smis, similarities, trees, actions):
+            if action != 3:
+                smi.append(None)
+                similarity.append(0)
+                tree.append(None)
+            else:
+                smi.append(s)
+                similarity.append(sim)
+                tree.append(tr)
 
+    else:
+        if action != 3:  # aka tree has not been properly ended
+            smi = None
+            similarity = 0
+            tree = None
     return smi, similarity, tree
 
 
@@ -146,6 +160,8 @@ def get_args():
         default="test",
         help="Choose from ['train', 'valid', 'test', 'chembl'] or provide a file with one SMILES per line.",
     )
+    parser.add_argument("--beam_width", default=3, type=int, help='If custom, use specified number of beams')
+    parser.add_argument("--analogs", action='store_true', help='If True, use specified number of beams to generate more analogs')
     # Processing
     parser.add_argument("--ncpu", type=int, default=MAX_PROCESSES, help="Number of cpus")
     parser.add_argument("--verbose", default=False, action="store_true")
@@ -229,62 +245,91 @@ if __name__ == "__main__":
     act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file) for file in ckpt_files]
     logger.info("...loading models completed.")
 
-    # Decode queries, i.e. the target molecules.
-    logger.info(f"Start to decode {len(targets)} target molecules.")
-
-    if args.ncpu == 1:
-        results = []
-        for smi in tqdm(targets):
-            if args.skeleton_set_file:
-                index = sk_set.lookup[smi].index
-                sk_coords = sk_set.coords[index:index+1]
-                results.append(wrapper_decoder(smi, sk_coords))
-            else:
-                results.append(wrapper_decoder(smi))
-    else:
+    for i, target in enumerate(targets):
+        # Additional pargs
+        pargs = []
         if args.skeleton_set_file:
-            for i in range(len(targets)):
-                smi = targets[i]
-                index = sk_set.lookup[smi].index
-                sk_coords = sk_set.coords[index:index+1]            
-                targets[i] = (targets[i], sk_coords)
-            with mp.Pool(processes=args.ncpu) as pool:
-                logger.info(f"Starting MP with ncpu={args.ncpu}")
-                results = pool.starmap(wrapper_decoder, tqdm(targets))
+            index = sk_set.lookup[target].index
+            sk_coords = sk_set.coords[index:index+1]
+            pargs.append(sk_coords)
         else:
-            with mp.Pool(processes=args.ncpu) as pool:
-                logger.info(f"Starting MP with ncpu={args.ncpu}")
-                results = pool.map(wrapper_decoder, tqdm(targets))
-    logger.info("Finished decoding.")
+            pargs.append(None)
+        pargs.append(args.beam_width)
+        pargs.append(args.analogs)
+        targets[i] = [targets[i]] + pargs
 
-    # Print some results from the prediction
-    # Note: If a syntree cannot be decoded within `max_depth` steps (15),
-    #       we will count it as unsuccessful. The similarity will be 0.    
-    decoded = [smi for smi, _, _ in results]
-    similarities = [sim for _, sim, _ in results]
-    trees = [tree for _, _, tree in results]
+    # # Decode queries, i.e. the target molecules.
+    # logger.info(f"Start to decode {len(targets)} target molecules.")    
+    # if args.ncpu == 1:
+    #     results = []
+    #     for pargs in tqdm(targets):
+    #         results.append(wrapper_decoder(*pargs))
+    # else:
+    #     with mp.Pool(processes=args.ncpu) as pool:
+    #         logger.info(f"Starting MP with ncpu={args.ncpu}")
+    #         results = pool.starmap(wrapper_decoder, tqdm(targets))
+    # logger.info("Finished decoding.")
+    results = pickle.load(open(os.path.join(args.output_dir, 'decoded.pkl'), 'rb'))
 
-    recovery_rate = (np.asfarray(similarities) == 1.0).sum() / len(similarities)
-    avg_similarity = np.mean(similarities)
-    n_successful = sum([syntree is not None for syntree in trees])
-    logger.info(f"For {args.data}:")
-    logger.info(f"  Total number of attempted  reconstructions: {len(targets)}")
-    logger.info(f"  Total number of successful reconstructions: {n_successful}")
-    logger.info(f"  {recovery_rate=}")
-    logger.info(f"  {avg_similarity=}")
+    targets = [target[0] for target in targets]
+    if args.analogs:
+        assert len(targets) == len(results)
+        data = []
+        trees = []
+        for target, res in zip(targets, results):
+            smis, sims, trees = res
+            for smi, sim, tree in zip(smis, sims, trees):
+                data.append({"targets": target, "decoded": smi, "similarity": sim})
+                trees.append(tree)
+        # Save to local dir
+        # 1. Dataframe with targets, decoded, smilarities
+        # 2. Synthetic trees of the decoded SMILES
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Saving results to {output_dir} ...")
 
-    # Save to local dir
-    # 1. Dataframe with targets, decoded, smilarities
-    # 2. Synthetic trees of the decoded SMILES
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving results to {output_dir} ...")
+        df = pd.DataFrame(data)
+        df.to_csv(f"{output_dir}/decoded_results_analogs_beam_width={args.beam_width}.csv.gz", compression="gzip", index=False)
+        df.to_csv(f"{output_dir}/decoded_results_analogs_beam_width={args.beam_width}.csv", index=False)
 
-    df = pd.DataFrame({"targets": targets, "decoded": decoded, "similarity": similarities})
-    df.to_csv(f"{output_dir}/decoded_results.csv.gz", compression="gzip", index=False)
-    df.to_csv(f"{output_dir}/decoded_results.csv", index=False)
+        synthetic_tree_set = SyntheticTreeSet(sts=trees)
+        synthetic_tree_set.save(f"{output_dir}/decoded_syntrees_analogs_beam_width={args.beam_width}.json.gz")
 
-    synthetic_tree_set = SyntheticTreeSet(sts=trees)
-    synthetic_tree_set.save(f"{output_dir}/decoded_syntrees.json.gz")
+        logger.info("Completed.")
+        
 
-    logger.info("Completed.")
+
+    else:
+        # Convert targets back to Smiles        
+
+        # Print some results from the prediction
+        # Note: If a syntree cannot be decoded within `max_depth` steps (15),
+        #       we will count it as unsuccessful. The similarity will be 0.    
+        decoded = [smi for smi, _, _ in results]
+        similarities = [sim for _, sim, _ in results]
+        trees = [tree for _, _, tree in results]
+
+        recovery_rate = (np.asfarray(similarities) == 1.0).sum() / len(similarities)
+        avg_similarity = np.mean(similarities)
+        n_successful = sum([syntree is not None for syntree in trees])
+        logger.info(f"For {args.data}:")
+        logger.info(f"  Total number of attempted  reconstructions: {len(targets)}")
+        logger.info(f"  Total number of successful reconstructions: {n_successful}")
+        logger.info(f"  {recovery_rate=}")
+        logger.info(f"  {avg_similarity=}")
+
+        # Save to local dir
+        # 1. Dataframe with targets, decoded, smilarities
+        # 2. Synthetic trees of the decoded SMILES
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Saving results to {output_dir} ...")
+
+        df = pd.DataFrame({"targets": targets, "decoded": decoded, "similarity": similarities})
+        df.to_csv(f"{output_dir}/decoded_results.csv.gz", compression="gzip", index=False)
+        df.to_csv(f"{output_dir}/decoded_results.csv", index=False)
+
+        synthetic_tree_set = SyntheticTreeSet(sts=trees)
+        synthetic_tree_set.save(f"{output_dir}/decoded_syntrees.json.gz")
+
+        logger.info("Completed.")
