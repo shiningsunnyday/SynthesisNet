@@ -174,15 +174,22 @@ class GeneticSearch:
         else:
             fp = parents[0].fp
 
-        # bt: random subtree swap
         if not cfg.freeze_bt:
-            trees = [parents[0].bt, parents[1].bt]
-            random.shuffle(trees)
-            bt = utils.random_graft(
-                *trees,
-                min_nodes=cfg.bt_nodes_min,
-                max_nodes=cfg.bt_nodes_max,
-            )
+            # bt: random subtree swap
+            if cfg.bt_crossover == "graft":
+                trees = [parents[0].bt, parents[1].bt]
+                random.shuffle(trees)
+                bt = utils.random_graft(
+                    *trees,
+                    min_nodes=cfg.bt_nodes_min,
+                    max_nodes=cfg.bt_nodes_max,
+                )
+            # bt: inherit from parent with more bits taken
+            elif cfg.bt_crossover == "inherit":
+                dominant = 0 if (k >= cfg.fp_bits / 2) else 1
+                bt = parents[dominant].bt
+            else:
+                raise NotImplementedError()
         else:
             bt = parents[0].bt
 
