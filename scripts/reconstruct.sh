@@ -1,6 +1,9 @@
 MAX_NUM_RXNS=3
-
-use_case="reconstruct_top_k=3_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=-1"
+TOP_K=3
+TOP_K_RXN=3
+STRATEGY=topological
+MAX_RXNS=-1
+use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
 ncpu=1;
 batch_size=100000;
 
@@ -39,19 +42,20 @@ batch_size=100000;
 
 python scripts/reconstruct-targets.py \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
+    --data data/assets/molecules/chembl_34_chemreps.tsv \
     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --out-dir /home/msun415/SynTreeNet/results/viz/ \
-    --mermaid \
-    --one-per-class \
-    --top-k 1 \
+    --top-k ${TOP_K} \
     --max_num_rxns ${MAX_NUM_RXNS} \
-    --top-k-rxn 1 \
-    --max_rxns -1 \
+    --top-k-rxn ${TOP_K_RXN} \
+    --max_rxns ${MAX_RXNS} \
     --test-correct-method reconstruct \
-    --strategy topological \
+    --strategy ${STRATEGY} \
     --ncpu $ncpu \
     --batch-size $batch_size \
     --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
-    # --sender-filename input_${use_case}.txt \
-    # --receiver-filename output_${use_case}.txt
+    --num-analogs 30 \
+    --sender-filename input_${use_case}.txt \
+    --receiver-filename output_${use_case}.txt \
+    --num 1000

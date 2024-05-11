@@ -55,6 +55,8 @@ def get_args():
     parser.add_argument("--ckpt-recognizer", type=str, help="Recognizer checkpoint to use")    
     parser.add_argument("--max_rxns", type=int, help="Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to syntrees whose skleton class was trained on by ckpt_dir)", default=-1)
     parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)    
+    parser.add_argument("--num-analogs", type=int, help="Number of analogs (by varying skeleton) to generate", default=1)
+    parser.add_argument("--num", type=int, help="Number of targets", default=-1)
     parser.add_argument("--ckpt-dir", type=str, help="Model checkpoint dir, if given assume one ckpt per class")
     parser.add_argument(
         "--skeleton-set-file",
@@ -131,7 +133,7 @@ def main(args):
                 breakpoint()
         else:
             raise NotImplementedError           
-        random.shuffle(targets)        
+        random.shuffle(targets)     
     else:
         syntree_set = []        
         print(f"SKELETON INDEX: {SKELETON_INDEX}")
@@ -149,7 +151,8 @@ def main(args):
                         syntree_set.append(syntree)       
         random.shuffle(syntree_set)
         targets = [syntree.root.smiles for syntree in syntree_set]                    
-    
+    if args.num != -1:
+        targets = targets[:args.num]
     lookup = {}    
     for i, target in tqdm(enumerate(targets), "initializing skeletons"):
         if args.data:        
@@ -168,12 +171,23 @@ def main(args):
                         good = False            
 
         if good:
-            if args.ckpt_recognizer:
-                pred_index = predict_skeleton(target, max_num_rxns=args.max_num_rxns)
-                sk = Skeleton(list(skeletons)[pred_index], pred_index)
-                if args.max_num_rxns != -1:
-                    assert sk.rxns.sum() <= args.max_num_rxns
-                lookup[target] = sk
+            if target not in lookup:
+                lookup[target] = []
+            if args.ckpt_recognizer:                
+                if args.num_analogs == 1:
+                    pred_index = predict_skeleton(target, max_num_rxns=args.max_num_rxns)
+                    sk = Skeleton(list(skeletons)[pred_index], pred_index)
+                    if args.max_num_rxns != -1:
+                        assert sk.rxns.sum() <= args.max_num_rxns
+                    lookup[target].append(sk)
+                else:                    
+                    pred_indices = predict_skeleton(target, max_num_rxns=args.max_num_rxns, top_k=list(range(1, args.num_analogs+1)))
+                    for pred_index in pred_indices:
+                        sk = Skeleton(list(skeletons)[pred_index], pred_index)
+                        if args.max_num_rxns != -1:
+                            assert sk.rxns.sum() <= args.max_num_rxns
+                        lookup[target].append(sk)
+                    
             else:
                 lookup[target] = sk
     targets = list(lookup)
@@ -190,7 +204,7 @@ def main(args):
     all_targets = []
     for batch in range((len(targets)+batch_size-1)//batch_size):
         target_batch = targets[batch_size*batch:batch_size*batch+batch_size]
-
+        target_batch = [(deepcopy(lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
 
         if args.test_correct_method == 'reconstruct' and args.sender_filename and args.receiver_filename: # assume background processes
             open(args.sender_filename, 'w+').close() # clear
@@ -200,8 +214,8 @@ def main(args):
                     editable = lock(fr)
                     if editable:
                         with open(args.sender_filename, 'w') as fw:
-                            for smi in target_batch:
-                                sample = DELIM.join([smi, str(lookup[smi].index)])
+                            for sk, smi in target_batch:
+                                sample = DELIM.join([smi, str(sk.index)])
                                 fw.write('{}\n'.format(sample))
                         break
                     fcntl.flock(fr, fcntl.LOCK_UN)     
@@ -228,18 +242,19 @@ def main(args):
             all_sks += status
             all_targets += target_batch
             data = []
-            for res, target in zip(all_sks, all_targets):
+            for res, (sk, target) in zip(all_sks, all_targets):
                 smiles, best_smi, index = res[1].split(DELIM)
                 assert smiles == target
+                assert int(index) == sk.index
                 score = res[2]
-                data_dict = {'target': target, 'smiles': best_smi, 'index': index, 'sim': score}
+                data_dict = {'target': target, 'smiles': best_smi, 'index': int(index), 'sim': score}
                 data.append(data_dict)
             df = pd.DataFrame(data)
             path = os.path.join(args.out_dir, 'reconstruct.csv')
             df.to_csv(path)
             print(os.path.abspath(path))
-        else:
-            target_batch = [(deepcopy(lookup[smi]), smi) for smi in target_batch]
+        else:            
+            target_batch = [(deepcopy(lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
             if args.ncpu == 1:
                 sks_batch = []
                 for arg in tqdm(target_batch):                        

@@ -1,6 +1,11 @@
-MAX_NUM_RXNS=6
+MAX_NUM_RXNS=3
+TOP_K=3
+TOP_K_RXN=3
+STRATEGY=topological
+MAX_RXNS=-1
+use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
 export OMP_NUM_THREADS=1
-use_case="reconstruct_top_k=3_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=-1"
+
 for ((i =1; i <= $1; i++));
 do
 # python -u scripts/reconstruct_listener.py \
@@ -41,11 +46,10 @@ do
         --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
         --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
         --out-dir /home/msun415/SynTreeNet/results/viz/ \
-        --top-k 3 \
+        --top-k ${TOP_K} \
         --max_num_rxns ${MAX_NUM_RXNS} \
-        --top-k-rxn 3 \
-        --max_rxns -1 \
+        --top-k-rxn ${TOP_K_RXN} \
+        --max_rxns ${MAX_RXNS} \
         --test-correct-method reconstruct \
-        --strategy topological &    
+        --strategy ${STRATEGY} &    
 done
-

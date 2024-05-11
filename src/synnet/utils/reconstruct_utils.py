@@ -34,6 +34,8 @@ import fcntl
 import random
 import uuid
 from tqdm import tqdm
+from tdc import Oracle
+import matplotlib.pyplot as plt
 
 def lock(f):
     try:
@@ -122,6 +124,7 @@ def decode(sk, smi):
         bb_gnn = bb_models[sk.index]
     else:
         bb_gnn = globals()['bb_gnn']
+
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
 
     ans = serialize_string(sk.tree, sk.tree_root)        
@@ -153,40 +156,148 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     return adj
 
 
+def fetch_oracle(objective):
+    if objective == "qed":
+        # define the oracle function from the TDC
+        return Oracle(name="QED")
+    elif objective == "logp":
+        # define the oracle function from the TDC
+        return Oracle(name="LogP")
+    elif objective == "jnk":
+        # return oracle function from the TDC
+        return Oracle(name="JNK3")
+    elif objective == "gsk":
+        # return oracle function from the TDC
+        return Oracle(name="GSK3B")
+    elif objective == "drd2":
+        # return oracle function from the TDC
+        return Oracle(name="DRD2")
+    elif objective == "7l11":
+        return dock_7l11
+    elif objective == "drd3":
+        return dock_drd3
+    else:
+        raise ValueError("Objective function not implemented")
 
-def mcmc(sk, smi, max_num_rxns=-1, beta=1., T=10):
+
+
+
+def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):    
     inds = get_skeleton_inds_within_depth(max_num_rxns)
     adj = globals()['mc_adj']
-    rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
-    ind = np.argmax([r[0] for r in rec])    
-    res = [(rec[ind][0], rec[ind][1], sk.index)]
-    for _ in range(1, T+1):
-        tree_key = serialize_string(sk.tree, sk.tree_root)        
-        index = inds.index(sk.index)
-        nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
-        tree_key_nei = globals()['skeleton_keys'][inds[nei]]
-        j_xy = adj[index, nei]
-        j_yx = adj[nei, index]        
-        sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]
-        sks_x = decode(sk, smi)
-        sks_y = decode(sk_y, smi)
-        x_rec = [reconstruct(sk, smi) for sk in sks_x]
-        y_rec = [reconstruct(sk, smi) for sk in sks_y]
-        ind_x = np.argmax([x[0] for x in x_rec])
-        ind_y = np.argmax([y[0] for y in y_rec])
-        x_smi = x_rec[ind_x][1]
-        y_smi = y_rec[ind_y][1]
-        sim_x = x_rec[ind_x][0]
-        sim_y = y_rec[ind_y][0]
-        pi_x = np.exp(-beta*(1-sim_x))
-        pi_y = np.exp(-beta*(1-sim_y))
-        a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
-        if random.random() < a_xy:
-            sk = sk_y
-            res.append((sim_y, y_smi, sk_y.index))
-        else:
-            res.append((sim_x, x_smi, sk.index))
-    return res
+    if objective == 'sim':                
+        rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
+        ind = np.argmax([r[0] for r in rec])    
+        res = [(rec[ind][0], rec[ind][1], sk.index)]
+        for _ in range(1, T+1):
+            index = inds.index(sk.index)
+            nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
+            tree_key_nei = globals()['skeleton_keys'][inds[nei]]
+            j_xy = adj[index, nei]
+            j_yx = adj[nei, index]        
+            sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]
+            sks_x = decode(sk, smi)
+            sks_y = decode(sk_y, smi)
+            x_rec = [reconstruct(sk, smi) for sk in sks_x]
+            y_rec = [reconstruct(sk, smi) for sk in sks_y]
+            ind_x = np.argmax([x[0] for x in x_rec])
+            ind_y = np.argmax([y[0] for y in y_rec])
+            x_smi = x_rec[ind_x][1]
+            y_smi = y_rec[ind_y][1]
+            sim_x = x_rec[ind_x][0]
+            sim_y = y_rec[ind_y][0]
+            pi_x = np.exp(-beta*(1-sim_x))
+            pi_y = np.exp(-beta*(1-sim_y))
+            a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
+            if random.random() < a_xy: # accept
+                sk = sk_y
+                res.append((sim_y, y_smi, sk_y.index))
+            else:
+                res.append((sim_x, x_smi, sk.index))
+        return res
+    else:
+        uid = uuid.uuid4()
+        oracle = fetch_oracle(objective)
+        fp = mol_fp(smi, 2, 2048)
+        sks = decode(sk, fp)
+        rec = [reconstruct(sk, fp) for sk in sks]
+        ind = np.argmax([r[0] for r in rec])    
+        x_smi = rec[ind][1]        
+        score_x = oracle(x_smi)
+        res = [(score_x, x_smi, sk.index, 1, 1)]
+        pi_x = np.exp(beta*score_x)        
+        oracle_lookup = {x_smi: score_x}
+        key = (''.join(list(map(str, fp))), sk.index)
+        reconstruct_lookup = {key: sks}
+        for iter in tqdm(range(1, T+1), "mcmc'ing"):
+            if iter % 2 == 1: # transition skeleton, like above
+                index = inds.index(sk.index)
+                nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
+                tree_key_nei = globals()['skeleton_keys'][inds[nei]]
+                j_xy = adj[index, nei]
+                j_yx = adj[nei, index]        
+                sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]                
+                sks_y = decode(sk_y, fp)
+                key = (''.join(list(map(str, fp))), sk_y.index)
+                if key in reconstruct_lookup:
+                    sks_y = reconstruct_lookup[key]
+                else:
+                    sks_y = decode(sk_y, fp)
+                    reconstruct_lookup[key] = sks_y
+                y_rec = [reconstruct(sk, fp) for sk in sks_y]                
+                ind_y = np.argmax([y[0] for y in y_rec])                
+                y_smi = y_rec[ind_y][1]
+                if y_smi in oracle_lookup:
+                    score_y = oracle_lookup[y_smi]
+                else:
+                    score_y = oracle(y_smi)
+                    oracle_lookup[y_smi] = score_y
+                pi_y = np.exp(beta*score_y)
+                a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
+                if random.random() < a_xy: # accept
+                    sk = sk_y
+                    fp = mol_fp(y_smi, 2, 2048)
+                    pi_x = pi_y
+                    res.append((score_y, y_smi, sk_y.index, len(reconstruct_lookup), len(oracle_lookup)))
+                else:
+                    res.append((score_x, x_smi, sk.index, len(reconstruct_lookup), len(oracle_lookup)))
+            else:
+                fp_y = deepcopy(fp)
+                bit = np.random.choice(np.arange(len(fp_y)))
+                fp_y[bit] = int(~fp_y[bit]) # assume equal prob
+                sks_y = decode(sk, fp_y)
+                key = (''.join(list(map(str, fp_y))), sk.index)
+                if key in reconstruct_lookup:
+                    sks_y = reconstruct_lookup[key]
+                else:
+                    sks_y = decode(sk, fp_y)
+                    reconstruct_lookup[key] = sks_y
+                y_rec = [reconstruct(sk, fp_y) for sk in sks_y]
+                ind_y = np.argmax([y[0] for y in y_rec])        
+                y_smi = y_rec[ind_y][1]
+                score_y = oracle(y_smi)
+                if y_smi in oracle_lookup:
+                    score_y = oracle_lookup[y_smi]
+                else:
+                    score_y = oracle(y_smi)
+                    oracle_lookup[y_smi] = score_y                
+                pi_y = np.exp(beta*score_y)
+                a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
+                if random.random() < a_xy: # accept
+                    sk = sk_y
+                    fp = fp_y
+                    pi_x = pi_y
+                    x_smi = y_smi
+                    res.append((score_y, y_smi, sk_y.index, len(reconstruct_lookup), len(oracle_lookup)))
+                else:
+                    res.append((score_x, x_smi, sk.index, len(reconstruct_lookup), len(oracle_lookup)))                
+            fig = plt.Figure()
+            ax = fig.add_subplot(1,1,1)
+            ax.plot(range(len(res)), [r[0] for r in res])
+            ax.set_title(f"{objective}: {len(reconstruct_lookup)}, {len(oracle_lookup)} calls")
+            fig.savefig(os.path.join('/home/msun415/SynTreeNet/results/chembl/mcmc/', f'{uid}.png'))
+        return res
+
 
 
 
@@ -532,7 +643,7 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, top_rxn
             if hasattr(rxns[pred_rxn_id], 'bblock_mask'):
                 second = sk.tree.nodes[n]['child'] == 'right'
                 indices = rxns[pred_rxn_id].bblock_mask[second]
-            bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
+            bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=min(top_bb, len(indices))).item()
             smiles = bbs[indices[bb_ind]]
         sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
 
@@ -592,6 +703,8 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             if isinstance(sk, tuple):
                 sk_n = sk[0]
                 sk_n.uuid = uuid.uuid4()        
+            else:
+                sk.uuid = uuid.uuid4()     
         skviz_version = skviz(sks[0][0] if isinstance(sks[0], tuple) else sks[0]).version
         assert args.top_k == 1
         assert args.top_k_rxn == 1
@@ -699,11 +812,12 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
         else:
             if args.mermaid:
                 sk_copy = deepcopy(sk)
-                sk_copy.reconstruct(rxns) # later we will reconstruct again
+                sk_copy.reconstruct(rxns, keep_main=True) # later we will reconstruct again
+                good = bool(sk_copy.tree.nodes[sk_copy.tree_root]['smiles'])
                 skviz_n = skviz(sk_copy, skviz_version)
                 mermaid_txt = skviz_n.write(node_mask=sk_copy.mask)             
                 mask_str = ''.join(map(str,sk_copy.mask))
-                outfile = skviz_n.path / f"skeleton_{sk_copy.uuid}_{sk_copy.index}_done.md"  
+                outfile = skviz_n.path / f"skeleton_{sk_copy.uuid}_{sk_copy.index}_done_{good}.md"  
                 SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
             final_sks.append(sk)
     # print(len(final_sks), "beams")
@@ -820,24 +934,40 @@ def get_skeleton_inds_within_depth(max_num_rxns):
 
 
 
-def predict_skeleton(smiles, max_num_rxns=-1):
+def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1]):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
     model.eval()    
     encoder = globals()['encoder']    
+    def argmax(x, ks=[1]):
+        if ks == [1]:
+            return x.argmax(axis=-1).item()
+        else:                        
+            sorted_args = x.argsort(axis=-1)
+            return [sorted_args[-k].item() for k in ks]
     probs = model(torch.FloatTensor(encoder.encode(smiles)))    
     if max_num_rxns == -1:
-        ind = probs.argmax(axis=-1).item()        
+        ind = argmax(probs, k=top_k)        
+        if top_k == [1]:
+            return globals()['skeleton_classes'][ind]
+        else:
+            return [globals()['skeleton_classes'][ind_] for ind_ in ind]
     else:
         inds = []
         inds = get_skeleton_inds_within_depth(max_num_rxns)
         sorted_inds = sorted(inds)
         inds = [globals()['skeleton_classes'].index(ind) for ind in sorted_inds]
         assert probs.shape[0] == 1
-        ind = probs[0, inds].argmax(axis=-1).item()
-        ind = inds[ind]
-    return globals()['skeleton_classes'][ind]
-
+        ind = argmax(probs[0, inds], ks=top_k)        
+        if top_k == [1]:
+            ind = inds[ind]
+            return globals()['skeleton_classes'][ind]
+        else:
+            classes = []
+            for ind_ in ind:
+                ind_ = inds[ind_]
+                classes.append(globals()['skeleton_classes'][ind_])
+        return classes
 
 # For reconstruct without true skeleton
 def reconstruct(sk, smi): 

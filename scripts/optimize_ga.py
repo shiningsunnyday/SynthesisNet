@@ -351,7 +351,13 @@ if __name__ == "__main__":
         # if not os.path.exists(emb_path):
         data = np.load(args.embeddings_knn_file)
         top_emb = data[bblock_inds]
-        np.save(emb_path, top_emb)        
+        np.save(emb_path, top_emb)  
+        # ... reaction templates
+        bblock_set = set(bblocks)
+        rxns = ReactionSet().load(args.rxns_collection_file).rxns
+        for rxn in rxns:
+            for i in range(len(rxn.available_reactants)):
+                rxn.available_reactants[i] = [reactant for reactant in rxn.available_reactants[i] if reactant in bblock_set]              
         bblocks_molembedder = (
             MolEmbedder().load_precomputed(emb_path).init_balltree(cosine_distance)
         )     
@@ -360,17 +366,14 @@ if __name__ == "__main__":
         bblock_inds = None        
         # A dict is used as lookup table for 2nd reactant during inference:
         bb_dict = {block: i for i, block in enumerate(bblocks)}
+        # Reactions
+        rxns = ReactionSet().load(args.rxns_collection_file).rxns
         # ... building block embedding
         bblocks_molembedder = (
             MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
         )
         bb_emb = bblocks_molembedder.get_embeddings()
 
-    # load the reaction templates as a ReactionSet object
-    rxns = ReactionSet().load(args.rxns_collection_file).rxns
-    for rxn in rxns:
-        for i in range(len(rxn.available_reactants)):
-            rxn.available_reactants[i] = [reactant for reactant in rxn.available_reactants[i] if reactant in bblocks]    
 
     # load the pre-trained modules
     path = Path(args.ckpt_dir)

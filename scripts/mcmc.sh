@@ -1,5 +1,10 @@
+obj=drd2
 MAX_NUM_RXNS=3
-use_case="mcmc_top_k=3_max_num_rxns=${MAX_NUM_RXNS}.txt"
+TOP_K=3
+TOP_K_RXN=3
+MAX_RXNS=-1
+STRATEGY=conf
+use_case="mcmc_${obj}_top_k=${TOP_K}_top_k_rxn=${TOP_K_RXN}_max_rxns=${MAX_RXNS}_max_num_rxns=${MAX_NUM_RXNS}_strategy=${STRATEGY}"
 batch_size=1000
 
 python scripts/mcmc.py \
@@ -10,15 +15,16 @@ python scripts/mcmc.py \
     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --out-dir /home/msun415/SynTreeNet/results/chembl/ \
     --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
-    --top-k 3 \
-    --top-k-rxn 3 \
+    --top-k ${TOP_K} \
+    --top-k-rxn ${TOP_K_RXN} \
     --max_num_rxns ${MAX_NUM_RXNS} \
-    --max_rxns -1 \
+    --max_rxns ${MAX_RXNS} \
     --test-correct-method reconstruct \
-    --strategy topological \
-    --beta 1. \
-    --mcmc_timesteps 20 \
+    --strategy ${STRATEGY} \
+    --beta 10. \
+    --mcmc_timesteps 1000 \
+    --obj ${obj} \
     --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.tx
+    --receiver-filename output_${use_case}.txt
     # --chunk_size 5 \
-    # --ncpu $ncpu \    
+    # --ncpu $ncpu \   ddk 

@@ -344,7 +344,7 @@ def synthetic_tree_decoder(
 
 
 def synthetic_tree_decoder_greedy_search(
-    beam_width: int = 3, **kwargs
+    beam_width: int = 3, analogs=False, **kwargs
 ) -> Tuple[str, float, SyntheticTree, int]:
     """
     Wrapper around `synthetic_tree_decoder_rt1` with variable `k` for kNN search of 1st reactant.
@@ -383,11 +383,14 @@ def synthetic_tree_decoder_greedy_search(
         trees.append(tree)
         acts.append(act)
 
-    # Identify most similar among all trees
-    max_similar_idx = np.argmax(similarities)
-    similarity = similarities[max_similar_idx]
-    tree = trees[max_similar_idx]
-    smi = smiles[max_similar_idx]
-    act = acts[max_similar_idx]
+    if analogs:
+        return smiles, similarities, trees, acts
+    else:
+        # Identify most similar among all trees
+        max_similar_idx = np.argmax(similarities)
+        similarity = similarities[max_similar_idx]
+        tree = trees[max_similar_idx]
+        smi = smiles[max_similar_idx]
+        act = acts[max_similar_idx]
 
-    return smi, similarity, tree, act
+        return smi, similarity, tree, act
