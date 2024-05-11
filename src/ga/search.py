@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Tuple
 
 import networkx as nx
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import scipy
 import torch
@@ -45,31 +46,13 @@ class GeneticSearch:
         return population
 
     def initialize_load(self, path: str) -> Population:
-        raise NotImplementedError("(AL) I'm pretty sure there's a bug here")
-        with open(path, "r") as f:
-            state = json.load(f)
-
+        cfg = self.config
         population = []
-        for ind in state:
-            bt = nx.tree_graph(ind["bt"])  # only supports node-level attributes
-            bt = nx.relabel_nodes(bt, {k: utils.random_name() for k in list(bt.nodes)})
-            for n in bt:  # move child node attribute "left" to edge attribute
-                preds = list(bt.predecessors(n))
-                if len(preds) == 1:
-                    pred = preds[0]
-                else:
-                    continue
-                if list(bt[pred]) == 1:   # FIXME: look into this
-                    bt.edges[(pred, n)]["left"] = True
-                else:
-                    assert "left" in bt.nodes[n]
-                    bt.edges[(pred, n)]["left"] = bt.nodes[n]["left"]
-            if "smi" in ind:
-                fp = mol_fp(ind["smi"], _nBits=self.config.fp_bits)
-                fp = np.array(fp, dtype=bool)
-            else:
-                fp = ind["fp"]
-                fp = np.array(fp, dtype=bool)
+        df = pd.read_csv(path).sample(cfg.population_size)
+        for smiles in df["smiles"].tolist():
+            fp = mol_fp(smiles, _nBits=cfg.fp_bits)
+            bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
+            bt = utils.random_binary_tree(bt_size.item())
             population.append(Individual(fp=fp, bt=bt))
         return population
 
@@ -88,7 +71,7 @@ class GeneticSearch:
             "scores/mean": np.mean(scores).item(),
             "scores/stdev": np.std(scores).item(),
         }
-        for k in [1, 10, 100]:
+        for k in [10, 100]:
             metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
         for k in range(1, 4):
             metrics[f"scores/top{k}"] = scores[k - 1]
@@ -174,9 +157,9 @@ class GeneticSearch:
         else:
             fp = parents[0].fp
 
+        # bt:
         if not cfg.freeze_bt:
-            # bt: random subtree swap
-            if cfg.bt_crossover == "graft":
+            if cfg.bt_crossover == "graft":  # random subtree swap
                 trees = [parents[0].bt, parents[1].bt]
                 random.shuffle(trees)
                 bt = utils.random_graft(
@@ -184,8 +167,7 @@ class GeneticSearch:
                     min_nodes=cfg.bt_nodes_min,
                     max_nodes=cfg.bt_nodes_max,
                 )
-            # bt: inherit from parent with more bits taken
-            elif cfg.bt_crossover == "inherit":
+            elif cfg.bt_crossover == "inherit":  # inherit from dominant parent
                 dominant = 0 if (k >= cfg.fp_bits / 2) else 1
                 bt = parents[dominant].bt
             else:
@@ -205,20 +187,19 @@ class GeneticSearch:
             fp = np.where(mask, ~fp, fp)
 
         # bt: random add or delete nodes
-        bt = ind.bt
-        if (not cfg.freeze_bt) and utils.random_boolean(cfg.bt_mutate_prob):
-            bt = bt.copy()
-            for _ in range(cfg.bt_mutate_edits):
-                if bt.number_of_nodes() == cfg.bt_nodes_max:
-                    add = False
-                elif bt.number_of_nodes() == cfg.bt_nodes_min:
-                    add = True
-                else:
-                    add = utils.random_boolean(0.5)
-                if add:
-                    utils.random_add_leaf(bt)
-                else:
-                    utils.random_remove_leaf(bt)
+        bt = ind.bt.copy()
+        num_edits = 0 if cfg.freeze_bt else torch.randint(cfg.bt_mutate_edits + 1, size=[1]).item()
+        for _ in range(num_edits):
+            if bt.number_of_nodes() == cfg.bt_nodes_max:
+                add = False
+            elif bt.number_of_nodes() == cfg.bt_nodes_min:
+                add = True
+            else:
+                add = utils.random_boolean(0.5)
+            if add:
+                utils.random_add_leaf(bt)
+            else:
+                utils.random_remove_leaf(bt)
 
         return Individual(fp=fp, bt=bt)
 
@@ -288,6 +269,9 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
+                table = [[epoch, ind.smiles, ind.fitness] for ind in population]
+                columns = ["generation", "smiles", "fitness"]
+                metrics["smiles"] = wandb.Table(columns=columns, data=table)
                 wandb.log({"generation": epoch, **metrics}, step=(1 + epoch), commit=True)
             if cfg.checkpoint_path is not None:
                 self.checkpoint(cfg.checkpoint_path, population)

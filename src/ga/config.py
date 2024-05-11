@@ -41,7 +41,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     early_stop_patience: int = 10
 
     # IO
-    initialize_path: str = None
+    initialize_path: str = "./data/zinc.csv"
     checkpoint_path: str = None
     background_set_file: str
 
