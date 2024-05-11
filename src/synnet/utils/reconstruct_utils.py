@@ -32,6 +32,7 @@ import gzip
 from copy import deepcopy
 import fcntl
 import random
+import uuid
 from tqdm import tqdm
 import contextlib
 
@@ -115,7 +116,7 @@ def decode(sk, smi):
     sk.clear_tree(forcing=args.forcing_eval)
     sk.modify_tree(sk.tree_root, smiles=smi)              
     if args.mermaid:
-        skviz = lambda sk: SkeletonVisualizer(skeleton=sk, outfolder=args.out_dir).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)                       
+        skviz = lambda sk, *pargs: SkeletonVisualizer(sk, args.out_dir, *pargs).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
     else:
         skviz = None
     if 'bblock_inds' in globals():
@@ -133,6 +134,7 @@ def decode(sk, smi):
     else:
         bb_gnn = globals()['bb_gnn']
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
+
     ans = serialize_string(sk.tree, sk.tree_root)        
     return sks
 
@@ -592,9 +594,18 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
         for top_sort in globals()['all_topological_sorts'][tree_key]:
             sks.append((deepcopy(sk), list(top_sort)))
     elif args.strategy == 'conf':
-        sks = [sk]    
+        sks = [sk]
     else:
         raise NotImplementedError    
+    if args.mermaid:
+        # set ids so don't forget
+        for sk in sks:
+            if isinstance(sk, tuple):
+                sk_n = sk[0]
+                sk_n.uuid = uuid.uuid4()        
+        skviz_version = skviz(sks[0][0] if isinstance(sks[0], tuple) else sks[0]).version
+        assert args.top_k == 1
+        assert args.top_k_rxn == 1
     final_sks = [] 
     while len(sks):
         sk = sks.pop(-1)
@@ -681,12 +692,11 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                         sks.append(sk_n)
                     else:
                         sks.append((sk_n, next_node))
-                    if skviz is not None:
-                        breakpoint()
-                        sk_viz_n = skviz(sk_n)
-                        mermaid_txt = sk_viz_n.write(node_mask=sk_n.mask)             
+                    if skviz is not None:  
+                        skviz_n = skviz(sk_n, skviz_version)                                              
+                        mermaid_txt = skviz_n.write(node_mask=sk_n.mask)             
                         mask_str = ''.join(map(str,sk_n.mask))
-                        outfile = sk_viz_n.path / f"skeleton_{sk_n.index}_{mask_str}.md"  
+                        outfile = skviz_n.path / f"skeleton_{sk_n.uuid}_{sk_n.index}_{mask_str}.md"  
                         SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
                         if args.attn_weights:
                             mask = edge_input[1] == n
@@ -699,6 +709,14 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                             sk.visualize(fpath, attn=(edge_input[:, mask], attns))
                         print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
         else:
+            if args.mermaid:
+                sk_copy = deepcopy(sk)
+                sk_copy.reconstruct(rxns) # later we will reconstruct again
+                skviz_n = skviz(sk_copy, skviz_version)
+                mermaid_txt = skviz_n.write(node_mask=sk_copy.mask)             
+                mask_str = ''.join(map(str,sk_copy.mask))
+                outfile = skviz_n.path / f"skeleton_{sk_copy.uuid}_{sk_copy.index}_done.md"  
+                SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
             final_sks.append(sk)
     # print(len(final_sks), "beams")
     return final_sks
