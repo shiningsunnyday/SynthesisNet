@@ -13,6 +13,7 @@ import scipy
 import torch
 import tqdm
 import wandb
+from networkx.algorithms.dag import dag_longest_path
 from rdkit import Chem
 
 from ga import utils
@@ -63,10 +64,10 @@ class GeneticSearch:
             assert cfg.bt_nodes_min <= ind.bt.number_of_nodes() <= cfg.bt_nodes_max
 
     def evaluate(self, population: Population) -> Dict[str, float]:
-        scores = [ind.fitness for ind in population]
-        scores.sort(reverse=True)
 
         # Fitness
+        scores = [ind.fitness for ind in population]
+        scores.sort(reverse=True)
         metrics = {
             "scores/mean": np.mean(scores).item(),
             "scores/stdev": np.std(scores).item(),
@@ -75,6 +76,11 @@ class GeneticSearch:
             metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
         for k in range(1, 4):
             metrics[f"scores/top{k}"] = scores[k - 1]
+
+        # Trees
+        trees = [ind.bt for ind in population]
+        metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
+        metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
 
         # Diversity
         distances = []
