@@ -183,13 +183,19 @@ def fetch_oracle(objective):
 
 
 def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):    
+    def beta_anneal(t):
+        if len(beta) == 1:
+            return beta[0]
+        # linear
+        return (T-t)/T*beta[0]+(t/T)*beta[1]
+
     inds = get_skeleton_inds_within_depth(max_num_rxns)
     adj = globals()['mc_adj']
     if objective == 'sim':                
         rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
         ind = np.argmax([r[0] for r in rec])    
         res = [(rec[ind][0], rec[ind][1], sk.index)]
-        for _ in range(1, T+1):
+        for iter in range(1, T+1):
             index = inds.index(sk.index)
             nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
             tree_key_nei = globals()['skeleton_keys'][inds[nei]]
@@ -206,8 +212,8 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
             y_smi = y_rec[ind_y][1]
             sim_x = x_rec[ind_x][0]
             sim_y = y_rec[ind_y][0]
-            pi_x = np.exp(-beta*(1-sim_x))
-            pi_y = np.exp(-beta*(1-sim_y))
+            pi_x = np.exp(-beta_anneal(iter)*(1-sim_x))
+            pi_y = np.exp(-beta_anneal(iter)*(1-sim_y))
             a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
             if random.random() < a_xy: # accept
                 sk = sk_y
@@ -217,7 +223,10 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
         return res
     else:
         uid = uuid.uuid4()
-        oracle = fetch_oracle(objective)
+        if objective == 'analog':
+            oracle = lambda smiles: max(tanimoto_similarity(mol_fp(smi, 2, 4096), [smiles]))
+        else:
+            oracle = fetch_oracle(objective)
         fp = mol_fp(smi, 2, 2048)
         sks = decode(sk, fp)
         rec = [reconstruct(sk, fp) for sk in sks]
@@ -225,7 +234,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
         x_smi = rec[ind][1]        
         score_x = oracle(x_smi)
         res = [(score_x, x_smi, sk.index, 1, 1)]
-        pi_x = np.exp(beta*score_x)        
+        pi_x = np.exp(beta_anneal(0)*score_x)        
         oracle_lookup = {x_smi: score_x}
         key = (''.join(list(map(str, fp))), sk.index)
         reconstruct_lookup = {key: sks}
@@ -252,7 +261,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
                 else:
                     score_y = oracle(y_smi)
                     oracle_lookup[y_smi] = score_y
-                pi_y = np.exp(beta*score_y)
+                pi_y = np.exp(beta_anneal(iter)*score_y)
                 a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
                 if random.random() < a_xy: # accept
                     sk = sk_y
@@ -281,8 +290,8 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
                 else:
                     score_y = oracle(y_smi)
                     oracle_lookup[y_smi] = score_y                
-                pi_y = np.exp(beta*score_y)
-                a_xy = min(1, pi_y*j_yx/(pi_x*j_xy))
+                pi_y = np.exp(beta_anneal(iter)*score_y)
+                a_xy = min(1, pi_y/pi_x)
                 if random.random() < a_xy: # accept
                     sk = sk_y
                     fp = fp_y

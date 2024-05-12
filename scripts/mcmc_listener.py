@@ -76,10 +76,10 @@ def get_args():
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # MCMC params
-    parser.add_argument("--beta", type=float, default=1.)
+    parser.add_argument("--beta", nargs='+', type=float, default=[1.])
     parser.add_argument("--mcmc_timesteps", type=int, default=10)
     parser.add_argument("--chunk_size", type=int, default=1)    
-    parser.add_argument("--obj", default='sim', choices=['sim','qed','logp','jnk','gsk','drd2'])
+    parser.add_argument("--obj", default='sim', choices=['sim','analog','qed','logp','jnk','gsk','drd2'])
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
@@ -132,10 +132,8 @@ def main(proc_id, filename, output_filename):
         index = int(index)
         st = list(skeletons)[index]               
         sk = Skeleton(st, index)
-        try:
-            sks = mcmc(sk, smiles, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
-        except:
-            print(smiles, sk.index, "needs debug")
+        sks = mcmc(sk, smiles, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
+
         # starting smiles, starting index, score history, smi history
         score_history = ','.join([str(sk[0]) for sk in sks])
         smi_history = ','.join([sk[1] for sk in sks])
@@ -161,5 +159,5 @@ def main(proc_id, filename, output_filename):
 
 if __name__ == "__main__":
     args = get_args()
-    setproctitle.setproctitle("mcmc_listener")
+    setproctitle.setproctitle("mcmc_listener_analog")
     main(args.proc_id, args.sender_filename, args.receiver_filename)

@@ -8,7 +8,7 @@ use_case="mcmc_${obj}_top_k=${TOP_K}_top_k_rxn=${TOP_K_RXN}_max_rxns=${MAX_RXNS}
 batch_size=1000
 
 python scripts/mcmc.py \
-    --data data/assets/molecules/chembl_34_chemreps.tsv \
+    --data data/assets/molecules/zinc.csv \
     --batch-size $batch_size \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
@@ -21,7 +21,7 @@ python scripts/mcmc.py \
     --max_rxns ${MAX_RXNS} \
     --test-correct-method reconstruct \
     --strategy ${STRATEGY} \
-    --beta 10. \
+    --beta 10. 100. \
     --mcmc_timesteps 1000 \
     --obj ${obj} \
     --sender-filename input_${use_case}.txt \

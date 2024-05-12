@@ -89,10 +89,10 @@ def get_args():
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # MCMC params
-    parser.add_argument("--beta", type=float, default=1.)
+    parser.add_argument("--beta", nargs='+', type=float, default=[1.])
     parser.add_argument("--mcmc_timesteps", type=int, default=10)
     parser.add_argument("--chunk_size", type=int, default=1)
-    parser.add_argument("--obj", default='sim', choices=['sim','qed','logp','jnk','gsk','drd2'])
+    parser.add_argument("--obj", default='sim', choices=['sim','analog','qed','logp','jnk','gsk','drd2'])
     # Visualization
     parser.add_argument("--mermaid", action='store_true')
     parser.add_argument("--one-per-class", action='store_true', help='visualize one skeleton per class')
@@ -129,12 +129,11 @@ def main(args):
     if args.data: 
         assert os.path.exists(args.data)
         if 'chembl' in args.data:
-            df = pd.read_csv(args.data, sep='\t')
-            col_name = 'canonical_smiles'
-            if col_name in df:
-                targets = list(df[col_name])
-            else:
-                breakpoint()
+            df = pd.read_csv(args.data, sep='\t')     
+            targets = list(df['canonical_smiles'])       
+        elif 'zinc' in args.data:
+            df = pd.read_csv(args.data)
+            targets = list(df['smiles'])
         else:
             raise NotImplementedError           
         random.shuffle(targets)
@@ -237,7 +236,6 @@ def main(args):
         else:
             if args.ncpu == 1:
                 sks_batch = []
-                sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                 for smi in tqdm(target_batch):                        
                     sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                     sks_batch.append(sks)                                      

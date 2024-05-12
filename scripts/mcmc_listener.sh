@@ -1,5 +1,5 @@
 obj=drd2
-export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=16
 MAX_NUM_RXNS=3
 TOP_K=3
 TOP_K_RXN=3
@@ -50,7 +50,7 @@ do
         --max_rxns ${MAX_RXNS} \
         --test-correct-method reconstruct \
         --strategy ${STRATEGY} \
-        --beta 10. \
+        --beta 10. 100. \
         --mcmc_timesteps 1000 \
         --obj ${obj} \
         --sender-filename input_${use_case}.txt \
