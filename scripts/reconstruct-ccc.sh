@@ -5,10 +5,8 @@ STRATEGY=topological
 MAX_RXNS=-1
 use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
 ncpu=1;
-batch_size=100000;
 ROOT_DIR=/u/msun415/SynTreeNet/
 MODEL_DIR=/u/msun415/SynTreeNet/surrogate/
-# MODEL_DIR=/ssd/msun415/surrogate
 
 # python scripts/reconstruct-targets.py \
 #     --skeleton-set-file results/viz/top_1000/skeletons-top-1000-valid.pkl \
@@ -55,9 +53,9 @@ python scripts/reconstruct-targets.py \
     --test-correct-method reconstruct \
     --strategy ${STRATEGY} \
     --ncpu $ncpu \
-    --batch-size $batch_size \
     --ckpt-recognizer ${MODEL_DIR}/${MAX_NUM_RXNS}-REC/ \
     --num-analogs 30 \
     --sender-filename input_${use_case}.txt \
     --receiver-filename output_${use_case}.txt \
+    --batch-size 10000000000000
     # --num 1000

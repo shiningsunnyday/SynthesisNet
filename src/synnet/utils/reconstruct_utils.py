@@ -152,7 +152,7 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
     fig.colorbar(cax)
     ax.set_title('Heatmap Example')
-    fig.savefig('/home/msun415/heatmap.png')  # Save to file    
+    fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file    
     return adj
 
 

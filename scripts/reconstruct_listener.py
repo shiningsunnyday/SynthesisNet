@@ -153,5 +153,5 @@ def main(proc_id, filename, output_filename):
 
 if __name__ == "__main__":
     args = get_args()
-    setproctitle.setproctitle("reconstruct_listener")
+    # setproctitle.setproctitle("reconstruct_listener")
     main(args.proc_id, args.filename, args.output_filename)

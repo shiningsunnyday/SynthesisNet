@@ -33,8 +33,8 @@ from sklearn.model_selection import train_test_split
 logger = logging.getLogger(__name__)
 MODEL_ID = Path(__file__).stem
 
-
-all_skeletons = pickle.load(open('/home/msun415/SynTreeNet/results/viz/skeletons.pkl','rb'))
+HOME_DIR = os.getenv('HOME')
+all_skeletons = pickle.load(open(f'{HOME_DIR}/SynTreeNet/results/viz/skeletons-train.pkl','rb'))
 # keys = sorted([index for index in range(len(all_skeletons))], key=lambda ind: len(all_skeletons[list(all_skeletons)[ind]]))[-4:]
 class PtrDataset(Dataset):
     def __init__(self, ptrs, rewire=False, pe=None, **kwargs):
