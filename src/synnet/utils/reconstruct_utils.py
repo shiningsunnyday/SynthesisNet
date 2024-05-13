@@ -966,7 +966,7 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
         fp = encoder.encode(smiles)
     elif fp.ndim == 1:
         fp = fp[None, :]
-    probs = model(torch.FloatTensor(fp))    
+    probs = model(torch.from_numpy(fp.astype(np.float32)))    
     if max_num_rxns == -1:
         ind = argmax(probs, k=top_k)        
         if top_k == [1]:
