@@ -378,7 +378,9 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
     globals()['skeleton_index_lookup'] = {}
     globals()['skeleton_index_lookup_by_num_rxns'] = {}
     globals()['skeleton_keys'] = {}
-    sks = list(skeleton_set.skeletons)
+    globals()['skeleton_list'] = list(skeleton_set.skeletons)
+
+    sks = globals()['skeleton_list']
     for index in SKELETON_INDEX:
         sk = Skeleton(sks[index], index)
         num_rxns = sk.rxns.sum()
@@ -421,6 +423,9 @@ def lookup_skeleton_key(zss_tree, tree_key):
         return ans
             
 
+def lookup_skeleton_by_index(index):
+    sks = globals()['skeleton_list']
+    return Skeleton(sks[index], index)
 
 
 def set_models(args, logger=None):

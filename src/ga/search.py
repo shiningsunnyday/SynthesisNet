@@ -21,7 +21,7 @@ from ga.config import GeneticSearchConfig, Individual
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
 from synnet.utils.data_utils import binary_tree_to_skeleton
-from synnet.utils.reconstruct_utils import predict_skeleton
+from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
 
@@ -53,7 +53,8 @@ class GeneticSearch:
         df = pd.read_csv(path).sample(cfg.population_size)
         for smiles in df["smiles"].tolist():
             fp = mol_fp(smiles, _nBits=cfg.fp_bits)
-            sk = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            sk = lookup_skeleton_by_index(index)
             bt = utils.skeleton_to_binary_tree(sk)
             population.append(Individual(fp=fp, bt=bt))
         return population
@@ -174,7 +175,8 @@ class GeneticSearch:
             dominant = 0 if (k >= cfg.fp_bits / 2) else 1
             bt = parents[dominant].bt
         elif cfg.bt_crossover == "recognizer":  # use recognizer
-            sk = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            sk = lookup_skeleton_by_index(index)
             bt = utils.skeleton_to_binary_tree(sk)
         else:
             raise NotImplementedError()
