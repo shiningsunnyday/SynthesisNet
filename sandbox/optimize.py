@@ -241,14 +241,6 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-# Needed to avoid deadlock
-# Reference:
-#   https://github.com/pytorch/pytorch/issues/17199
-def thread_quarantine(idx_and_ind, converter):
-    with ThreadPoolExecutor(max_workers=1) as exe:
-        return exe.submit(converter, idx_and_ind).result()
-
-
 def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
     oracle = fetch_oracle(config.objective)
 
@@ -332,7 +324,6 @@ def main():
 
     if config.num_workers > 0:
         pool = Pool(processes=config.num_workers)
-        converter = functools.partial(thread_quarantine, converter=converter)
     else:
         pool = None
 
