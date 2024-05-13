@@ -128,11 +128,19 @@ def random_graft(
 
 
 def skeleton_to_binary_tree(skeleton):
+    tree = skeleton.tree
+
     bt = nx.MultiDiGraph()
-    lookup = defaultdict(random_name)
-    for e in skeleton.tree.edges:
-        src = lookup[skeleton.nodes[e[0]]]
-        dst = lookup[skeleton.nodes[e[1]]]
-        left = dst["child"] == "left"
-        bt.add_edge(src, dst, left=left)
+    for node, ndata in list(tree.nodes(data=True)):
+        if "smiles" not in ndata:  # rxn node 
+            continue 
+        bt.add_node(node)
+        rxns = list(tree.successors(node))
+        if not rxns:
+            continue 
+        assert len(rxns) == 1
+        reactants = list(tree.successors(rxns[0]))
+        for adj in reactants:
+             bt.add_edge(node, adj, left=(tree.nodes[adj]["child"] == "left"))
+    nx.relabel_nodes(bt, {k: random_name() for k in bt}, copy=False)
     return bt
