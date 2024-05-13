@@ -18,7 +18,7 @@ from synnet.MolEmbedder import MolEmbedder
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
-from synnet.utils.data_utils import ReactionSet, Skeleton, SkeletonSet, binary_tree_to_skeleton
+from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
 from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
     decode,

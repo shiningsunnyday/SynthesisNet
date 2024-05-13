@@ -130,11 +130,10 @@ def random_graft(
 def skeleton_to_binary_tree(skeleton):
     tree = skeleton.tree
 
-    bt = nx.MultiDiGraph()
+    bt = nx.DiGraph()
     for node, ndata in list(tree.nodes(data=True)):
         if "smiles" not in ndata:  # rxn node 
             continue 
-        bt.add_node(node)
         rxns = list(tree.successors(node))
         if not rxns:
             continue 
