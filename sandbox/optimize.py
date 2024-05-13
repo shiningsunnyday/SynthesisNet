@@ -71,9 +71,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
 
-    # Input file for the skeletons of syntree-file
-    skeleton_file: str = "results/viz/top_1000/skeletons-top-1000.pkl"
-
     forcing_eval: bool = False
     mermaid: bool = False
     one_per_class: bool = False
