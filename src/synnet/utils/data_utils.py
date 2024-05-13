@@ -2990,6 +2990,7 @@ class SkeletonSet:
             sim[i][j] = d
         sim += sim.T
         self.sim = sim
+        return
         ms = MDS(n_components=256, dissimilarity='precomputed', verbose=1)
         print("begin mds")
         coords = ms.fit_transform(sim)
