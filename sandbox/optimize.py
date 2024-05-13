@@ -23,6 +23,7 @@ from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similari
 from synnet.utils.reconstruct_utils import (
     decode,
     load_data,
+    lookup_skeleton_by_index,
     lookup_skeleton_key,
     reconstruct,
     serialize_string,
@@ -190,9 +191,7 @@ def get_smiles_ours(idx_and_ind):
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
     index = lookup_skeleton_key(sk.zss_tree, tree_key)
-
-    st0 = globals()["skeleton_list"][index]
-    sk0 = Skeleton(st0, index)
+    sk0 = lookup_skeleton_by_index(index)
 
     ans = 0.0
     best_smi = ""
@@ -291,7 +290,6 @@ def main():
         load_data(config, logger)
         with open(config.skeleton_set_file, "rb") as f:
             skeletons = pickle.load(f)
-            globals()["skeleton_list"] = list(skeletons)  # FIXME: (AL) why does this work?
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
         SKELETON_INDEX = test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
 
