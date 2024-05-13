@@ -54,7 +54,7 @@ class GeneticSearch:
         for smiles in df["smiles"].tolist():
             fp = mol_fp(smiles, _nBits=cfg.fp_bits)
             sk = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-            bt = 
+            bt = utils.skeleton_to_binary_tree(sk)
             population.append(Individual(fp=fp, bt=bt))
         return population
 
@@ -175,7 +175,7 @@ class GeneticSearch:
             bt = parents[dominant].bt
         elif cfg.bt_crossover == "recognizer":  # use recognizer
             sk = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-            bt = 
+            bt = utils.skeleton_to_binary_tree(sk)
         else:
             raise NotImplementedError()
 
