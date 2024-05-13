@@ -946,7 +946,7 @@ def get_skeleton_inds_within_depth(max_num_rxns):
 
 
 
-def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1]):
+def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
     model.eval()    
@@ -957,7 +957,9 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1]):
         else:                        
             sorted_args = x.argsort(axis=-1)
             return [sorted_args[-k].item() for k in ks]
-    probs = model(torch.FloatTensor(encoder.encode(smiles)))    
+    if fp is None:
+        fp = encoder.encode(smiles)
+    probs = model(torch.FloatTensor(fp))    
     if max_num_rxns == -1:
         ind = argmax(probs, k=top_k)        
         if top_k == [1]:

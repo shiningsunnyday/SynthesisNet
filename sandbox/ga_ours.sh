@@ -19,4 +19,6 @@ python sandbox/optimize.py \
     --num_workers=10 \
     --bt_nodes_max=25 \
     --offspring_size=512 \
-    --fp_bits=2048
+    --fp_bits=2048 \
+    --bt_crossover=recognizer \
+    --bt_mutate_edits=3

@@ -89,9 +89,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # syntrees whose skeleton class was trained on by ckpt_dir)
     max_rxns: int = -1
 
-    # Restrict skeleton prediction to max number of reactions
-    max_num_rxns: int = -1
-
     filter_only: List[Literal["rxn", "bb"]] = []
 
     # Objective function to optimize
@@ -131,7 +128,8 @@ def get_args():
     parser.add_argument("--bt_nodes_max", type=int)
     parser.add_argument("--offspring_size", type=int)
     parser.add_argument("--fp_bits", type=int)
-    parser.add_argument("--freeze_bt", action="store_true")
+    parser.add_argument("--bt_crossover", type=str)
+    parser.add_argument("--bt_mutate_edits", type=int)
 
     return parser.parse_args()
 

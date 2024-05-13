@@ -21,6 +21,7 @@ from ga.config import GeneticSearchConfig, Individual
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
 from synnet.utils.data_utils import binary_tree_to_skeleton
+from synnet.utils.reconstruct_utils import predict_skeleton
 
 Population = List[Individual]
 
@@ -52,8 +53,8 @@ class GeneticSearch:
         df = pd.read_csv(path).sample(cfg.population_size)
         for smiles in df["smiles"].tolist():
             fp = mol_fp(smiles, _nBits=cfg.fp_bits)
-            bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
-            bt = utils.random_binary_tree(bt_size.item())
+            sk = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            bt = 
             population.append(Individual(fp=fp, bt=bt))
         return population
 
@@ -154,32 +155,29 @@ class GeneticSearch:
         cfg = self.config
 
         # fp: random bit swap
-        if not cfg.freeze_fp:
-            n = cfg.fp_bits
-            k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
-            k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
-            mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
-            fp = np.where(mask, parents[0].fp, parents[1].fp)
-        else:
-            fp = parents[0].fp
+        n = cfg.fp_bits
+        k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
+        k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
+        mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
+        fp = np.where(mask, parents[0].fp, parents[1].fp)
 
         # bt:
-        if not cfg.freeze_bt:
-            if cfg.bt_crossover == "graft":  # random subtree swap
-                trees = [parents[0].bt, parents[1].bt]
-                random.shuffle(trees)
-                bt = utils.random_graft(
-                    *trees,
-                    min_nodes=cfg.bt_nodes_min,
-                    max_nodes=cfg.bt_nodes_max,
-                )
-            elif cfg.bt_crossover == "inherit":  # inherit from dominant parent
-                dominant = 0 if (k >= cfg.fp_bits / 2) else 1
-                bt = parents[dominant].bt
-            else:
-                raise NotImplementedError()
+        if cfg.bt_crossover == "graft":  # random subtree swap
+            trees = [parents[0].bt, parents[1].bt]
+            random.shuffle(trees)
+            bt = utils.random_graft(
+                *trees,
+                min_nodes=cfg.bt_nodes_min,
+                max_nodes=cfg.bt_nodes_max,
+            )
+        elif cfg.bt_crossover == "inherit":  # inherit from dominant parent
+            dominant = 0 if (k >= cfg.fp_bits / 2) else 1
+            bt = parents[dominant].bt
+        elif cfg.bt_crossover == "recognizer":  # use recognizer
+            sk = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            bt = 
         else:
-            bt = parents[0].bt
+            raise NotImplementedError()
 
         return Individual(fp=fp, bt=bt)
 
@@ -188,13 +186,13 @@ class GeneticSearch:
 
         # fp: random bit flip
         fp = ind.fp
-        if (not cfg.freeze_fp) and utils.random_boolean(cfg.fp_mutate_prob):
+        if utils.random_boolean(cfg.fp_mutate_prob):
             mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
             fp = np.where(mask, ~fp, fp)
 
         # bt: random add or delete nodes
         bt = ind.bt.copy()
-        num_edits = 0 if cfg.freeze_bt else torch.randint(cfg.bt_mutate_edits + 1, size=[1]).item()
+        num_edits = torch.randint(cfg.bt_mutate_edits + 1, size=[1]).item()
         for _ in range(num_edits):
             if bt.number_of_nodes() == cfg.bt_nodes_max:
                 add = False
