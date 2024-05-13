@@ -59,8 +59,8 @@ class MLP(pl.LightningModule):
             modules.append(nn.ReLU())
             if i > num_layers - 3 - num_dropout_layers:
                 modules.append(nn.Dropout(dropout))
-        self.final_layer = nn.Linear(hidden_dim, output_dim)
-        # modules.append(nn.Linear(hidden_dim, output_dim))
+        # self.final_layer = nn.Linear(hidden_dim, output_dim)
+        modules.append(nn.Linear(hidden_dim, output_dim))
         self.layers = nn.Sequential(*modules)
 
     def forward(self, x, return_hidden=False):

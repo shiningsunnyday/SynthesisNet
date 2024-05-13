@@ -71,7 +71,7 @@ def _fetch_data(name: str) -> list[str]:
 def wrapper_decoder(smiles: str, sk_coords=None, beam_width=3, analogs=False) -> Tuple[str, float, SyntheticTree]:
     """Generate a synthetic tree for the input molecular embedding."""
     emb = mol_fp(smiles)
-    try:
+    if analogs: # debug
         smi, similarity, tree, action = synthetic_tree_decoder_greedy_search(
             z_target=emb,
             sk_coords=sk_coords,
@@ -90,9 +90,29 @@ def wrapper_decoder(smiles: str, sk_coords=None, beam_width=3, analogs=False) ->
             analogs=analogs,
             max_step=15,
         )
-    except Exception as e:
-        logger.error(e, exc_info=e)
-        action = -1
+    else:        
+        try:
+            smi, similarity, tree, action = synthetic_tree_decoder_greedy_search(
+                z_target=emb,
+                sk_coords=sk_coords,
+                building_blocks=bblocks,
+                bb_dict=bblocks_dict,
+                reaction_templates=rxns,
+                mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused
+                action_net=act_net,
+                reactant1_net=rt1_net,
+                rxn_net=rxn_net,
+                reactant2_net=rt2_net,
+                bb_emb=bb_emb,
+                rxn_template="hb",  # TODO: Do not hard code
+                n_bits=4096,  # TODO: Do not hard code
+                beam_width=beam_width,
+                analogs=analogs,
+                max_step=15,
+            )
+        except Exception as e:
+            logger.error(e, exc_info=e)
+            action = -1
 
     if analogs:        
         smis, similarities, trees, actions = smi, similarity, tree, action
@@ -187,7 +207,6 @@ if __name__ == "__main__":
     random.shuffle(targets)
     if args.num > 0:  # Select only n queries
         targets = targets[: args.num]
-
     # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
     if args.top_bbs_file:
@@ -258,17 +277,17 @@ if __name__ == "__main__":
         pargs.append(args.analogs)
         targets[i] = [targets[i]] + pargs
 
-    # # Decode queries, i.e. the target molecules.
-    # logger.info(f"Start to decode {len(targets)} target molecules.")    
-    # if args.ncpu == 1:
-    #     results = []
-    #     for pargs in tqdm(targets):
-    #         results.append(wrapper_decoder(*pargs))
-    # else:
-    #     with mp.Pool(processes=args.ncpu) as pool:
-    #         logger.info(f"Starting MP with ncpu={args.ncpu}")
-    #         results = pool.starmap(wrapper_decoder, tqdm(targets))
-    # logger.info("Finished decoding.")
+    # Decode queries, i.e. the target molecules.
+    logger.info(f"Start to decode {len(targets)} target molecules.")    
+    if args.ncpu == 1:
+        results = []
+        for pargs in tqdm(targets):
+            results.append(wrapper_decoder(*pargs))
+    else:
+        with mp.Pool(processes=args.ncpu) as pool:
+            logger.info(f"Starting MP with ncpu={args.ncpu}")
+            results = pool.starmap(wrapper_decoder, tqdm(targets))
+    logger.info("Finished decoding.")
     results = pickle.load(open(os.path.join(args.output_dir, 'decoded.pkl'), 'rb'))
 
     targets = [target[0] for target in targets]

@@ -372,7 +372,10 @@ def synthetic_tree_decoder_greedy_search(
         similarities_in_tree = np.array(
             tanimoto_similarity(z_target, [node.smiles for node in tree.chemicals])
         )
-        max_similar_idx = np.argmax(similarities_in_tree)
+        try:
+            max_similar_idx = np.argmax(similarities_in_tree)
+        except ValueError:
+            continue
         max_similarity = similarities_in_tree[max_similar_idx]
 
         # Keep track of max similarities (across syntrees)
