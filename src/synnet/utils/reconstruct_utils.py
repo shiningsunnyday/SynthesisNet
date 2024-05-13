@@ -34,6 +34,7 @@ import fcntl
 import random
 import uuid
 from tqdm import tqdm
+import contextlib
 from tdc import Oracle
 import matplotlib.pyplot as plt
 
@@ -43,6 +44,16 @@ def lock(f):
     except IOError:
         return False
     return True
+
+
+@contextlib.contextmanager
+def torch_single_threaded():
+    old_num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        yield None 
+    finally: 
+        torch.set_num_threads(old_num_threads)
 
 
 def get_metrics(targets, all_sks):
@@ -376,7 +387,9 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
     globals()['skeleton_index_lookup'] = {}
     globals()['skeleton_index_lookup_by_num_rxns'] = {}
     globals()['skeleton_keys'] = {}
-    sks = list(skeleton_set.skeletons)
+    globals()['skeleton_list'] = list(skeleton_set.skeletons)
+
+    sks = globals()['skeleton_list']
     for index in SKELETON_INDEX:
         sk = Skeleton(sks[index], index)
         num_rxns = sk.rxns.sum()
@@ -402,7 +415,7 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             tree_key = serialize_string(sk.tree, sk.tree_root)
             globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
     
-    globals()['mc_adj'] = build_mc(args.max_num_rxns)
+    # globals()['mc_adj'] = build_mc(args.max_num_rxns)
     return SKELETON_INDEX
 
 
@@ -419,6 +432,9 @@ def lookup_skeleton_key(zss_tree, tree_key):
         return ans
             
 
+def lookup_skeleton_by_index(index):
+    sks = globals()['skeleton_list']
+    return Skeleton(sks[index], index)
 
 
 def set_models(args, logger=None):
@@ -752,8 +768,9 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 x_input_bb = np.concatenate((X, pe), axis=-1)            
             else:
                 x_input_bb = X
-            data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
-            data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
+            with torch_single_threaded():
+                data_rxn = Data(edge_index=edge_input, x=torch.Tensor(x_input_rxn))
+                data_bb = Data(edge_index=edge_input, x=torch.Tensor(x_input_bb))
             if skviz is not None and args.attn_weights:
                 logits_rxn, rxn_attns = model_rxn(data_rxn, return_attention=True)
                 logits_bb, bb_attns= model_bb(data_bb, return_attention=True)
@@ -917,7 +934,7 @@ def load_data(args, logger=None):
         logger.info("...loading data completed.")            
     # remember indices of bblocks
     bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
-    for i, r in tqdm(enumerate(rxns)):
+    for i, r in tqdm(enumerate(rxns), desc="Loading reaction data"):
         bblock_mask = []
         for j in range(len(r.available_reactants)):
             mask = [False for _ in bblocks]            
@@ -943,7 +960,7 @@ def get_skeleton_inds_within_depth(max_num_rxns):
 
 
 
-def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1]):
+def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
     model.eval()    
@@ -954,7 +971,11 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1]):
         else:                        
             sorted_args = x.argsort(axis=-1)
             return [sorted_args[-k].item() for k in ks]
-    probs = model(torch.FloatTensor(encoder.encode(smiles)))    
+    if fp is None:
+        fp = encoder.encode(smiles)
+    elif fp.ndim == 1:
+        fp = fp[None, :]
+    probs = model(torch.FloatTensor(fp))    
     if max_num_rxns == -1:
         ind = argmax(probs, k=top_k)        
         if top_k == [1]:

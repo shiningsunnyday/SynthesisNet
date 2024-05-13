@@ -1,23 +1,27 @@
 import collections
 import itertools
 import json
+import pickle
 import random
 from typing import Callable, Dict, List, Tuple
 
 import networkx as nx
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import scipy
 import torch
 import tqdm
 import wandb
+from networkx.algorithms.dag import dag_longest_path
+from rdkit import Chem
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
-from synnet.utils.analysis_utils import serialize_string
 from synnet.utils.data_utils import binary_tree_to_skeleton
+from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
 
@@ -26,6 +30,12 @@ class GeneticSearch:
 
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
+
+        with open(config.background_set_file, "rb") as f:
+            self.background_smiles = set(
+                Chem.CanonSmiles(st.root.smiles)
+                for st in pickle.load(f).keys()
+            )
 
     def initialize_random(self) -> Population:
         cfg = self.config
@@ -38,31 +48,14 @@ class GeneticSearch:
         return population
 
     def initialize_load(self, path: str) -> Population:
-        raise NotImplementedError("(AL) I'm pretty sure there's a bug here")
-        with open(path, "r") as f:
-            state = json.load(f)
-
+        cfg = self.config
         population = []
-        for ind in state:
-            bt = nx.tree_graph(ind["bt"])  # only supports node-level attributes
-            bt = nx.relabel_nodes(bt, {k: utils.random_name() for k in list(bt.nodes)})
-            for n in bt:  # move child node attribute "left" to edge attribute
-                preds = list(bt.predecessors(n))
-                if len(preds) == 1:
-                    pred = preds[0]
-                else:
-                    continue
-                if list(bt[pred]) == 1:   # FIXME: look into this
-                    bt.edges[(pred, n)]["left"] = True
-                else:
-                    assert "left" in bt.nodes[n]
-                    bt.edges[(pred, n)]["left"] = bt.nodes[n]["left"]
-            if "smi" in ind:
-                fp = mol_fp(ind["smi"], _nBits=self.config.fp_bits)
-                fp = np.array(fp, dtype=bool)
-            else:
-                fp = ind["fp"]
-                fp = np.array(fp, dtype=bool)
+        df = pd.read_csv(path).sample(cfg.population_size)
+        for smiles in df["smiles"].tolist():
+            fp = mol_fp(smiles, _nBits=cfg.fp_bits)
+            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            sk = lookup_skeleton_by_index(index)
+            bt = utils.skeleton_to_binary_tree(sk)
             population.append(Individual(fp=fp, bt=bt))
         return population
 
@@ -73,43 +66,70 @@ class GeneticSearch:
             assert cfg.bt_nodes_min <= ind.bt.number_of_nodes() <= cfg.bt_nodes_max
 
     def evaluate(self, population: Population) -> Dict[str, float]:
-        scores = [ind.fitness for ind in population]
-        scores.sort(reverse=True)
 
         # Fitness
+        scores = [ind.fitness for ind in population]
+        scores.sort(reverse=True)
         metrics = {
             "scores/mean": np.mean(scores).item(),
             "scores/stdev": np.std(scores).item(),
         }
-        for k in [1, 10, 100]:
+        for k in [10, 100]:
             metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
+        for k in range(1, 4):
+            metrics[f"scores/top{k}"] = scores[k - 1]
+
+        # Trees
+        trees = [ind.bt for ind in population]
+        metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
+        metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
 
         # Diversity
         distances = []
-        fps = [mol_fp(ind.smiles, _nBits=2048) for ind in population]
+        fps = [mol_fp(ind.smiles, _nBits=4096) for ind in population if ind.smiles is not None]
         for a, b in itertools.combinations(fps, r=2):
             d = 1 - _tanimoto_similarity(a, b)
             distances.append(d)
         metrics["diversity"] = np.mean(distances).item()
 
+        # Population size
+        N = len(population)
+        metrics["population_size"] = N
+
         # Uniqueness
-        unique = set(ind.smiles for ind in population)
-        metrics["unique"] = len(unique) / len(population)
+        unique = set(ind.smiles for ind in population if ind.smiles is not None)
+        metrics["unique"] = len(unique) / N
+
+        # Novelty
+        if unique:
+            metrics["novelty"] = len(unique - self.background_smiles) / len(unique)
+        else:
+            metrics["novelty"] = 0.0
 
         return metrics
 
     def cull(self, population: Population) -> Population:
-        serials = []
-        for indv in population:
-            tree = indv.bt
-            root = next(v for v, d in tree.in_degree() if d == 0)
-            fp_str = "".join(list(map(str, map(int, indv.fp))))
-            serial = serialize_string(tree, root) + " " + fp_str
-            serials.append(serial)
-        _, inds = np.unique(serials, return_index=True)
-        population = [population[ind] for ind in inds]
-        population = sorted(population, key=(lambda x: x.fitness), reverse=True)
-        return population[:self.config.population_size]
+        N = self.config.population_size
+
+        filtered = []
+        leftover = []
+        seen_smiles = set()
+        for ind in population:
+            if (ind.smiles is not None) and (ind.smiles not in seen_smiles):
+                filtered.append(ind)
+                seen_smiles.add(ind.smiles)
+            else:
+                leftover.append(ind)
+        filtered.sort(key=(lambda x: x.fitness), reverse=True)
+        filtered = filtered[:N]
+
+        # Add top individuals of leftover
+        if len(filtered) < N:
+            leftover.sort(key=(lambda x: x.fitness), reverse=True)
+            filtered += leftover[:(N - len(filtered))]
+            filtered.sort(key=(lambda x: x.fitness), reverse=True)
+
+        return filtered
 
     def choose_couples(
         self,
@@ -120,18 +140,11 @@ class GeneticSearch:
         indices = np.arange(len(population))
 
         cfg = self.config
-        if cfg.parent_schedule == "anneal":
-            t = epoch / cfg.generations
-            temp = (1 - t) * cfg.parent_temp_max + t * cfg.parent_temp_min  # LERP
-            p = scipy.special.softmax(indices / temp)
-        elif cfg.parent_schedule == "synnet":
-            p = indices + 10
-            if epoch < 0.8 * cfg.generations:
-                p = p / np.sum(p)
-            else:
-                p = scipy.special.softmax(p)
+        p = indices + 10
+        if epoch < 0.8 * cfg.generations:
+            p = p / np.sum(p)
         else:
-            raise NotImplementedError()
+            p = scipy.special.softmax(p)
 
         couples = []
         for _ in range(cfg.offspring_size):
@@ -143,22 +156,14 @@ class GeneticSearch:
         cfg = self.config
 
         # fp: random bit swap
-        if not cfg.freeze_fp:
-            n = cfg.fp_bits
-            k = scipy.stats.truncnorm.rvs(
-                a=(0.2 * n), b=(0.8 * n),
-                loc=(n / 2),
-                scale=(n / 10),
-                size=1,
-            )
-            k = int(np.round(k))
-            mask = utils.random_bitmask(cfg.fp_bits, k=k)
-            fp = np.where(mask, parents[0].fp, parents[1].fp)
-        else:
-            fp = parents[0].fp
+        n = cfg.fp_bits
+        k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
+        k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
+        mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
+        fp = np.where(mask, parents[0].fp, parents[1].fp)
 
-        # bt: random subtree swap
-        if not cfg.freeze_bt:
+        # bt:
+        if cfg.bt_crossover == "graft":  # random subtree swap
             trees = [parents[0].bt, parents[1].bt]
             random.shuffle(trees)
             bt = utils.random_graft(
@@ -166,8 +171,15 @@ class GeneticSearch:
                 min_nodes=cfg.bt_nodes_min,
                 max_nodes=cfg.bt_nodes_max,
             )
+        elif cfg.bt_crossover == "inherit":  # inherit from dominant parent
+            dominant = 0 if (k >= cfg.fp_bits / 2) else 1
+            bt = parents[dominant].bt
+        elif cfg.bt_crossover == "recognizer":  # use recognizer
+            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            sk = lookup_skeleton_by_index(index)
+            bt = utils.skeleton_to_binary_tree(sk)
         else:
-            bt = parents[0].bt
+            raise NotImplementedError()
 
         return Individual(fp=fp, bt=bt)
 
@@ -176,25 +188,24 @@ class GeneticSearch:
 
         # fp: random bit flip
         fp = ind.fp
-        if (not cfg.freeze_fp) and utils.random_boolean(cfg.fp_mutate_prob):
-            mask = utils.random_bitmask(cfg.fp_bits, k=cfg.fp_mutate_bits)
+        if utils.random_boolean(cfg.fp_mutate_prob):
+            mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
             fp = np.where(mask, ~fp, fp)
 
         # bt: random add or delete nodes
-        bt = ind.bt
-        if (not cfg.freeze_bt) and utils.random_boolean(cfg.bt_mutate_prob):
-            bt = bt.copy()
-            for _ in range(cfg.bt_mutate_edits):
-                if bt.number_of_nodes() == cfg.bt_nodes_max:
-                    add = False
-                elif bt.number_of_nodes() == cfg.bt_nodes_min:
-                    add = True
-                else:
-                    add = utils.random_boolean(0.5)
-                if add:
-                    utils.random_add_leaf(bt)
-                else:
-                    utils.random_remove_leaf(bt)
+        bt = ind.bt.copy()
+        num_edits = torch.randint(cfg.bt_mutate_edits + 1, size=[1]).item()
+        for _ in range(num_edits):
+            if bt.number_of_nodes() == cfg.bt_nodes_max:
+                add = False
+            elif bt.number_of_nodes() == cfg.bt_nodes_min:
+                add = True
+            else:
+                add = utils.random_boolean(0.5)
+            if add:
+                utils.random_add_leaf(bt)
+            else:
+                utils.random_remove_leaf(bt)
 
         return Individual(fp=fp, bt=bt)
 
@@ -244,10 +255,10 @@ class GeneticSearch:
         early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)
 
         # Main loop
-        for epoch in tqdm.trange(cfg.generations + 1, desc="Searching"):
+        for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
 
             # Crossover & mutation
-            if epoch > 0:
+            if epoch >= 0:
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover(parents)
@@ -264,7 +275,10 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                wandb.log({"generation": epoch, **metrics}, step=epoch, commit=True)
+                table = [[epoch, ind.smiles, ind.fitness] for ind in population]
+                columns = ["generation", "smiles", "fitness"]
+                metrics["smiles"] = wandb.Table(columns=columns, data=table)
+                wandb.log({"generation": epoch, **metrics}, step=(1 + epoch), commit=True)
             if cfg.checkpoint_path is not None:
                 self.checkpoint(cfg.checkpoint_path, population)
 

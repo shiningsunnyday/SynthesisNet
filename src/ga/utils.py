@@ -1,9 +1,12 @@
 import random
 import uuid
 from typing import Dict
+from collections import defaultdict
 
 import networkx as nx
 import numpy as np
+
+from synnet.utils.data_utils import skeleton2graph
 
 
 def random_boolean(p: float) -> bool:
@@ -123,3 +126,20 @@ def random_graft(
 
     return merged
 
+
+def skeleton_to_binary_tree(skeleton):
+    tree = skeleton.tree
+
+    bt = nx.DiGraph()
+    for node, ndata in list(tree.nodes(data=True)):
+        if "smiles" not in ndata:  # rxn node 
+            continue 
+        rxns = list(tree.successors(node))
+        if not rxns:
+            continue 
+        assert len(rxns) == 1
+        reactants = list(tree.successors(rxns[0]))
+        for adj in reactants:
+             bt.add_edge(node, adj, left=(tree.nodes[adj]["child"] == "left"))
+    nx.relabel_nodes(bt, {k: random_name() for k in bt}, copy=False)
+    return bt
