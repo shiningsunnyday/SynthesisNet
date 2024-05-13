@@ -2958,9 +2958,9 @@ class SkeletonSet:
         """
         lookup = {} # should be multi-set?
         sks = []
-        for st, sts in skeletons.items():
-            sk = Skeleton(st, len(sks)) # uses representative syntree
+        for st, sts in skeletons.items():            
             for st in sts:
+                sk = Skeleton(st, len(sks)) # uses representative syntree
                 lookup[st.root.smiles] = lookup.get(st.root.smiles, []) + [sk]
             sks.append(sk)
         self.lookup = lookup
@@ -2983,16 +2983,16 @@ class SkeletonSet:
         print("begin computing similarity matrix")
         # args = [(i, j, sks[i].tree,sks[j].tree) for i in range(len(sks)) for j in range(len(sks)) if j > i]
         args = [(i, j, sks[i].zss_tree,sks[j].zss_tree) for i in range(len(sks)) for j in range(len(sks)) if j > i]
-        with Pool(120) as p:
+        with mp.Pool(120) as p:
             res = p.starmap(self.compute_dists, tqdm(args, total=len(args)))
         assert len(args) == len(res)
         for (i, j, _, _), d in zip(args, res):
-            sim[i][j] = d or 6            
+            sim[i][j] = d
         sim += sim.T
         self.sim = sim
         ms = MDS(n_components=256, dissimilarity='precomputed', verbose=1)
         print("begin mds")
-        coords = ms.fit_transform(-sim)
+        coords = ms.fit_transform(sim)
         self.coords = coords
     
 
