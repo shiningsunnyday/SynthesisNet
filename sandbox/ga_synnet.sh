@@ -20,4 +20,5 @@ python sandbox/optimize.py \
     --analog_size=0 \
     --fp_bits=4096 \
     --bt_mutate_edits=1 \
-    --early_stop_warmup=10000
+    --early_stop_warmup=10000 \
+    --bt_ignore

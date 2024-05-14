@@ -37,25 +37,18 @@ class GeneticSearch:
                 for st in pickle.load(f).keys()
             )
 
-    def initialize_random(self) -> Population:
-        cfg = self.config
-        population = []
-        for _ in range(cfg.population_size):
-            fp = np.random.choice([True, False], size=cfg.fp_bits)
-            bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
-            bt = utils.random_binary_tree(bt_size.item())
-            population.append(Individual(fp=fp, bt=bt))
-        return population
-
-    def initialize_load(self, path: str) -> Population:
+    def initialize(self, path: str) -> Population:
         cfg = self.config
         population = []
         df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
         for smiles in df["smiles"].tolist():
             fp = mol_fp(smiles, _nBits=cfg.fp_bits)
-            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-            sk = lookup_skeleton_by_index(index)
-            bt = utils.skeleton_to_binary_tree(sk)
+            if cfg.bt_ignore:
+                bt = None
+            else:
+                index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+                sk = lookup_skeleton_by_index(index)
+                bt = utils.skeleton_to_binary_tree(sk)
             population.append(Individual(fp=fp, bt=bt, smiles=smiles))
         return population
 
@@ -67,7 +60,7 @@ class GeneticSearch:
             assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
             assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
 
-    def evaluate_scores(population: Population, prefix) -> Dict[str, float]:
+    def evaluate_scores(self, population: Population, prefix) -> Dict[str, float]:
         scores = [ind.fitness for ind in population]
         scores = sorted(scores, reverse=True)
         metrics = {
@@ -185,6 +178,8 @@ class GeneticSearch:
 
     def analog_mutate(self, ind: Individual) -> Individual:
         cfg = self.config
+        if cfg.bt_ignore:
+            return Individual(fp=ind.fp.copy(), bt=None)
         bt = ind.bt.copy()
 
         # bt: random add or delete nodes
@@ -234,20 +229,17 @@ class GeneticSearch:
             )
 
         # Initialize population
-        if cfg.initialize_path is None:
-            population = self.initialize_random()
-        else:
-            population = self.initialize_load(cfg.initialize_path)
+        population = self.initialize(cfg.initialize_path)
 
-            # Let's also log the seed stats
-            fn(population, usesmiles=True)
-            metrics = self.evaluate_scores(population, prefix="seeds")
-            wandb.log({"generation": -1, **metrics}, step=0, commit=True)
-        
-            # Safety 
-            for ind in population:
-                ind.smiles = None
-                ind.fitness = None
+        # Let's also log the seed stats
+        fn(population, usesmiles=True)
+        metrics = self.evaluate_scores(population, prefix="seeds")
+        wandb.log({"generation": -1, **metrics}, step=0, commit=True)
+    
+        # Safety 
+        for ind in population:
+            ind.smiles = None
+            ind.fitness = None
 
         # Track some stats
         early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)

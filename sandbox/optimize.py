@@ -126,6 +126,7 @@ def get_args():
     parser.add_argument("--offspring_size", type=int)
     parser.add_argument("--analog_size", type=int)
     parser.add_argument("--fp_bits", type=int)
+    parser.add_argument("--bt_ignore", action="store_true")
     parser.add_argument("--bt_mutate_edits", type=int)
     parser.add_argument("--early_stop_warmup", type=int)
 
@@ -246,7 +247,7 @@ def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=F
 
     # Debug option
     if usesmiles:
-        indexed_smiles = [(idx, ind.smiles) for ind in enumerate(batch)]
+        indexed_smiles = [(idx, ind.smiles) for idx, ind in enumerate(batch)]
         assert all(smi is not None for _, smi in indexed_smiles)
     else:
         indexed_batch = list(enumerate(batch))
@@ -284,7 +285,7 @@ def main():
         with open(config.skeleton_set_file, "rb") as f:
             skeletons = pickle.load(f)
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
-        SKELETON_INDEX = test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
+        test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
 
         converter = get_smiles_ours
 
