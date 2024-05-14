@@ -123,11 +123,11 @@ def get_args():
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--method", type=str, choices=["ours", "synnet"])
     parser.add_argument("--num_workers", type=int)
-    parser.add_argument("--bt_nodes_max", type=int)
     parser.add_argument("--offspring_size", type=int)
+    parser.add_argument("--analog_size", type=int)
     parser.add_argument("--fp_bits", type=int)
-    parser.add_argument("--bt_crossover", type=str)
     parser.add_argument("--bt_mutate_edits", type=int)
+    parser.add_argument("--early_stop_warmup", type=int)
 
     return parser.parse_args()
 

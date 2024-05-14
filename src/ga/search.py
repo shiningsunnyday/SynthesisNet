@@ -63,7 +63,9 @@ class GeneticSearch:
         cfg = self.config
         for ind in population:
             assert ind.fp.shape == (cfg.fp_bits,)
-            assert cfg.bt_nodes_min <= ind.bt.number_of_nodes() <= cfg.bt_nodes_max
+            assert 2 <= ind.bt.number_of_nodes()
+            assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
+            assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
 
     def evaluate(self, population: Population) -> Dict[str, float]:
 
@@ -131,7 +133,7 @@ class GeneticSearch:
 
         return filtered
 
-    def choose_couples(
+    def choose_couples_and_analogs(
         self,
         population: Population,
         epoch: int,
@@ -146,68 +148,50 @@ class GeneticSearch:
         else:
             p = scipy.special.softmax(p)
 
-        couples = []
+        choices = []
         for _ in range(cfg.offspring_size):
             i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
-            couples.append((population[i1], population[i2]))
-        return couples
+            choices.append((population[i1], population[i2]))
+        for _ in range(cfg.analog_size):
+            i = np.random.choice(indices, size=[1], replace=False, p=p).item()
+            choices.append((population[i],))
+        return choices
 
-    def crossover(self, parents: Tuple[Individual, Individual]) -> Individual:
+    def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
         cfg = self.config
 
-        # fp: random bit swap
+        # Crossover: random bit swap
         n = cfg.fp_bits
         k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
         k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
         mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
         fp = np.where(mask, parents[0].fp, parents[1].fp)
 
-        # bt:
-        if cfg.bt_crossover == "graft":  # random subtree swap
-            trees = [parents[0].bt, parents[1].bt]
-            random.shuffle(trees)
-            bt = utils.random_graft(
-                *trees,
-                min_nodes=cfg.bt_nodes_min,
-                max_nodes=cfg.bt_nodes_max,
-            )
-        elif cfg.bt_crossover == "inherit":  # inherit from dominant parent
-            dominant = 0 if (k >= cfg.fp_bits / 2) else 1
-            bt = parents[dominant].bt
-        elif cfg.bt_crossover == "recognizer":  # use recognizer
-            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-            sk = lookup_skeleton_by_index(index)
-            bt = utils.skeleton_to_binary_tree(sk)
-        else:
-            raise NotImplementedError()
-
-        return Individual(fp=fp, bt=bt)
-
-    def mutate(self, ind: Individual) -> Individual:
-        cfg = self.config
-
-        # fp: random bit flip
-        fp = ind.fp
+        # Mutate: random bit flip
         if utils.random_boolean(cfg.fp_mutate_prob):
             mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
             fp = np.where(mask, ~fp, fp)
 
-        # bt: random add or delete nodes
-        bt = ind.bt.copy()
-        num_edits = torch.randint(cfg.bt_mutate_edits + 1, size=[1]).item()
-        for _ in range(num_edits):
-            if bt.number_of_nodes() == cfg.bt_nodes_max:
-                add = False
-            elif bt.number_of_nodes() == cfg.bt_nodes_min:
-                add = True
-            else:
-                add = utils.random_boolean(0.5)
-            if add:
-                utils.random_add_leaf(bt)
-            else:
-                utils.random_remove_leaf(bt)
+        # Initialize bt
+        index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+        sk = lookup_skeleton_by_index(index)
+        bt = utils.skeleton_to_binary_tree(sk)
 
         return Individual(fp=fp, bt=bt)
+
+    def analog_mutate(self, ind: Individual) -> Individual:
+        cfg = self.config
+        bt = ind.bt.copy()
+
+        # bt: random add or delete nodes
+        num_edits = torch.randint(1, cfg.bt_mutate_edits + 1, size=[1]).item()
+        for _ in range(num_edits):
+            if utils.random_boolean(0.5):
+                utils.random_add_leaf(bt, max_internal=cfg.max_num_rxns)
+            else:
+                utils.random_remove_leaf(bt)
+    
+        return Individual(fp=ind.fp.copy(), bt=bt)
 
     def checkpoint(self, path: str, population: Population) -> None:
         ckpt = []
@@ -260,9 +244,12 @@ class GeneticSearch:
             # Crossover & mutation
             if epoch >= 0:
                 offsprings = []
-                for parents in self.choose_couples(population, epoch):
-                    child = self.crossover(parents)
-                    child = self.mutate(child)
+                for parents in self.choose_couples_and_analogs(population, epoch):
+                    if len(parents) == 2:
+                        child = self.crossover_and_mutate(parents)
+                    else:
+                        assert len(parents) == 1
+                        child = self.analog_mutate(parents[0])
                     offsprings.append(child)
                 fn(offsprings)
                 population = self.cull(population + offsprings)

@@ -1,6 +1,6 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 MAX_NUM_RXNS=6
-export OMP_NUM_THREADS=1
+# export OMP_NUM_THREADS=1
 
 python sandbox/optimize.py \
     --background_set_file /ssd/msun415/skeletons/skeletons-train.pkl \
@@ -16,9 +16,9 @@ python sandbox/optimize.py \
     --objective $1 \
     --wandb \
     --method=ours \
-    --num_workers=10 \
-    --bt_nodes_max=25 \
-    --offspring_size=512 \
+    --num_workers=0 \
+    --offspring_size=384 \
+    --analog_size=128 \
     --fp_bits=2048 \
-    --bt_crossover=recognizer \
-    --bt_mutate_edits=3
+    --bt_mutate_edits=3 \
+    --early_stop_warmup=10000

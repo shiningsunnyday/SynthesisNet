@@ -22,13 +22,13 @@ class GeneticSearchConfig(pydantic.BaseModel):
     # Search parameters
     generations: int = 200
     population_size: int = 128
-    offspring_size: int = 512
+    offspring_size: int = 384
+    analog_size: int = 128
 
     # Mutation
     fp_mutate_prob: float = 0.5
     fp_mutate_frac: float = (24 / 4096)
 
-    bt_crossover: Literal["graft", "inherit", "recognizer"] = "inherit"
     bt_mutate_edits: int = 3
 
     # Restrict skeleton prediction to max number of reactions
