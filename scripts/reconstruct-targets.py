@@ -12,6 +12,7 @@ import pdb
 from tqdm import tqdm
 import os
 import pickle
+import hashlib
 from synnet.utils.reconstruct_utils import *
 import multiprocessing as mp
 from multiprocessing.pool import ThreadPool
@@ -153,43 +154,54 @@ def main(args):
         targets = [syntree.root.smiles for syntree in syntree_set]                    
     if args.num != -1:
         targets = targets[:args.num]
-    lookup = {}    
-    for i, target in tqdm(enumerate(targets), "initializing skeletons"):
-        if args.data:        
-            assert args.ckpt_recognizer
-            good = True
-        else:
-            # Use the gold skeleton or predict the skeleton
-            sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)             
-            smile_set = [c.smiles for c in syntree_set[i].chemicals]
-            if len(set(smile_set)) != len(smile_set):
-                continue
-            good = True     
-            for n in sk.tree:
-                if sk.leaves[n]:
-                    if sk.tree.nodes[n]['smiles'] not in TOP_BBS:
-                        good = False            
+    
+    # populating lookup takes time, so cache it
+    args_dict = {k: str(v) for (k, v) in args.__dict__.items()}
+    serialized = json.dumps(args_dict, sort_keys=True).encode('utf-8')
+    name = hashlib.md5(serialized).hexdigest()
+    path = os.path.join(args.out_dir, f"{name}.pkl")
+    if os.path.exists(path):
+        lookup = pickle.load(open(path, 'rb'))
+    else:
+        lookup = {}    
+        for i, target in tqdm(enumerate(targets), "initializing skeletons"):
+            if args.data:        
+                assert args.ckpt_recognizer
+                good = True
+            else:
+                # Use the gold skeleton or predict the skeleton
+                sk = Skeleton(syntree_set[i], skeleton_set.lookup[target][0].index)             
+                smile_set = [c.smiles for c in syntree_set[i].chemicals]
+                if len(set(smile_set)) != len(smile_set):
+                    continue
+                good = True     
+                for n in sk.tree:
+                    if sk.leaves[n]:
+                        if sk.tree.nodes[n]['smiles'] not in TOP_BBS:
+                            good = False            
 
-        if good:
-            if target not in lookup:
-                lookup[target] = []
-            if args.ckpt_recognizer:                
-                if args.num_analogs == 1:
-                    pred_index = predict_skeleton(target, max_num_rxns=args.max_num_rxns)
-                    sk = Skeleton(list(skeletons)[pred_index], pred_index)
-                    if args.max_num_rxns != -1:
-                        assert sk.rxns.sum() <= args.max_num_rxns
-                    lookup[target].append(sk)
-                else:                    
-                    pred_indices = predict_skeleton(target, max_num_rxns=args.max_num_rxns, top_k=list(range(1, args.num_analogs+1)))
-                    for pred_index in pred_indices:
+            if good:
+                if target not in lookup:
+                    lookup[target] = []
+                if args.ckpt_recognizer:                
+                    if args.num_analogs == 1:
+                        pred_index = predict_skeleton(target, max_num_rxns=args.max_num_rxns)
                         sk = Skeleton(list(skeletons)[pred_index], pred_index)
                         if args.max_num_rxns != -1:
                             assert sk.rxns.sum() <= args.max_num_rxns
                         lookup[target].append(sk)
-                    
-            else:
-                lookup[target] = sk
+                    else:                    
+                        pred_indices = predict_skeleton(target, max_num_rxns=args.max_num_rxns, top_k=list(range(1, args.num_analogs+1)))
+                        for pred_index in pred_indices:
+                            sk = Skeleton(list(skeletons)[pred_index], pred_index)
+                            if args.max_num_rxns != -1:
+                                assert sk.rxns.sum() <= args.max_num_rxns
+                            lookup[target].append(sk)
+                        
+                else:
+                    lookup[target] = sk
+        pickle.dump(lookup, open(path, 'wb+'))
+        
     targets = list(lookup)
     print(f"{len(targets)} targets")
     
@@ -204,7 +216,7 @@ def main(args):
     all_targets = []
     for batch in range((len(targets)+batch_size-1)//batch_size):
         target_batch = targets[batch_size*batch:batch_size*batch+batch_size]
-        target_batch = [(deepcopy(lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
+        target_batch = [(lookup[smi][j], smi) for smi in target_batch for j in range(len(lookup[smi]))]
 
         if args.test_correct_method == 'reconstruct' and args.sender_filename and args.receiver_filename: # assume background processes
             open(args.sender_filename, 'w+').close() # clear
@@ -234,6 +246,11 @@ def main(args):
                                 status[key] = (splitted_line[0], splitted_line[1], splitted_line[2])
                             if np.all([x is not None for x in status]):
                                 break
+                        else:
+                            # write to another file for viewing progress
+                            progress_file = args.receiver_filename.replace(".txt", "_progress.txt")
+                            with open(progress_file, 'w+') as f:
+                                f.writelines(lines)
                     fcntl.flock(fr, fcntl.LOCK_UN)
                 time.sleep(1)
             assert len(target_batch) == len(status)            

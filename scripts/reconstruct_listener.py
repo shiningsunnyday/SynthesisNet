@@ -101,7 +101,7 @@ def main(proc_id, filename, output_filename):
     print(f"SKELETON INDEX: {SKELETON_INDEX}")    
     while(True):        
         selected_mol = None
-        with open(filename, 'r') as f:
+        with open(filename, 'r+') as f:
             editable = lock(f)
             if editable:
                 lines = f.readlines()
@@ -115,9 +115,9 @@ def main(proc_id, filename, output_filename):
                     else:
                         new_line = "{}\n".format(" ".join(splitted_line))
                     new_lines.append(new_line)
-                with open(filename, 'w') as fw:
-                    for _new_line in new_lines:
-                        fw.write(_new_line)
+                f.seek(0)
+                f.writelines(new_lines)
+                f.truncate()
                 fcntl.flock(f, fcntl.LOCK_UN)
         if selected_mol is None:            
             continue
@@ -153,5 +153,5 @@ def main(proc_id, filename, output_filename):
 
 if __name__ == "__main__":
     args = get_args()
-    # setproctitle.setproctitle("reconstruct_listener")
+    setproctitle.setproctitle("reconstruct_listener")
     main(args.proc_id, args.filename, args.output_filename)

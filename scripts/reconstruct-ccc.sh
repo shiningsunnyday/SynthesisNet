@@ -6,7 +6,7 @@ MAX_RXNS=-1
 use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
 ncpu=1;
 ROOT_DIR=/u/msun415/SynTreeNet/
-MODEL_DIR=/u/msun415/SynTreeNet/surrogate/
+MODEL_DIR=/dccstor/graph-design/surrogate
 
 # python scripts/reconstruct-targets.py \
 #     --skeleton-set-file results/viz/top_1000/skeletons-top-1000-valid.pkl \

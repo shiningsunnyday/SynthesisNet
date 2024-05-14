@@ -5,5 +5,5 @@ do
         -queue x86_24h \
         -name listener.${i} \
         -mem 10g \
-        -cores ${cpus}+1 sh ./scripts/reconstruct-listener-ccc.sh $i
+        -cores ${cpus} sh ./scripts/reconstruct-listener-ccc.sh $i
 done
