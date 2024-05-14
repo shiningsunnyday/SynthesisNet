@@ -50,7 +50,7 @@ class GeneticSearch:
     def initialize_load(self, path: str) -> Population:
         cfg = self.config
         population = []
-        df = pd.read_csv(path).sample(cfg.population_size)
+        df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
         for smiles in df["smiles"].tolist():
             fp = mol_fp(smiles, _nBits=cfg.fp_bits)
             index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
