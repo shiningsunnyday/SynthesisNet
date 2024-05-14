@@ -46,8 +46,8 @@ class GeneticSearch:
             if cfg.bt_ignore:
                 bt = None
             else:
-                index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-                sk = lookup_skeleton_by_index(index)
+                sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+                sk = lookup_skeleton_by_index(sk_index)
                 bt = utils.skeleton_to_binary_tree(sk)
             population.append(Individual(fp=fp, bt=bt, smiles=smiles))
         return population

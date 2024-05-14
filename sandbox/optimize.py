@@ -188,8 +188,8 @@ def get_smiles_ours(idx_and_ind):
 
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
-    index = lookup_skeleton_key(sk.zss_tree, tree_key)
-    sk0 = lookup_skeleton_by_index(index)
+    sk0_index = lookup_skeleton_key(sk.zss_tree, tree_key)
+    sk0 = lookup_skeleton_by_index(sk0_index)
 
     ans = 0.0
     best_smi = ""
