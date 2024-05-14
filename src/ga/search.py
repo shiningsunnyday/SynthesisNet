@@ -209,7 +209,7 @@ class GeneticSearch:
         with open(path, "w+") as f:
             json.dump(ckpt, f)
 
-    def optimize(self, fn: Callable[[Population], None], oracle) -> None:
+    def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
 
         Args:
