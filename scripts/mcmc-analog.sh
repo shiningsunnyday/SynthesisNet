@@ -7,14 +7,17 @@ STRATEGY=topological
 use_case="mcmc_${obj}_top_k=${TOP_K}_top_k_rxn=${TOP_K_RXN}_max_rxns=${MAX_RXNS}_max_num_rxns=${MAX_NUM_RXNS}_strategy=${STRATEGY}"
 batch_size=1000
 
+ROOT_DIR=/u/msun415/SynTreeNet
+MODEL_DIR=/dccstor/graph-design/surrogate
+
 python scripts/mcmc.py \
     --data data/assets/molecules/chembl_34_chemreps.tsv \
     --batch-size $batch_size \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
-    --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
-    --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
-    --out-dir /home/msun415/SynTreeNet/results/chembl/analog/ \
-    --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
+    --ckpt-rxn ${MODEL_DIR}/${MAX_NUM_RXNS}-RXN/ \
+    --ckpt-bb ${MODEL_DIR}/${MAX_NUM_RXNS}-NN/ \
+    --out-dir results/chembl/analog/ \
+    --ckpt-recognizer ${MODEL_DIR}/${MAX_NUM_RXNS}-REC/ \
     --top-k ${TOP_K} \
     --top-k-rxn ${TOP_K_RXN} \
     --max_num_rxns ${MAX_NUM_RXNS} \
