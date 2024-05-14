@@ -465,7 +465,7 @@ if __name__ == "__main__":
             "smiles": mols,
             "scores": scores.tolist(),
         }
-        with open("opt_" + args.objective + ".json", "w") as f:
+        with open("opt_" + args.objective + f"_{str(n + 1)}.json", "w") as f:
             json.dump(data, f)
 
         if n > 30 and recent_scores[-1] - recent_scores[0] < 0.01:

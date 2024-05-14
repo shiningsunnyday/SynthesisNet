@@ -131,11 +131,17 @@ def find_best_model_ckpt(path: str, version=None, key="val_loss") -> Union[Path,
     ckpts = Path(path).rglob("*.ckpt")
     best_model_ckpt = None
     lowest_loss = 10_000  # ~ math.inf    
+    ckpts = list(ckpts) 
     for file in ckpts:
         if version is not None and f"version_{version}" not in str(file.parent):
             continue
         stem = file.stem
-        val_loss = float(stem.split(f"{key}=")[-1])
+        try:
+            val_loss = float(stem.split(f"{key}=")[-1])
+        except:
+            assert best_model_ckpt is None
+            best_model_ckpt = file
+            continue
         if val_loss < lowest_loss:
             best_model_ckpt = file
             lowest_loss = val_loss
@@ -156,6 +162,7 @@ def _load_mlp_from_iclr_ckpt(ckpt_file: str):
             num_layers=5,
             task="classification",
             dropout=0.5,
+            map_location='cpu'
         )
     elif model == "rt1":
         model = MLP.load_from_checkpoint(
@@ -166,6 +173,7 @@ def _load_mlp_from_iclr_ckpt(ckpt_file: str):
             num_layers=5,
             task="regression",
             dropout=0.5,
+            map_location='cpu'
         )
     elif model == "rxn":
         model = MLP.load_from_checkpoint(
@@ -176,6 +184,7 @@ def _load_mlp_from_iclr_ckpt(ckpt_file: str):
             num_layers=5,
             task="classification",
             dropout=0.5,
+            map_location='cpu'
         )
     elif model == "rt2":
         model = MLP.load_from_checkpoint(
@@ -186,6 +195,7 @@ def _load_mlp_from_iclr_ckpt(ckpt_file: str):
             num_layers=5,
             task="regression",
             dropout=0.5,
+            map_location='cpu'
         )
 
     else:
