@@ -15,7 +15,7 @@ python sandbox/optimize.py \
     --objective $1 \
     --wandb \
     --method=synnet \
-    --num_workers=0 \
+    --num_workers=32 \
     --offspring_size=512 \
     --analog_size=0 \
     --fp_bits=4096 \

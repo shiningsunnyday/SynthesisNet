@@ -1,4 +1,3 @@
-import collections
 import itertools
 import json
 import pickle
@@ -56,9 +55,12 @@ class GeneticSearch:
         cfg = self.config
         for ind in population:
             assert ind.fp.shape == (cfg.fp_bits,)
-            assert 2 <= ind.bt.number_of_nodes()
-            assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
-            assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
+            if cfg.bt_ignore:
+                assert ind.bt is None
+            else:
+                assert 2 <= ind.bt.number_of_nodes()
+                assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
+                assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
 
     def evaluate_scores(self, population: Population, prefix) -> Dict[str, float]:
         scores = [ind.fitness for ind in population]
@@ -79,9 +81,10 @@ class GeneticSearch:
         metrics = self.evaluate_scores(population, prefix="scores")
 
         # Trees
-        trees = [ind.bt for ind in population]
-        metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
-        metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
+        if not self.config.bt_ignore:
+            trees = [ind.bt for ind in population]
+            metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
+            metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
 
         # Diversity
         distances = []
@@ -170,9 +173,12 @@ class GeneticSearch:
             fp = np.where(mask, ~fp, fp)
 
         # Initialize bt
-        index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-        sk = lookup_skeleton_by_index(index)
-        bt = utils.skeleton_to_binary_tree(sk)
+        if cfg.bt_ignore:
+            bt = None 
+        else:
+            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+            sk = lookup_skeleton_by_index(index)
+            bt = utils.skeleton_to_binary_tree(sk)
 
         return Individual(fp=fp, bt=bt)
 
@@ -234,7 +240,7 @@ class GeneticSearch:
         # Let's also log the seed stats
         fn(population, usesmiles=True)
         metrics = self.evaluate_scores(population, prefix="seeds")
-        wandb.log({"generation": -1, **metrics}, step=0, commit=True)
+        wandb.log({"generation": -1, **metrics}, commit=True)
     
         # Safety 
         for ind in population:
@@ -242,7 +248,7 @@ class GeneticSearch:
             ind.fitness = None
 
         # Track some stats
-        early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)
+        history = []
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
@@ -266,23 +272,23 @@ class GeneticSearch:
             # Scoring
             metrics = self.evaluate(population)
 
+            # Early-stopping
+            best = metrics["scores/mean"] 
+            assert best >= max(history) 
+            history.append(best)
+            for i, v in enumerate(history):
+                if abs(best - v) < 0.01:
+                    metrics["scores/convergence"] = i
+                    break
+
             # Logging
             if cfg.wandb:
                 table = [[epoch, ind.smiles, ind.fitness] for ind in population]
                 columns = ["generation", "smiles", "fitness"]
                 metrics["smiles"] = wandb.Table(columns=columns, data=table)
-                wandb.log({"generation": epoch, **metrics}, step=(1 + epoch), commit=True)
+                wandb.log({"generation": epoch, **metrics}, commit=True)
             if cfg.checkpoint_path is not None:
                 self.checkpoint(cfg.checkpoint_path, population)
-
-            # Early-stopping
-            early_stop_queue.append(metrics["scores/mean"])
-            if (
-                (epoch > cfg.early_stop_warmup)
-                and (len(early_stop_queue) == cfg.early_stop_patience)
-                and (early_stop_queue[-1] - early_stop_queue[0] < cfg.early_stop_delta)
-            ):
-                break
 
         # Cleanup
         if cfg.wandb:
