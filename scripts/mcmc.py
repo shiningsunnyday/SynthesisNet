@@ -91,6 +91,7 @@ def get_args():
     # MCMC params
     parser.add_argument("--beta", nargs='+', type=float, default=[1.])
     parser.add_argument("--mcmc_timesteps", type=int, default=10)
+    parser.add_argument("--mcmc_uniq", type=int, default=-1)
     parser.add_argument("--chunk_size", type=int, default=1)
     parser.add_argument("--obj", default='sim', choices=['sim','analog','qed','logp','jnk','gsk','drd2'])
     # Visualization
@@ -237,7 +238,13 @@ def main(args):
             if args.ncpu == 1:
                 sks_batch = []
                 for smi in tqdm(target_batch):                        
-                    sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
+                    sks = mcmc(deepcopy(lookup[smi]), 
+                                smi, 
+                                args.obj, 
+                                args.max_num_rxns, 
+                                args.beta, 
+                                args.mcmc_timesteps,
+                                args.mcmc_uniq)
                     sks_batch.append(sks)                                      
             else:
                 torch.set_num_threads(1)
@@ -248,6 +255,7 @@ def main(args):
                                             [args.max_num_rxns for _ in target_batch],
                                             [args.beta for _ in target_batch],
                                             [args.mcmc_timesteps for _ in target_batch],
+                                            [args.mcmc_uniq for _ in target_batch],
                                             chunksize=args.chunk_size)
                     sks_batch = []
                     for sks in tqdm(batch_future, total=len(target_batch), desc="MCMC"):

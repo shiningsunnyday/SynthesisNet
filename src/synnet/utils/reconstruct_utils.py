@@ -182,7 +182,7 @@ def fetch_oracle(objective):
 
 
 
-def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):    
+def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
     def beta_anneal(t):
         if len(beta) == 1:
             return beta[0]
@@ -238,7 +238,13 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
         oracle_lookup = {x_smi: score_x}
         key = (''.join(list(map(str, fp))), sk.index)
         reconstruct_lookup = {key: sks}
-        for iter in tqdm(range(1, T+1), "mcmc'ing"):
+        iter = 1
+        uniq_analogs = {}
+        while True:
+            if uniq == -1 and iter == T+1:
+                break
+            if uniq != -1 and len(uniq_analogs) == uniq+1:
+                break
             if iter % 2 == 1: # transition skeleton, like above
                 index = inds.index(sk.index)
                 nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
@@ -300,11 +306,13 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):
                     res.append((score_y, y_smi, sk_y.index, len(reconstruct_lookup), len(oracle_lookup)))
                 else:
                     res.append((score_x, x_smi, sk.index, len(reconstruct_lookup), len(oracle_lookup)))                
+            uniq_analogs[res[-1][1]] = 1
             fig = plt.Figure()
             ax = fig.add_subplot(1,1,1)
             ax.plot(range(len(res)), [r[0] for r in res])
-            ax.set_title(f"{objective}: {len(reconstruct_lookup)}, {len(oracle_lookup)} calls")
+            ax.set_title(f"{objective}: {len(reconstruct_lookup)}, {len(oracle_lookup)} calls, {len(uniq_analogs)} unique")
             fig.savefig(os.path.join('/home/msun415/SynTreeNet/results/chembl/mcmc/', f'{uid}.png'))
+            iter += 1
         return res
 
 
