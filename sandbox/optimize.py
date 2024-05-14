@@ -241,15 +241,19 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
+def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=False):
     oracle = fetch_oracle(config.objective)
 
     # Debug option
-    indexed_batch = list(enumerate(batch))
-    if config.num_workers <= 0:
-        indexed_smiles = map(converter, indexed_batch)
+    if usesmiles:
+        indexed_smiles = [(idx, ind.smiles) for ind in enumerate(batch)]
+        assert all(smi is not None for _, smi in indexed_smiles)
     else:
-        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
+        indexed_batch = list(enumerate(batch))
+        if config.num_workers <= 0:
+            indexed_smiles = map(converter, indexed_batch)
+        else:
+            indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating", leave=False)
     for idx, smi in pbar:

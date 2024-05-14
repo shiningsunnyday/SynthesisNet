@@ -56,7 +56,7 @@ class GeneticSearch:
             index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
             sk = lookup_skeleton_by_index(index)
             bt = utils.skeleton_to_binary_tree(sk)
-            population.append(Individual(fp=fp, bt=bt))
+            population.append(Individual(fp=fp, bt=bt, smiles=smiles))
         return population
 
     def validate(self, population: Population):
@@ -67,19 +67,23 @@ class GeneticSearch:
             assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
             assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
 
+    def evaluate_scores(population: Population, prefix) -> Dict[str, float]:
+        scores = [ind.fitness for ind in population]
+        scores = sorted(scores, reverse=True)
+        metrics = {
+            f"{prefix}/mean": np.mean(scores).item(),
+            f"{prefix}/stdev": np.std(scores).item(),
+        }
+        for k in [10, 100]:
+            metrics[f"{prefix}/mean_top{k}"] = np.mean(scores[:k]).item()
+        for k in range(1, 4):
+            metrics[f"{prefix}/top{k}"] = scores[k - 1]
+        return metrics
+
     def evaluate(self, population: Population) -> Dict[str, float]:
 
         # Fitness
-        scores = [ind.fitness for ind in population]
-        scores.sort(reverse=True)
-        metrics = {
-            "scores/mean": np.mean(scores).item(),
-            "scores/stdev": np.std(scores).item(),
-        }
-        for k in [10, 100]:
-            metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
-        for k in range(1, 4):
-            metrics[f"scores/top{k}"] = scores[k - 1]
+        metrics = self.evaluate_scores(population, prefix="scores")
 
         # Trees
         trees = [ind.bt for ind in population]
@@ -205,7 +209,7 @@ class GeneticSearch:
         with open(path, "w+") as f:
             json.dump(ckpt, f)
 
-    def optimize(self, fn: Callable[[Population], None]) -> None:
+    def optimize(self, fn: Callable[[Population], None], oracle) -> None:
         """Runs a genetic search.
 
         Args:
@@ -234,6 +238,16 @@ class GeneticSearch:
             population = self.initialize_random()
         else:
             population = self.initialize_load(cfg.initialize_path)
+
+            # Let's also log the seed stats
+            fn(population, usesmiles=True)
+            metrics = self.evaluate_scores(population, prefix="seeds")
+            wandb.log({"generation": -1, **metrics}, step=0, commit=True)
+        
+            # Safety 
+            for ind in population:
+                ind.smiles = None
+                ind.fitness = None
 
         # Track some stats
         early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)
