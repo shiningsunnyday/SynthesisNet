@@ -3,6 +3,7 @@ MAX_NUM_RXNS=6
 # export OMP_NUM_THREADS=1
 
 python sandbox/optimize.py \
+    --seed=10 \
     --background_set_file /ssd/msun415/skeletons/skeletons-train.pkl \
     --skeleton_set_file /ssd/msun415/skeletons/skeletons-valid.pkl \
     --ckpt_rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
@@ -20,5 +21,4 @@ python sandbox/optimize.py \
     --offspring_size=384 \
     --analog_size=128 \
     --fp_bits=2048 \
-    --bt_mutate_edits=3 \
-    --early_stop_warmup=10000
+    --bt_mutate_edits=3
