@@ -129,7 +129,6 @@ def get_args():
     parser.add_argument("--fp_bits", type=int)
     parser.add_argument("--bt_ignore", action="store_true")
     parser.add_argument("--bt_mutate_edits", type=int)
-    parser.add_argument("--early_stop_warmup", type=int)
 
     return parser.parse_args()
 
