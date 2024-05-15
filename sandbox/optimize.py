@@ -104,6 +104,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
 def get_args():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--seed", type=int, default=10)  
     parser.add_argument("--background_set_file", type=str)  
     parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")   
     parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")

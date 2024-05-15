@@ -274,8 +274,8 @@ class GeneticSearch:
 
             # Early-stopping
             best = metrics["scores/mean"] 
-            assert best >= max(history) 
             history.append(best)
+            assert best >= max(history) 
             for i, v in enumerate(history):
                 if abs(best - v) < 0.01:
                     metrics["scores/convergence"] = i
