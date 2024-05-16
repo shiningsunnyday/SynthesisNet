@@ -55,7 +55,7 @@ class GeneticSearch:
         cfg = self.config
         for ind in population:
             assert ind.fp.shape == (cfg.fp_bits,)
-            assert ind.fp.dtype == bool
+            assert set(np.unique(ind.fp)) == {0, 1}
             if cfg.bt_ignore:
                 assert ind.bt is None
             else:
