@@ -83,10 +83,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Beam width for first rxn
     top_k_rxn: int = 3
 
-    # Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to
-    # syntrees whose skeleton class was trained on by ckpt_dir)
-    max_rxns: int = -1
-
     filter_only: List[Literal["rxn", "bb"]] = []
 
     # Objective function to optimize
@@ -110,7 +106,6 @@ def get_args():
     parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")    
-    parser.add_argument("--max_rxns", type=int, help="Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to syntrees whose skleeton class was trained on by ckpt_dir)", default=-1)
     parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)        
     parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
     parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
@@ -285,7 +280,7 @@ def main():
         with open(config.skeleton_set_file, "rb") as f:
             skeletons = pickle.load(f)
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
-        test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
+        test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
 
         converter = get_smiles_ours
 
