@@ -180,6 +180,7 @@ def fetch_oracle(objective):
 
 def get_smiles_ours(idx_and_ind):
     idx, ind = idx_and_ind
+    emb = ind.fp.astype(np.float32)
 
     sk = binary_tree_to_skeleton(ind.bt)
     tree_key = serialize_string(sk.tree, sk.tree_root)
@@ -188,8 +189,8 @@ def get_smiles_ours(idx_and_ind):
 
     ans = 0.0
     best_smi = ""
-    for sk in decode(sk0, ind.fp):
-        score, smi = reconstruct(sk, ind.fp)
+    for sk in decode(sk0, emb):
+        score, smi = reconstruct(sk, emb)
         if score > ans:
             ans = score
             best_smi = smi
@@ -208,7 +209,7 @@ def get_smiles_synnet(
 ):
     idx, ind = idx_and_ind
 
-    emb = ind.fp.reshape((1, -1))
+    emb = ind.fp.reshape((1, -1)).astype(np.float32)
     try:
         tree, action = synthetic_tree_decoder(
             z_target=emb,
