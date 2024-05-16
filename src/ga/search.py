@@ -41,7 +41,7 @@ class GeneticSearch:
         population = []
         df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
         for smiles in df["smiles"].tolist():
-            fp = mol_fp(smiles, _nBits=cfg.fp_bits)
+            fp = mol_fp(smiles, _nBits=cfg.fp_bits).astype(np.float32)
             if cfg.bt_ignore:
                 bt = None
             else:
@@ -55,6 +55,7 @@ class GeneticSearch:
         cfg = self.config
         for ind in population:
             assert ind.fp.shape == (cfg.fp_bits,)
+            assert ind.fp.dtype == bool
             if cfg.bt_ignore:
                 assert ind.bt is None
             else:
@@ -170,7 +171,7 @@ class GeneticSearch:
         # Mutate: random bit flip
         if utils.random_boolean(cfg.fp_mutate_prob):
             mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
-            fp = np.where(mask, ~fp, fp)
+            fp = np.where(mask, 1 - fp, fp)
 
         # Initialize bt
         if cfg.bt_ignore:
