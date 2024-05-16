@@ -707,14 +707,8 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
     if args.strategy == 'topological':
         sks = []        
         tree_key = serialize_string(sk.tree, sk.tree_root)
-        if tree_key in globals()['all_topological_sorts']:
-            for top_sort in globals()['all_topological_sorts'][tree_key]:
-                sks.append((deepcopy(sk), list(top_sort)))
-        else:
-            top_sorts = nx.all_topological_sorts(sk.tree)
-            for top_sort in top_sorts:
-                top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
-                sks.append((deepcopy(sk), top_sort))
+        for top_sort in globals()['all_topological_sorts'][tree_key]:
+            sks.append((deepcopy(sk), list(top_sort)))
     elif args.strategy == 'conf':
         sks = [sk]
     else:
