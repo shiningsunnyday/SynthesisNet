@@ -32,6 +32,11 @@ class GeneticSearchConfig(pydantic.BaseModel):
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1
 
+    # Early stopping
+    early_stop_delta: float = 0.01
+    early_stop_warmup: int = 30
+    early_stop_patience: int = 10
+
     # IO
     initialize_path: str = "./data/zinc.csv"
     checkpoint_path: str = None

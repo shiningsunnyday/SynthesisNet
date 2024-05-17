@@ -1,3 +1,4 @@
+import collections
 import itertools
 import json
 import pickle
@@ -249,7 +250,7 @@ class GeneticSearch:
             ind.fitness = None
 
         # Track some stats
-        history = []
+        history = collections.deque(maxlen=cfg.early_stop_patience)
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
@@ -273,15 +274,6 @@ class GeneticSearch:
             # Scoring
             metrics = self.evaluate(population)
 
-            # Early-stopping
-            best = metrics["scores/mean"] 
-            history.append(best)
-            assert best >= max(history) 
-            for i, v in enumerate(history):
-                if abs(best - v) < 0.01:
-                    metrics["scores/convergence"] = i
-                    break
-
             # Logging
             if cfg.wandb:
                 table = [[epoch, ind.smiles, ind.fitness] for ind in population]
@@ -290,6 +282,17 @@ class GeneticSearch:
                 wandb.log({"generation": epoch, **metrics}, commit=True)
             if cfg.checkpoint_path is not None:
                 self.checkpoint(cfg.checkpoint_path, population)
+
+            
+            # Early-stopping
+            history.append(metrics["scores/mean"])
+            if (
+                (epoch > cfg.early_stop_warmup)
+                and (len(history) == cfg.early_stop_patience)
+                and (history[-1] - history[0] < cfg.early_stop_delta)
+            ):
+                print("Early stopping.")
+                break
 
         # Cleanup
         if cfg.wandb:

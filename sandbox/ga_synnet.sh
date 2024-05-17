@@ -2,7 +2,7 @@ export PYTHONPATH="${HOME}/SynTreeNet/src"
 MAX_NUM_RXNS=4
 
 python sandbox/optimize.py \
-    --seed=11 \
+    --seed=10 \
     --background_set_file /ssd/msun415/skeletons/skeletons-train.pkl \
     --skeleton_set_file /ssd/msun415/skeletons/skeletons-valid.pkl \
     --ckpt_rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
@@ -19,5 +19,5 @@ python sandbox/optimize.py \
     --offspring_size=512 \
     --analog_size=0 \
     --fp_bits=4096 \
-    --bt_mutate_edits=1 \
+    --bt_mutate_edits=0 \
     --bt_ignore
