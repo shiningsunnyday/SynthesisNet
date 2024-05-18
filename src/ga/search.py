@@ -31,12 +31,6 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-        with open(config.background_set_file, "rb") as f:
-            self.background_smiles = set(
-                Chem.CanonSmiles(st.root.smiles)
-                for st in pickle.load(f).keys()
-            )
-
     def initialize(self, path: str) -> Population:
         cfg = self.config
         population = []
@@ -104,12 +98,6 @@ class GeneticSearch:
         # Uniqueness
         unique = set(ind.smiles for ind in population if ind.smiles is not None)
         metrics["unique"] = len(unique) / N
-
-        # Novelty
-        if unique:
-            metrics["novelty"] = len(unique - self.background_smiles) / len(unique)
-        else:
-            metrics["novelty"] = 0.0
 
         return metrics
 
