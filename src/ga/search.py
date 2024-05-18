@@ -87,6 +87,7 @@ class GeneticSearch:
             trees = [ind.bt for ind in population]
             metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
             metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
+            metrics["trees/mean_internal"] = np.mean([utils.num_internal(bt) for bt in trees]).item()
 
         # Diversity
         distances = []
