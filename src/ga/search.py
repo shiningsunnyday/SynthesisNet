@@ -139,6 +139,7 @@ class GeneticSearch:
         self,
         population: Population,
         epoch: int,
+        analog: bool, 
     ) -> List[Tuple[Individual, Individual]]:
         population = sorted(population, key=(lambda x: x.fitness))  # ascending
         indices = np.arange(len(population))
@@ -150,11 +151,18 @@ class GeneticSearch:
         else:
             p = scipy.special.softmax(p)
 
+        offspring_size = cfg.offspring_size
+        if analog:
+            analog_size = cfg.analog_size
+        else:
+            offspring_size += cfg.analog_size
+            analog_size = 0
+
         choices = []
-        for _ in range(cfg.offspring_size):
+        for _ in range(offspring_size):
             i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
             choices.append((population[i1], population[i2]))
-        for _ in range(cfg.analog_size):
+        for _ in range(analog_size):
             i = np.random.choice(indices, size=[1], replace=False, p=p).item()
             choices.append((population[i],))
         return choices
@@ -250,7 +258,9 @@ class GeneticSearch:
             ind.fitness = None
 
         # Track some stats
+        analog = False
         history = collections.deque(maxlen=cfg.early_stop_patience)
+        history.append(-1000)
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
@@ -258,7 +268,10 @@ class GeneticSearch:
             # Crossover & mutation
             if epoch >= 0:
                 offsprings = []
-                for parents in self.choose_couples_and_analogs(population, epoch):
+                if (not analog) and (history[-1] - history[-2] < cfg.analog_delta): 
+                    print(f"Enabling analogs at {epoch = }")
+                    analog = True
+                for parents in self.choose_couples_and_analogs(population, epoch, analog):
                     if len(parents) == 2:
                         child = self.crossover_and_mutate(parents)
                     else:

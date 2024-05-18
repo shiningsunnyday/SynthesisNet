@@ -22,7 +22,9 @@ class GeneticSearchConfig(pydantic.BaseModel):
     generations: int = 200
     population_size: int = 128
     offspring_size: int = 384
+
     analog_size: int = 128
+    analog_delta: float = 0.01
 
     # Mutation
     fp_mutate_prob: float = 0.5

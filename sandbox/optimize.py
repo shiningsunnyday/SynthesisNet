@@ -23,10 +23,7 @@ from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similari
 from synnet.utils.reconstruct_utils import (
     decode,
     load_data,
-    lookup_skeleton_by_index,
-    lookup_skeleton_key,
     reconstruct,
-    serialize_string,
     set_models,
     test_skeletons,
 )
@@ -180,11 +177,7 @@ def fetch_oracle(objective):
 
 def get_smiles_ours(idx_and_ind):
     idx, ind = idx_and_ind
-
-    sk = binary_tree_to_skeleton(ind.bt)
-    tree_key = serialize_string(sk.tree, sk.tree_root)
-    sk0_index = lookup_skeleton_key(sk.zss_tree, tree_key)
-    sk0 = lookup_skeleton_by_index(sk0_index)
+    sk0 = binary_tree_to_skeleton(ind.bt)
 
     ans = 0.0
     best_smi = ""
@@ -251,7 +244,7 @@ def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=F
         else:
             indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
-    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating", leave=False)
+    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
     for idx, smi in pbar:
         ind = batch[idx]
         if smi is None:

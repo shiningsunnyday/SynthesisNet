@@ -391,22 +391,21 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
         globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
 
-    
-    if hasattr(args, 'strategy') and args.strategy == 'topological':
-        globals()['all_topological_sorts'] = {}
-        for index in SKELETON_INDEX:
-            sk = Skeleton(sks[index], index)
-            if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
-                continue
-            top_sorts = nx.all_topological_sorts(sk.tree)
-            top_sort_set = set()
-            for top_sort in top_sorts:
-                top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
-                top_sort_set.add(tuple(top_sort))    
-            tree_key = serialize_string(sk.tree, sk.tree_root)
-            globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
-    
+    # if hasattr(args, 'strategy') and args.strategy == 'topological':
+    #     globals()['all_topological_sorts'] = {}
+    #     for index in SKELETON_INDEX:
+    #         sk = Skeleton(sks[index], index)
+    #         if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
+    #             continue
+    #         top_sorts = nx.all_topological_sorts(sk.tree)
+    #         top_sort_set = set()
+    #         for top_sort in top_sorts:
+    #             top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
+    #             top_sort_set.add(tuple(top_sort))    
+    #         tree_key = serialize_string(sk.tree, sk.tree_root)
+    #         globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
     # globals()['mc_adj'] = build_mc(args.max_num_rxns)
+
     return SKELETON_INDEX
 
 
@@ -705,10 +704,17 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
     # corresponding to the first bb chosen
     # To make the code more general, we implement this with a stack
     if args.strategy == 'topological':
-        sks = []        
-        tree_key = serialize_string(sk.tree, sk.tree_root)
-        for top_sort in globals()['all_topological_sorts'][tree_key]:
-            sks.append((deepcopy(sk), list(top_sort)))
+        # sks = []        
+        # tree_key = serialize_string(sk.tree, sk.tree_root)
+        # for top_sort in globals()['all_topological_sorts'][tree_key]:
+        #     sks.append((deepcopy(sk), list(top_sort))
+        sks = []
+        top_sort_set = set()
+        for top_sort in nx.all_topological_sorts(sk.tree):
+            top_sort = tuple(n for n in top_sort if sk.rxns[n] or sk.leaves[n])
+            if top_sort not in top_sort_set:
+                top_sort_set.add(top_sort)
+                sks.append((deepcopy(sk), list(top_sort)))
     elif args.strategy == 'conf':
         sks = [sk]
     else:
