@@ -92,6 +92,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Topological: Decode every topological order of the rxn+bb nodes.
     strategy: Literal["conf", "topological"] = "conf"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
+    max_topological_orders: int = 5
 
 
 def get_args():
@@ -118,6 +119,7 @@ def get_args():
     parser.add_argument("--num_workers", type=int)
     parser.add_argument("--offspring_size", type=int)
     parser.add_argument("--analog_size", type=int)
+    parser.add_argument("--analog_delta", type=float)
     parser.add_argument("--fp_bits", type=int)
     parser.add_argument("--bt_ignore", action="store_true")
     parser.add_argument("--bt_mutate_edits", type=int)
@@ -126,6 +128,7 @@ def get_args():
     parser.add_argument("--early_stop_warmup", type=str)
     parser.add_argument("--early_stop_patience", type=int)
     parser.add_argument("--checkpoint_path", type=str)
+    parser.add_argument("--resume_path", type=str)
 
     return parser.parse_args()
 

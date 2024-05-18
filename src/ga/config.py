@@ -42,7 +42,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
 
     # IO
     initialize_path: str = "./data/zinc.csv"
-    checkpoint_path: str = None
+    checkpoint_path: Optional[str] = None
+    resume_path: Optional[str] = None
     background_set_file: str
 
     # WandB

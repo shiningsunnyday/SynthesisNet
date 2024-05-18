@@ -221,18 +221,22 @@ class GeneticSearch:
                 config=dict(cfg),
             )
 
-        # Initialize population
-        population = self.initialize(cfg.initialize_path)
+        if cfg.resume_path is not None:
+            with open(cfg.resume_path, "rb") as f:
+                population = pickle.load(f)
+        else:
+            # Initialize population
+            population = self.initialize(cfg.initialize_path)
 
-        # Let's also log the seed stats
-        fn(population, usesmiles=True)
-        metrics = self.evaluate_scores(population, prefix="seeds")
-        wandb.log({"generation": -1, **metrics}, commit=True)
-    
-        # Safety 
-        for ind in population:
-            ind.smiles = None
-            ind.fitness = None
+            # Let's also log the seed stats
+            fn(population, usesmiles=True)
+            metrics = self.evaluate_scores(population, prefix="seeds")
+            wandb.log({"generation": -1, **metrics}, commit=True)
+        
+            # Safety 
+            for ind in population:
+                ind.smiles = None
+                ind.fitness = None
 
         # Track some stats
         analog = False
@@ -257,6 +261,8 @@ class GeneticSearch:
                     offsprings.append(child)
                 fn(offsprings)
                 population = self.cull(population + offsprings)
+            elif cfg.resume_path is not None:
+                pass
             else:
                 fn(population)
             self.validate(population)  # sanity check
@@ -284,6 +290,10 @@ class GeneticSearch:
             ):
                 print("Early stopping.")
                 break
+
+            # Snap fp to SMILES
+            for ind in population:
+                ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
 
         # Cleanup
         if cfg.wandb:

@@ -138,7 +138,7 @@ def decode(sk, smi):
 
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
 
-    ans = serialize_string(sk.tree, sk.tree_root)        
+    # ans = serialize_string(sk.tree, sk.tree_root)        
     return sks
 
 
@@ -715,6 +715,8 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             if top_sort not in top_sort_set:
                 top_sort_set.add(top_sort)
                 sks.append((deepcopy(sk), list(top_sort)))
+        if len(sks) > args.max_topological_orders:
+            sks = random.sample(sks, k=args.max_topological_orders)
     elif args.strategy == 'conf':
         sks = [sk]
     else:
