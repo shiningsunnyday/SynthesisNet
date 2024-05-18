@@ -271,7 +271,7 @@ class GeneticSearch:
                 metrics["smiles"] = wandb.Table(columns=columns, data=table)
                 wandb.log({"generation": epoch, **metrics}, commit=True)
             if cfg.checkpoint_path is not None:
-                with open(cfg.checkpoint_path, "rb") as f:
+                with open(cfg.checkpoint_path, "wb") as f:
                     pickle.dump(population, f)
 
             # Early-stopping
