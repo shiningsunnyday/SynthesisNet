@@ -21,7 +21,7 @@ python sandbox/optimize.py \
     --analog_size=0 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
-    --checkpoint_path= /ablations/population.pkl \
+    --checkpoint_path= ablations/population.pkl \
     --early_stop \
     --early_stop_delta=0.01 \
     --early_stop_warmup=-1 \

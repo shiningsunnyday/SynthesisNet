@@ -278,7 +278,7 @@ class GeneticSearch:
             history.append(metrics["scores/mean"])
             if (
                 cfg.early_stop
-                (epoch > cfg.early_stop_warmup)
+                and (epoch > cfg.early_stop_warmup)
                 and (len(history) == cfg.early_stop_patience)
                 and (history[-1] - history[0] < cfg.early_stop_delta)
             ):
