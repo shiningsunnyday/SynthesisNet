@@ -121,6 +121,11 @@ def get_args():
     parser.add_argument("--fp_bits", type=int)
     parser.add_argument("--bt_ignore", action="store_true")
     parser.add_argument("--bt_mutate_edits", type=int)
+    parser.add_argument("--early_stop", action="store_true")
+    parser.add_argument("--early_stop_delta", type=float)
+    parser.add_argument("--early_stop_warmup", type=str)
+    parser.add_argument("--early_stop_patience", type=int)
+    parser.add_argument("--checkpoint_path", type=str)
 
     return parser.parse_args()
 

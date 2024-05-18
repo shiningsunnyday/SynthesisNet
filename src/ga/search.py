@@ -209,18 +209,6 @@ class GeneticSearch:
     
         return Individual(fp=ind.fp.copy(), bt=bt)
 
-    def checkpoint(self, path: str, population: Population) -> None:
-        ckpt = []
-        for ind in population:
-            sk = binary_tree_to_skeleton(ind.bt)
-            ckpt.append({
-                "smi": ind.smiles,
-                "bt": nx.tree_data(sk.tree, sk.tree_root),
-                "score": ind.fitness,
-            })
-        with open(path, "w+") as f:
-            json.dump(ckpt, f)
-
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
 
@@ -295,12 +283,13 @@ class GeneticSearch:
                 metrics["smiles"] = wandb.Table(columns=columns, data=table)
                 wandb.log({"generation": epoch, **metrics}, commit=True)
             if cfg.checkpoint_path is not None:
-                self.checkpoint(cfg.checkpoint_path, population)
+                with open(cfg.checkpoint_path, "rb") as f:
+                    pickle.dump(population, f)
 
-            
             # Early-stopping
             history.append(metrics["scores/mean"])
             if (
+                cfg.early_stop
                 (epoch > cfg.early_stop_warmup)
                 and (len(history) == cfg.early_stop_patience)
                 and (history[-1] - history[0] < cfg.early_stop_delta)

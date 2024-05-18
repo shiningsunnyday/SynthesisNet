@@ -35,6 +35,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     max_num_rxns: int = -1
 
     # Early stopping
+    early_stop: bool = False
     early_stop_delta: float = 0.01
     early_stop_warmup: int = 30
     early_stop_patience: int = 10
