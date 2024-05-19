@@ -17,12 +17,12 @@ python sandbox/optimize.py \
     --wandb \
     --method=ours \
     --num_workers=50 \
-    --offspring_size=512 \
-    --analog_size=0 \
+    --offspring_size=384 \
+    --analog_size=128 \
     --fp_bits=2048 \
-    --bt_mutate_edits=-1 \
+    --bt_mutate_edits=3 \
     --early_stop \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
-    --analog_delta=-1 \
+    --analog_delta=10000000 \
