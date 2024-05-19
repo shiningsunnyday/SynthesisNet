@@ -26,7 +26,7 @@ do
         --test-correct-method reconstruct \
         --strategy ${STRATEGY} \
         --beta 10. \
-        --mcmc_timesteps 30 \
+        --mcmc_uniq 30 \
         --obj ${obj} \
         --sender-filename input_${use_case}.txt \
         --receiver-filename output_${use_case}.txt &

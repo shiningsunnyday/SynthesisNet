@@ -78,6 +78,7 @@ def get_args():
     # MCMC params
     parser.add_argument("--beta", nargs='+', type=float, default=[1.])
     parser.add_argument("--mcmc_timesteps", type=int, default=10)
+    parser.add_argument("--mcmc_uniq", type=int, default=-1)
     parser.add_argument("--chunk_size", type=int, default=1)    
     parser.add_argument("--obj", default='sim', choices=['sim','analog','qed','logp','jnk','gsk','drd2'])
     # Visualization
@@ -106,7 +107,7 @@ def main(proc_id, filename, output_filename):
     print(f"SKELETON INDEX: {SKELETON_INDEX}")    
     while(True):        
         selected_mol = None
-        with open(filename, 'r') as f:
+        with open(filename, 'r+') as f:
             editable = lock(f)
             if editable:
                 lines = f.readlines()
@@ -120,9 +121,9 @@ def main(proc_id, filename, output_filename):
                     else:
                         new_line = "{}\n".format(" ".join(splitted_line))
                     new_lines.append(new_line)
-                with open(filename, 'w') as fw:
-                    for _new_line in new_lines:
-                        fw.write(_new_line)
+                f.seek(0)
+                f.writelines(new_lines)
+                f.truncate()
                 fcntl.flock(f, fcntl.LOCK_UN)
         if selected_mol is None:            
             continue
@@ -132,7 +133,7 @@ def main(proc_id, filename, output_filename):
         index = int(index)
         st = list(skeletons)[index]               
         sk = Skeleton(st, index)
-        sks = mcmc(sk, smiles, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
+        sks = mcmc(sk, smiles, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps, args.mcmc_uniq)
 
         # starting smiles, starting index, score history, smi history
         score_history = ','.join([str(sk[0]) for sk in sks])

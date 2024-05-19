@@ -245,12 +245,11 @@ def main(args):
                                 key = int(splitted_line[0])                                
                                 status[key] = (splitted_line[0], splitted_line[1], splitted_line[2])
                             if np.all([x is not None for x in status]):
-                                break
-                        else:
-                            # write to another file for viewing progress
-                            progress_file = args.receiver_filename.replace(".txt", "_progress.txt")
-                            with open(progress_file, 'w+') as f:
-                                f.writelines(lines)
+                                break      
+                        # write to another file for viewing progress
+                        progress_file = args.receiver_filename.replace(".txt", "_progress.txt")
+                        with open(progress_file, 'w+') as f:
+                            f.writelines(lines)
                     fcntl.flock(fr, fcntl.LOCK_UN)
                 time.sleep(1)
             assert len(target_batch) == len(status)            

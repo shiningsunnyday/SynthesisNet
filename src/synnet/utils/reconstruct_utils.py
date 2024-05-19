@@ -37,6 +37,7 @@ from tqdm import tqdm
 import contextlib
 from tdc import Oracle
 import matplotlib.pyplot as plt
+HOME_DIR = os.getenv('HOME')
 
 def lock(f):
     try:
@@ -322,7 +323,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
             ax = fig.add_subplot(1,1,1)
             ax.plot(range(len(res)), [r[0] for r in res])
             ax.set_title(f"{objective}: {len(reconstruct_lookup)}, {len(oracle_lookup)} calls, {len(uniq_analogs)} unique")
-            fig.savefig(os.path.join('/home/msun415/SynTreeNet/results/chembl/mcmc/', f'{uid}.png'))
+            fig.savefig(os.path.join(f'{HOME_DIR}/SynTreeNet/results/chembl/mcmc/', f'{uid}.png'))
             iter += 1
         return res
 
@@ -423,7 +424,7 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             tree_key = serialize_string(sk.tree, sk.tree_root)
             globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
     
-    # globals()['mc_adj'] = build_mc(args.max_num_rxns)
+    globals()['mc_adj'] = build_mc(args.max_num_rxns)
     return SKELETON_INDEX
 
 
@@ -1036,7 +1037,7 @@ def surrogate(sk, fp, oracle):
         return 0., ''
     for sk in sks:
         sk.reconstruct(rxns)
-        sk.visualize('/home/msun415/test.png')
+        sk.visualize(f'{HOME_DIR}/test.png')
         smi = sk.tree.nodes[sk.tree_root]['smiles']
         for smi in smi.split(DELIM):
             score = oracle(smi)
