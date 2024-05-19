@@ -66,9 +66,18 @@ def random_binary_tree(n: int) -> nx.DiGraph:
     return tree
 
 
-def random_add_leaf(tree: nx.DiGraph) -> None:
-    nonfull = [v for v, d in tree.out_degree() if (d < 2)]
-    parent = random.choice(nonfull)
+def num_internal(tree: nx.digraph): 
+    return sum(1 for v, d in tree.out_degree() if (d > 0))
+
+
+def random_add_leaf(tree: nx.DiGraph, max_internal: int) -> None:
+    if num_internal(tree) == max_internal:
+        choices = [v for v, d in tree.out_degree() if (d == 1)]  # don't create new internal
+    else:
+        choices = [v for v, d in tree.out_degree() if (d < 2)]
+    if not choices:
+        return
+    parent = random.choice(choices)
     if tree.out_degree(parent) == 0:
         left = random_boolean(0.5)
     else:
@@ -80,7 +89,7 @@ def random_add_leaf(tree: nx.DiGraph) -> None:
 
 
 def random_remove_leaf(tree: nx.DiGraph) -> None:
-    if tree.number_of_nodes() == 1:  # safety, don't remove root
+    if tree.number_of_nodes() <= 2:
         return
     leaves = [v for v, d in tree.out_degree() if (d == 0)]
     victim = random.choice(leaves)

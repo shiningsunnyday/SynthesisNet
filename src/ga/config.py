@@ -16,37 +16,39 @@ class GeneticSearchConfig(pydantic.BaseModel):
 
     # Individuals
     fp_bits: int = 2048
-    bt_nodes_min: int = 2
-    bt_nodes_max: int = 10
+    bt_ignore: bool = False
 
     # Search parameters
     generations: int = 200
     population_size: int = 128
-    offspring_size: int = 512
+    offspring_size: int = 384
+
+    analog_size: int = 128
+    analog_delta: float = 0.01
 
     # Mutation
     fp_mutate_prob: float = 0.5
     fp_mutate_frac: float = (24 / 4096)
-
-    bt_crossover: Literal["graft", "inherit", "recognizer"] = "inherit"
     bt_mutate_edits: int = 3
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1
 
     # Early stopping
+    early_stop: bool = False
     early_stop_delta: float = 0.01
     early_stop_warmup: int = 30
     early_stop_patience: int = 10
 
     # IO
     initialize_path: str = "./data/zinc.csv"
-    checkpoint_path: str = None
+    checkpoint_path: Optional[str] = None
+    resume_path: Optional[str] = None
     background_set_file: str
 
     # WandB
     wandb: bool = False
-    wandb_project: str = "syntreenet_ga"
+    wandb_project: str = "syntreenet_ga_final"
     wandb_dir: Optional[str] = None
 
 

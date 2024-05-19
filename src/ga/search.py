@@ -31,58 +31,57 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-        with open(config.background_set_file, "rb") as f:
-            self.background_smiles = set(
-                Chem.CanonSmiles(st.root.smiles)
-                for st in pickle.load(f).keys()
-            )
-
-    def initialize_random(self) -> Population:
+    def initialize(self, path: str) -> Population:
         cfg = self.config
         population = []
-        for _ in range(cfg.population_size):
-            fp = np.random.choice([True, False], size=cfg.fp_bits)
-            bt_size = torch.randint(cfg.bt_nodes_min, cfg.bt_nodes_max + 1, size=[1])
-            bt = utils.random_binary_tree(bt_size.item())
-            population.append(Individual(fp=fp, bt=bt))
-        return population
-
-    def initialize_load(self, path: str) -> Population:
-        cfg = self.config
-        population = []
-        df = pd.read_csv(path).sample(cfg.population_size)
+        df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
         for smiles in df["smiles"].tolist():
-            fp = mol_fp(smiles, _nBits=cfg.fp_bits)
-            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-            sk = lookup_skeleton_by_index(index)
-            bt = utils.skeleton_to_binary_tree(sk)
-            population.append(Individual(fp=fp, bt=bt))
+            fp = mol_fp(smiles, _nBits=cfg.fp_bits).astype(np.float32)
+            if cfg.bt_ignore:
+                bt = None
+            else:
+                sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+                sk = lookup_skeleton_by_index(sk_index)
+                bt = utils.skeleton_to_binary_tree(sk)
+            population.append(Individual(fp=fp, bt=bt, smiles=smiles))
         return population
 
     def validate(self, population: Population):
         cfg = self.config
         for ind in population:
             assert ind.fp.shape == (cfg.fp_bits,)
-            assert cfg.bt_nodes_min <= ind.bt.number_of_nodes() <= cfg.bt_nodes_max
+            assert set(np.unique(ind.fp)) == {0, 1}
+            if cfg.bt_ignore:
+                assert ind.bt is None
+            else:
+                assert 2 <= ind.bt.number_of_nodes()
+                assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
+                assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
+
+    def evaluate_scores(self, population: Population, prefix) -> Dict[str, float]:
+        scores = [ind.fitness for ind in population]
+        scores = sorted(scores, reverse=True)
+        metrics = {
+            f"{prefix}/mean": np.mean(scores).item(),
+            f"{prefix}/stdev": np.std(scores).item(),
+        }
+        for k in [10, 100]:
+            metrics[f"{prefix}/mean_top{k}"] = np.mean(scores[:k]).item()
+        for k in range(1, 4):
+            metrics[f"{prefix}/top{k}"] = scores[k - 1]
+        return metrics
 
     def evaluate(self, population: Population) -> Dict[str, float]:
 
         # Fitness
-        scores = [ind.fitness for ind in population]
-        scores.sort(reverse=True)
-        metrics = {
-            "scores/mean": np.mean(scores).item(),
-            "scores/stdev": np.std(scores).item(),
-        }
-        for k in [10, 100]:
-            metrics[f"scores/mean_top{k}"] = np.mean(scores[:k]).item()
-        for k in range(1, 4):
-            metrics[f"scores/top{k}"] = scores[k - 1]
+        metrics = self.evaluate_scores(population, prefix="scores")
 
         # Trees
-        trees = [ind.bt for ind in population]
-        metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
-        metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
+        if not self.config.bt_ignore:
+            trees = [ind.bt for ind in population]
+            metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
+            metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
+            metrics["trees/mean_internal"] = np.mean([utils.num_internal(bt) for bt in trees]).item()
 
         # Diversity
         distances = []
@@ -99,12 +98,6 @@ class GeneticSearch:
         # Uniqueness
         unique = set(ind.smiles for ind in population if ind.smiles is not None)
         metrics["unique"] = len(unique) / N
-
-        # Novelty
-        if unique:
-            metrics["novelty"] = len(unique - self.background_smiles) / len(unique)
-        else:
-            metrics["novelty"] = 0.0
 
         return metrics
 
@@ -131,10 +124,11 @@ class GeneticSearch:
 
         return filtered
 
-    def choose_couples(
+    def choose_couples_and_analogs(
         self,
         population: Population,
         epoch: int,
+        analog: bool, 
     ) -> List[Tuple[Individual, Individual]]:
         population = sorted(population, key=(lambda x: x.fitness))  # ascending
         indices = np.arange(len(population))
@@ -146,80 +140,62 @@ class GeneticSearch:
         else:
             p = scipy.special.softmax(p)
 
-        couples = []
-        for _ in range(cfg.offspring_size):
-            i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
-            couples.append((population[i1], population[i2]))
-        return couples
+        offspring_size = cfg.offspring_size
+        if analog:
+            analog_size = cfg.analog_size
+        else:
+            offspring_size += cfg.analog_size
+            analog_size = 0
 
-    def crossover(self, parents: Tuple[Individual, Individual]) -> Individual:
+        choices = []
+        for _ in range(offspring_size):
+            i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
+            choices.append((population[i1], population[i2]))
+        for _ in range(analog_size):
+            i = np.random.choice(indices, size=[1], replace=False, p=p).item()
+            choices.append((population[i],))
+        return choices
+
+    def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
         cfg = self.config
 
-        # fp: random bit swap
+        # Crossover: random bit swap
         n = cfg.fp_bits
         k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
         k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
         mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
         fp = np.where(mask, parents[0].fp, parents[1].fp)
 
-        # bt:
-        if cfg.bt_crossover == "graft":  # random subtree swap
-            trees = [parents[0].bt, parents[1].bt]
-            random.shuffle(trees)
-            bt = utils.random_graft(
-                *trees,
-                min_nodes=cfg.bt_nodes_min,
-                max_nodes=cfg.bt_nodes_max,
-            )
-        elif cfg.bt_crossover == "inherit":  # inherit from dominant parent
-            dominant = 0 if (k >= cfg.fp_bits / 2) else 1
-            bt = parents[dominant].bt
-        elif cfg.bt_crossover == "recognizer":  # use recognizer
+        # Mutate: random bit flip
+        if utils.random_boolean(cfg.fp_mutate_prob):
+            mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
+            fp = np.where(mask, 1 - fp, fp)
+
+        # Initialize bt
+        if cfg.bt_ignore:
+            bt = None 
+        else:
             index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
             sk = lookup_skeleton_by_index(index)
             bt = utils.skeleton_to_binary_tree(sk)
-        else:
-            raise NotImplementedError()
 
         return Individual(fp=fp, bt=bt)
 
-    def mutate(self, ind: Individual) -> Individual:
+    def analog_mutate(self, ind: Individual) -> Individual:
         cfg = self.config
-
-        # fp: random bit flip
-        fp = ind.fp
-        if utils.random_boolean(cfg.fp_mutate_prob):
-            mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
-            fp = np.where(mask, ~fp, fp)
+        if cfg.bt_ignore:
+            return Individual(fp=ind.fp.copy(), bt=None)
+        bt = ind.bt.copy()
 
         # bt: random add or delete nodes
-        bt = ind.bt.copy()
-        num_edits = torch.randint(cfg.bt_mutate_edits + 1, size=[1]).item()
+        num_edits = torch.randint(1, cfg.bt_mutate_edits + 1, size=[1]).item()
         for _ in range(num_edits):
-            if bt.number_of_nodes() == cfg.bt_nodes_max:
-                add = False
-            elif bt.number_of_nodes() == cfg.bt_nodes_min:
-                add = True
-            else:
-                add = utils.random_boolean(0.5)
-            if add:
-                utils.random_add_leaf(bt)
+            if utils.random_boolean(0.5):
+                utils.random_add_leaf(bt, max_internal=cfg.max_num_rxns)
             else:
                 utils.random_remove_leaf(bt)
-
-        return Individual(fp=fp, bt=bt)
-
-    def checkpoint(self, path: str, population: Population) -> None:
-        ckpt = []
-        for ind in population:
-            sk = binary_tree_to_skeleton(ind.bt)
-            ckpt.append({
-                "smi": ind.smiles,
-                "bt": nx.tree_data(sk.tree, sk.tree_root),
-                "score": ind.fitness,
-            })
-        with open(path, "w+") as f:
-            json.dump(ckpt, f)
+    
+        return Individual(fp=ind.fp.copy(), bt=bt)
 
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -245,14 +221,27 @@ class GeneticSearch:
                 config=dict(cfg),
             )
 
-        # Initialize population
-        if cfg.initialize_path is None:
-            population = self.initialize_random()
+        if cfg.resume_path is not None:
+            with open(cfg.resume_path, "rb") as f:
+                population = pickle.load(f)
         else:
-            population = self.initialize_load(cfg.initialize_path)
+            # Initialize population
+            population = self.initialize(cfg.initialize_path)
+
+            # Let's also log the seed stats
+            fn(population, usesmiles=True)
+            metrics = self.evaluate_scores(population, prefix="seeds")
+            wandb.log({"generation": -1, **metrics}, commit=True)
+        
+            # Safety 
+            for ind in population:
+                ind.smiles = None
+                ind.fitness = None
 
         # Track some stats
-        early_stop_queue = collections.deque(maxlen=cfg.early_stop_patience)
+        analog = False
+        history = collections.deque(maxlen=cfg.early_stop_patience)
+        history.append(-1000)
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
@@ -260,12 +249,20 @@ class GeneticSearch:
             # Crossover & mutation
             if epoch >= 0:
                 offsprings = []
-                for parents in self.choose_couples(population, epoch):
-                    child = self.crossover(parents)
-                    child = self.mutate(child)
+                if (not analog) and (history[-1] - history[-2] < cfg.analog_delta): 
+                    print(f"Enabling analogs at {epoch = }")
+                    analog = True
+                for parents in self.choose_couples_and_analogs(population, epoch, analog):
+                    if len(parents) == 2:
+                        child = self.crossover_and_mutate(parents)
+                    else:
+                        assert len(parents) == 1
+                        child = self.analog_mutate(parents[0])
                     offsprings.append(child)
                 fn(offsprings)
                 population = self.cull(population + offsprings)
+            elif cfg.resume_path is not None:
+                pass
             else:
                 fn(population)
             self.validate(population)  # sanity check
@@ -278,18 +275,25 @@ class GeneticSearch:
                 table = [[epoch, ind.smiles, ind.fitness] for ind in population]
                 columns = ["generation", "smiles", "fitness"]
                 metrics["smiles"] = wandb.Table(columns=columns, data=table)
-                wandb.log({"generation": epoch, **metrics}, step=(1 + epoch), commit=True)
+                wandb.log({"generation": epoch, **metrics}, commit=True)
             if cfg.checkpoint_path is not None:
-                self.checkpoint(cfg.checkpoint_path, population)
+                with open(cfg.checkpoint_path, "wb") as f:
+                    pickle.dump(population, f)
 
             # Early-stopping
-            early_stop_queue.append(metrics["scores/mean"])
+            history.append(metrics["scores/mean"])
             if (
-                (epoch > cfg.early_stop_warmup)
-                and (len(early_stop_queue) == cfg.early_stop_patience)
-                and (early_stop_queue[-1] - early_stop_queue[0] < cfg.early_stop_delta)
+                cfg.early_stop
+                and (epoch > cfg.early_stop_warmup)
+                and (len(history) == cfg.early_stop_patience)
+                and (history[-1] - history[0] < cfg.early_stop_delta)
             ):
+                print("Early stopping.")
                 break
+
+            # Snap fp to SMILES
+            for ind in population:
+                ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
 
         # Cleanup
         if cfg.wandb:

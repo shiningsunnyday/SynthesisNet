@@ -23,10 +23,7 @@ from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similari
 from synnet.utils.reconstruct_utils import (
     decode,
     load_data,
-    lookup_skeleton_by_index,
-    lookup_skeleton_key,
     reconstruct,
-    serialize_string,
     set_models,
     test_skeletons,
 )
@@ -83,10 +80,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Beam width for first rxn
     top_k_rxn: int = 3
 
-    # Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to
-    # syntrees whose skeleton class was trained on by ckpt_dir)
-    max_rxns: int = -1
-
     filter_only: List[Literal["rxn", "bb"]] = []
 
     # Objective function to optimize
@@ -99,17 +92,18 @@ class OptimizeGAConfig(GeneticSearchConfig):
     # Topological: Decode every topological order of the rxn+bb nodes.
     strategy: Literal["conf", "topological"] = "conf"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
+    max_topological_orders: int = 5
 
 
 def get_args():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--seed", type=int, default=10)  
     parser.add_argument("--background_set_file", type=str)  
     parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")   
     parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")    
     parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")    
-    parser.add_argument("--max_rxns", type=int, help="Restrict syntree test set to max number of reactions (-1 to do syntrees, 0 to syntrees whose skleeton class was trained on by ckpt_dir)", default=-1)
     parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)        
     parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
     parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
@@ -123,11 +117,18 @@ def get_args():
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--method", type=str, choices=["ours", "synnet"])
     parser.add_argument("--num_workers", type=int)
-    parser.add_argument("--bt_nodes_max", type=int)
     parser.add_argument("--offspring_size", type=int)
+    parser.add_argument("--analog_size", type=int)
+    parser.add_argument("--analog_delta", type=float)
     parser.add_argument("--fp_bits", type=int)
-    parser.add_argument("--bt_crossover", type=str)
+    parser.add_argument("--bt_ignore", action="store_true")
     parser.add_argument("--bt_mutate_edits", type=int)
+    parser.add_argument("--early_stop", action="store_true")
+    parser.add_argument("--early_stop_delta", type=float)
+    parser.add_argument("--early_stop_warmup", type=str)
+    parser.add_argument("--early_stop_patience", type=int)
+    parser.add_argument("--checkpoint_path", type=str)
+    parser.add_argument("--resume_path", type=str)
 
     return parser.parse_args()
 
@@ -184,11 +185,7 @@ def fetch_oracle(objective):
 
 def get_smiles_ours(idx_and_ind):
     idx, ind = idx_and_ind
-
-    sk = binary_tree_to_skeleton(ind.bt)
-    tree_key = serialize_string(sk.tree, sk.tree_root)
-    index = lookup_skeleton_key(sk.zss_tree, tree_key)
-    sk0 = lookup_skeleton_by_index(index)
+    sk0 = binary_tree_to_skeleton(ind.bt)
 
     ans = 0.0
     best_smi = ""
@@ -241,17 +238,21 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
+def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=False):
     oracle = fetch_oracle(config.objective)
 
     # Debug option
-    indexed_batch = list(enumerate(batch))
-    if config.num_workers <= 0:
-        indexed_smiles = map(converter, indexed_batch)
+    if usesmiles:
+        indexed_smiles = [(idx, ind.smiles) for idx, ind in enumerate(batch)]
+        assert all(smi is not None for _, smi in indexed_smiles)
     else:
-        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
+        indexed_batch = list(enumerate(batch))
+        if config.num_workers <= 0:
+            indexed_smiles = map(converter, indexed_batch)
+        else:
+            indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
-    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating", leave=False)
+    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
     for idx, smi in pbar:
         ind = batch[idx]
         if smi is None:
@@ -280,7 +281,7 @@ def main():
         with open(config.skeleton_set_file, "rb") as f:
             skeletons = pickle.load(f)
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
-        SKELETON_INDEX = test_skeletons(config, skeleton_set, max_rxns=config.max_rxns)
+        test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
 
         converter = get_smiles_ours
 
@@ -303,7 +304,7 @@ def main():
         rxns = ReactionSet().load(args.rxns_collection_file).rxns
 
         # Load the pre-trained modules
-        path = pathlib.Path(__file__).parent / "checkpoints"
+        path = pathlib.Path(__file__).parents[1] / "data" / "checkpoints"
         ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
         act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file).cpu() for file in ckpt_files]
 
