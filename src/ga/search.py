@@ -136,7 +136,7 @@ class GeneticSearch:
 
         return filtered
 
-    def choose_couples_and_analogs(
+    def choose_couples(
         self,
         population: Population,
         epoch: int,
@@ -147,16 +147,30 @@ class GeneticSearch:
         cfg = self.config
         p = indices + 10
         p = p / np.sum(p)
-        p_analog = np.square(p) / np.sum(np.square(p))
 
-        choices = []
+        parents = []
         for _ in range(cfg.offspring_size):
             i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
-            choices.append((population[i1], population[i2]))
+            parents.append((population[i1], population[i2]))
+        return parents
+
+    def choose_references(
+        self,
+        population: Population,
+        epoch: int,
+    ) -> List[Individual]:
+        population = sorted(population, key=(lambda x: x.fitness))  # ascending
+        indices = np.arange(len(population))
+
+        cfg = self.config
+        p = indices + 10
+        p = np.square(p) / np.sum(np.square(p))
+
+        references = []
         for _ in range(cfg.analog_size):
-            i = np.random.choice(indices, size=[1], replace=False, p=p_analog).item()
-            choices.append((population[i],))
-        return choices
+            i = np.random.choice(indices, size=[1], replace=False, p=p).item()
+            choices.append(population[i])
+        return references
 
     def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
         cfg = self.config
@@ -251,14 +265,19 @@ class GeneticSearch:
 
             # Crossover & mutation
             if epoch >= 0:
-                
+
+                mutants = [] 
+                references = self.choose_references(population, epoch)
+                for ref in references:
+                    mutants.append(self.analog_mutate(ref))
+                fn(mutants)
+                for ref, mut in zip(references, mutants):
+                    mut.fp = mol_fp(mut.smiles, _nBits=cfg.fp_bits).astype(np.float32)
+                    mut.fitness = ref.fitness
+
                 offsprings = []
-                for parents in self.choose_couples_and_analogs(population, epoch):
-                    if len(parents) == 2:
-                        child = self.crossover_and_mutate(parents)
-                    else:
-                        assert len(parents) == 1
-                        child = self.analog_mutate(parents[0])
+                for parents in self.choose_couples(population + mutants, epoch):
+                    child = self.crossover_and_mutate(parents)
                     offsprings.append(child)
                 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:

@@ -19,9 +19,9 @@ python sandbox/optimize.py \
     --method=ours \
     --num_workers=50 \
     --offspring_size=512 \
-    --analog_size=0 \
+    --analog_size=64 \
     --fp_bits=2048 \
-    --bt_mutate_edits=0 \
+    --bt_mutate_edits=2 \
     --early_stop \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
