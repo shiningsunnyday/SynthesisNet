@@ -24,38 +24,35 @@ batch_size=100000;
 #     --sender-filename input_reconstruct.txt \
 #     --receiver-filename output_reconstruct.txt
 
-# python scripts/reconstruct-targets.py \
-#     --skeleton-set-file results/viz/skeletons-valid.pkl \
-#     --ckpt-rxn /ssd/msun415/surrogate/version_42/ \
-#     --ckpt-bb /ssd/msun415/surrogate/version_70/ \
-#     --ckpt-recognizer /ssd/msun415/recognizer/ckpts.epoch=1-val_loss=0.14.ckpt \
-#     --out-dir /home/msun415/SynTreeNet/results/viz/ \
-#     --top-k 3 \
-#     --test-correct-method reconstruct \
-#     --ncpu $ncpu \
-#     --batch-size $batch_size \
-#     --mermaid \
-#     --one-per-class \
-#     --attn_weights
-    # --sender-filename input_reconstruct.txt \
-    # --receiver-filename output_reconstruct.txt
-
 python scripts/reconstruct-targets.py \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
-    --data data/assets/molecules/chembl_34_chemreps.tsv \
     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
-    --out-dir /home/msun415/SynTreeNet/results/viz/ \
-    --top-k ${TOP_K} \
-    --max_num_rxns ${MAX_NUM_RXNS} \
-    --top-k-rxn ${TOP_K_RXN} \
-    --max_rxns ${MAX_RXNS} \
+    --out-dir /home/msun415/SynTreeNet/results/viz/attn/ \
+    --top-k 1 \
     --test-correct-method reconstruct \
-    --strategy ${STRATEGY} \
     --ncpu $ncpu \
     --batch-size $batch_size \
-    --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
-    --num-analogs 30 \
-    --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.txt \
-    --num 1000
+    --mermaid \
+    --one-per-class \
+    --attn_weights
+
+# python scripts/reconstruct-targets.py \
+#     --skeleton-set-file results/viz/skeletons-valid.pkl \
+#     --data data/assets/molecules/chembl_34_chemreps.tsv \
+#     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
+#     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
+#     --out-dir /home/msun415/SynTreeNet/results/viz/ \
+#     --top-k ${TOP_K} \
+#     --max_num_rxns ${MAX_NUM_RXNS} \
+#     --top-k-rxn ${TOP_K_RXN} \
+#     --max_rxns ${MAX_RXNS} \
+#     --test-correct-method reconstruct \
+#     --strategy ${STRATEGY} \
+#     --ncpu $ncpu \
+#     --batch-size $batch_size \
+#     --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
+#     --num-analogs 30 \
+#     --sender-filename input_${use_case}.txt \
+#     --receiver-filename output_${use_case}.txt \
+#     --num 1000

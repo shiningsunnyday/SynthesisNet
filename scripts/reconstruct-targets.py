@@ -189,7 +189,7 @@ def main(args):
                         lookup[target].append(sk)
                     
             else:
-                lookup[target] = sk
+                lookup[target].append(sk)
     targets = list(lookup)
     print(f"{len(targets)} targets")
     
@@ -204,7 +204,7 @@ def main(args):
     all_targets = []
     for batch in range((len(targets)+batch_size-1)//batch_size):
         target_batch = targets[batch_size*batch:batch_size*batch+batch_size]
-        target_batch = [(deepcopy(lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
+        target_batch = [((lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
 
         if args.test_correct_method == 'reconstruct' and args.sender_filename and args.receiver_filename: # assume background processes
             open(args.sender_filename, 'w+').close() # clear
@@ -254,7 +254,6 @@ def main(args):
             df.to_csv(path)
             print(os.path.abspath(path))
         else:            
-            target_batch = [(deepcopy(lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
             if args.ncpu == 1:
                 sks_batch = []
                 for arg in tqdm(target_batch):                        

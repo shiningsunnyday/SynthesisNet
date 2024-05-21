@@ -142,6 +142,14 @@ def main(args):
     print(f"{len(skeletons)} classes with >= {num_per_class} per class")
     num_classes = len(skeletons)
     setattr(args, 'num_classes', num_classes)    
+    lookup = {}
+    for i, k in enumerate(skeletons):            
+        for j, st in enumerate(skeletons[k]):                
+            try: feats = encoder.encode(st.root.smiles).flatten()                    
+            except: continue
+            if st.root.smiles not in lookup:
+                lookup[st.root.smiles] = {'labels': np.zeros((len(skeletons),)), 'features': feats}                
+            lookup[st.root.smiles]['labels'][i] = 1    
     if same:
         train_dataset = pickle.load(open(os.path.join(args.work_dir, 'train_dataset.pkl'), 'rb'))
         valid_dataset = pickle.load(open(os.path.join(args.work_dir, 'valid_dataset.pkl'), 'rb'))
@@ -213,7 +221,8 @@ def main(args):
             val_feats.append(feats)
         train_feats = []
         train_indices = []
-        train_max_count = {}        
+        train_max_count = {}
+        breakpoint()
         for X_train, y_train in train_dataset:
             if y_train.sum().item() > 1:
                 continue

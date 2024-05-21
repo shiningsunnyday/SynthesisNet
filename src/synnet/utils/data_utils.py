@@ -35,6 +35,8 @@ from networkx.algorithms import weisfeiler_lehman_graph_hash
 from networkx.algorithms.traversal.depth_first_search import dfs_tree
 import networkx as nx
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrowPatch
+from matplotlib.lines import Line2D
 from sklearn.manifold import MDS
 from zss import Node as ZSSNode, simple_distance
 from copy import deepcopy
@@ -2057,38 +2059,96 @@ class Skeleton:
             Skeleton.do_postorder(tree, n, res)
         res.append(cur)
 
+    
+
+    @staticmethod
+    def draw_networkx_curved_edges(G, pos, ax, widths=None, radius=0.2, buffer=0.01):
+        if widths is None:
+            widths = [None for _ in G.edges]
+        for (u, v, d), width in zip(G.edges(data=True), widths):
+            # rad = radius if u > v else -radius
+            if width is not None:
+                rad = radius
+                color = 'blue' if u > v else 'magenta'
+            else:
+                rad = 0            
+                color = 'gray'
+                width = 1
+            src_pos = np.array(pos[u])
+            tgt_pos = np.array(pos[v])
+            direction = tgt_pos - src_pos
+            length = np.linalg.norm(direction)
+            direction = direction / length
+            adj_src_pos = src_pos + direction * buffer
+            adj_tgt_pos = tgt_pos - direction * buffer            
+            edge = FancyArrowPatch(adj_src_pos, adj_tgt_pos, arrowstyle='-|>',
+                                connectionstyle=f"Arc3,rad={rad}",
+                                mutation_scale=50.0,
+                                lw=width*10,
+                                color=color)                
+            ax.add_patch(edge)
 
 
-    def visualize(self, path=None, Xy=None, ax=None, labels=True, attn=None):
+
+    def visualize(self, path=None, Xy=None, ax=None, labels=True, attn=None, node_to_highlight=[], sq_size=1000, o_size=1000):
         pos = Skeleton.hierarchy_pos(self.tree, self.tree_root)
+        if attn is not None:
+            # our tree is now bi-directional
+            tree = nx.DiGraph(self.tree)
+            for u, v in tree.edges:
+                tree.add_edge(v, u)        
+        else:
+            tree = self.tree
         if ax is None:
             pos_np = np.array([v for v in pos.values()])
             w, l = pos_np.max(axis=0)-pos_np.min(axis=0)
             w = max(w, 1) # in case uni-mol rxns only
-            fig = plt.Figure(figsize=(20*w, 20*l))
+            fig = plt.Figure(figsize=(10*w, 10*l))
             ax = fig.add_subplot(1, 1, 1)        
         else:
             fig = None
         if Xy:
             X, y = Xy
             node_colors = []
-            for i in self.tree:
+            for i in tree:
                 assert ((X[i].sum() > 0) + (y[i].sum() > 0)) <= 1
                 if X[i].sum():
-                    node_colors.append('green')
+                    if self.rxns[i]:
+                        node_colors.append('red')
+                    elif self.leaves[i]:
+                        node_colors.append('lightgreen')
+                    elif i == self.tree_root:
+                        node_colors.append('green')
+                    else:
+                        node_colors.append('gray')
                 elif y[i].sum():
                     node_colors.append('yellow')
                 else:
                     node_colors.append('gray')
         else:
-            node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
+            node_colors = []
+            for n in tree:
+                if n in node_to_highlight:
+                    node_colors.append('yellow')
+                else: 
+                    if self.mask[n]:
+                        if self.rxns[n]:
+                            node_colors.append('red')
+                        elif self.leaves[n]:
+                            node_colors.append('lightgreen')
+                        elif n == self.tree_root:
+                            node_colors.append('green')
+                        else:
+                            node_colors.append('gray')
+                    else:
+                        node_colors.append('gray')
 
-        widths = [1. for _ in self.tree.edges]       
-        edge_color = ['k' for _ in self.tree.edges]
-        if attn is not None:                
+        if attn is not None:
+            widths = [0. for _ in tree.edges]       
+            edge_color = ['k' for _ in tree.edges]            
             attn_edges, attn = attn            
             attn_ind = 0
-            edge_tuples = [tuple(e) for e in np.array(self.tree.edges)]
+            edge_tuples = [tuple(e) for e in np.array(tree.edges)]
             attn_edge_tuples = [tuple(e) for e in attn_edges.numpy().T]
             for e in attn_edge_tuples:
                 if e in edge_tuples:
@@ -2097,43 +2157,84 @@ class Skeleton:
                     ind = edge_tuples.index(e[::-1])
                 else:
                     continue
-                widths[ind] = attn[attn_ind]*2
+                widths[ind] += attn[attn_ind]
                 edge_color[ind] = 'red'
                 attn_ind += 1
+        else:
+            widths = [1. for _ in tree.edges]       
         if not labels:
-            nx.draw_networkx(self.tree, pos=pos, ax=ax, node_color=node_colors)
+            nx.draw_networkx(tree, pos=pos, ax=ax, node_color=node_colors)
             if fig is not None:
                 if path is not None:
                     fig.savefig(path)
                     print(os.path.abspath(path))            
-        else:            
+        else:                   
             node_labels = {}
             node_sizes = []
-            for n in self.tree:
-                if 'smiles' in self.tree.nodes[n]:
-                    smiles = self.tree.nodes[n]['smiles']                                       
+            rxn_mask = []
+            for n in tree:
+                if 'smiles' in tree.nodes[n]:
+                    smiles = tree.nodes[n]['smiles']                                       
+                    if self.mask[n] and smiles:
+                        smiles = '√'                    
+                    else:
+                        smiles = '?'
                     if isinstance(smiles, np.ndarray):
                         smiles = 'fp'
                     else:
                         if len(smiles):
                             m = int(math.sqrt(len(smiles))) 
                             l = (len(smiles)+m-1)//m
-                            smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])                    
-                    node_labels[n] = f"{n}: {smiles}"
-                    node_sizes.append(5000)
+                            smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])                                        
+                    node_labels[n] = f"{n}: {smiles}" if (self.leaves[n] or n == self.tree_root) else ''
+                    # node_sizes.append(1000)                    
                 else:
-                    rxn_id = self.tree.nodes[n]['rxn_id']
+                    rxn_id = tree.nodes[n]['rxn_id']     
+                    if self.mask[n] and rxn_id != -1:
+                        rxn_id = '√'
+                    else:
+                        rxn_id = '?'
                     node_labels[n] = f"{n}: {rxn_id}"
-                    node_sizes.append(1000)
-            nx.draw_networkx(self.tree, pos=pos, ax=ax, 
-                            node_color=node_colors, 
-                            edge_color=edge_color,
-                            labels=node_labels,
-                            node_size=node_sizes,
-                            width=widths)
+                    # node_sizes.append(1000)
+                rxn_mask.append('rxn_id' in tree.nodes[n])
+            rxn_mask = np.array(rxn_mask)
+            node_list = np.array(tree.nodes)
+            node_colors = np.array(node_colors)
+            node_labels_keys = np.array(list(node_labels))
+            # nx.draw_networkx(tree, pos=pos, ax=ax, 
+            #                 node_color=node_colors, 
+            #                 edge_color=edge_color,
+            #                 labels=node_labels,
+            #                 node_size=node_sizes,
+            #                 width=widths)
+            nx.draw_networkx_nodes(tree, pos=pos, ax=ax, 
+                            nodelist=node_list[~rxn_mask],
+                            node_shape='s',
+                            node_color=node_colors[~rxn_mask], 
+                            node_size=sq_size)        
+            nx.draw_networkx_nodes(tree, pos=pos, ax=ax, 
+                            nodelist=node_list[rxn_mask],
+                            node_shape='o',
+                            node_color=node_colors[rxn_mask], 
+                            node_size=o_size)
+            if attn is not None:
+                self.draw_networkx_curved_edges(tree, pos, ax, widths)
+            else:
+                self.draw_networkx_curved_edges(tree, pos, ax, widths=None)
+            nx.draw_networkx_labels(tree, pos, labels=node_labels, ax=ax)
+            legend_elements = [
+                Line2D([0], [0], marker='s', color='w', label='Target Molecule', markersize=10, markerfacecolor='green', markeredgewidth=1.5),  
+                Line2D([0], [0], marker='o', color='w', label='Filled Reactions', markersize=10, markerfacecolor='red', markeredgewidth=1.5),               
+                Line2D([0], [0], marker='s', color='w', label='Filled Building Blocks', markersize=10, markerfacecolor='lightgreen', markeredgewidth=1.5),       
+                Line2D([0], [0], marker='s', color='w', label='Unfilled BBs / Intermediates', markersize=10, markerfacecolor='gray', markeredgewidth=1.5),
+                Line2D([0], [0], marker='o', color='w', label='Unfilled Reactions', markersize=10, markerfacecolor='gray', markeredgewidth=1.5),                                                                     
+                Line2D([0], [0], marker='o', color='w', label='Frontier Reactions', markersize=10, markerfacecolor='yellow', markeredgewidth=1.5),
+                Line2D([0], [0], marker='s', color='w', label='Frontier BBs', markersize=10, markerfacecolor='yellow', markeredgewidth=1.5),
+            ]
+            ax.legend(handles=legend_elements, loc='best')
             if fig is not None:
                 if path is not None:
-                    fig.savefig(path)
+                    fig.savefig(path, bbox_inches='tight')
                     print(os.path.abspath(path))
 
 
@@ -2793,9 +2894,8 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
     # visualize to help debug
     
     path = os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}.png")
-    if not os.path.exists(path):
-        sk.visualize(path)
-        sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}_Xy.png"), Xy=(X, y))
+    sk.visualize(path)
+    sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}_Xy.png"), Xy=(X, y))
 
 
     return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        

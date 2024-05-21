@@ -8,8 +8,8 @@ debug=$2;
 
 # HPARAMS
 ncpu=50;
-# rewire='--rewire-edges';
-rewire='';
+rewire='--rewire-edges';
+# rewire='';
 pe='--pe sin';
 # pe='--pe child'
 # pe='--pe one_hot'

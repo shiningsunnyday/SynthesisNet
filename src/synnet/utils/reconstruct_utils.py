@@ -817,15 +817,18 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                         outfile = skviz_n.path / f"skeleton_{sk_n.uuid}_{sk_n.index}_{mask_str}.md"  
                         SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
                         if args.attn_weights:
-                            mask = edge_input[1] == n
+                            # mask = edge_input[1] == n
+                            mask = np.ones((len(edge_input[-1]),), dtype='bool')
                             if sk.rxns[n]:                                
                                 attns = torch.stack([rxn_attns[layer][mask] for layer in range(len(rxn_attns))], dim=0).mean(axis=0)
                             else:
                                 attns = torch.stack([bb_attns[layer][mask] for layer in range(len(bb_attns))], dim=0).mean(axis=0)
                             attns = attns.mean(axis=-1)
                             fpath = os.path.join(outfile.parent, f"{outfile.stem}.png")
-                            sk.visualize(fpath, attn=(edge_input[:, mask], attns))
+                            sk.visualize(fpath, attn=(edge_input[:, mask], attns), node_to_highlight=[n for n in sk.frontier_nodes if not sk.mask[n]])
+                            # one time hack to save the attn weights for later     
                         print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
+
         else:
             if args.mermaid:
                 sk_copy = deepcopy(sk)
@@ -964,7 +967,7 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1]):
             return [sorted_args[-k].item() for k in ks]
     probs = model(torch.FloatTensor(encoder.encode(smiles)))    
     if max_num_rxns == -1:
-        ind = argmax(probs, k=top_k)        
+        ind = argmax(probs, ks=top_k)        
         if top_k == [1]:
             return globals()['skeleton_classes'][ind]
         else:
