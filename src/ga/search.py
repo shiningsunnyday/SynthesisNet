@@ -258,6 +258,17 @@ class GeneticSearch:
                     else:
                         assert len(parents) == 1
                         child = self.analog_mutate(parents[0])
+                        # # TODO: delete
+                        # fn([child])
+                        # if child.fitness > parents[0].fitness:
+                        #     with open('/u/msun415/mutant/dump.txt', 'a+') as f:
+                        #         smi1 = parents[0].smiles
+                        #         smi2 = child.smiles
+                        #         f.write(f"parent: {smi1} mutant: {smi2}\n")
+                        #         sk1 = binary_tree_to_skeleton(parents[0].bt)
+                        #         sk2 = binary_tree_to_skeleton(child.bt)
+                        #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
+                        #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')
                     offsprings.append(child)
                 fn(offsprings)
                 population = self.cull(population + offsprings)
