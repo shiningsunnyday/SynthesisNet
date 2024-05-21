@@ -31,11 +31,14 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def predict_bt(self, fp):
+    def predict_bt(self, fp, top_k=[1]):
         cfg = self.config
         if cfg.bt_ignore:
             return None
-        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns, top_k=top_k)
+        if isinstance(sk_index, list):
+            assert len(sk_index) == 1
+            sk_index = sk_index[0]
         sk = lookup_skeleton_by_index(sk_index)
         return utils.skeleton_to_binary_tree(sk)
 
@@ -188,7 +191,8 @@ class GeneticSearch:
             fp = np.where(mask, 1 - fp, fp)
 
         # Initialize bt
-        bt = self.predict_bt(fp)
+        k = torch.randint(1, cfg.bt_mutate_topk + 1, size=[1]).item()
+        bt = self.predict_bt(fp, top_k=[k])
 
         return Individual(fp=fp, bt=bt)
 
@@ -282,7 +286,7 @@ class GeneticSearch:
                 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
-                    offsprings = random.sample(offsprings, k=num_calls)
+                    offsprings = random.sample(offsprings, k=leftover)
                 fn(offsprings)
                 num_calls += len(offsprings)
 
