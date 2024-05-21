@@ -3,18 +3,23 @@ import pickle
 import os
 import networkx as nx
 import matplotlib.pyplot as plt
+plt.rc('font', family='serif')
 import numpy as np
 from tqdm import tqdm
+from synnet.data_generation.preprocessing import BuildingBlockFileHandler, ReactionTemplateFileHandler
+from synnet.visualize.drawers import MolDrawer, RxnDrawer
+from synnet.visualize.visualizer import SkeletonVisualizer
+from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
 from synnet.data_generation.syntrees import MorganFingerprintEncoder
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
-from synnet.models.mlp import MLP
+from synnet.models.mlp import MLP, nn_search_list
 from synnet.utils.data_utils import Skeleton
 import torch.nn as nn
 import time
 import logging
 import json
 import rdkit.Chem as Chem
-
+from sklearn.neighbors import KNeighborsClassifier
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
@@ -26,31 +31,6 @@ from sklearn.manifold import TSNE
 
 logger = logging.getLogger(__name__)
 
-class Predictor(nn.Module):
-    def __init__(self, out_dim, in_dim=2048, dim=512,
-                 dropout_rate=0.3):
-        super(Predictor, self).__init__()
-        self.in_dim = in_dim
-        self.dropout_rate = dropout_rate
-        self.fc1 = nn.Linear(in_dim,dim)
-        self.bn1 = nn.BatchNorm1d(dim)
-        self.dropout1 = nn.Dropout(dropout_rate)
-        # self.fc2 = nn.Linear(dim,dim)
-        # self.bn2 = nn.BatchNorm1d(dim)
-        # self.dropout2 = nn.Dropout(dropout_rate)
-        self.fc3 = nn.Linear(dim,out_dim)
-
-    def forward(self,x, y=None, loss_fn =nn.CrossEntropyLoss()):
-        x = self.dropout1(F.elu(self.bn1(self.fc1(x))))
-        # x = self.dropout1(F.elu(self.fc1(x)))
-        # x = self.dropout2(F.elu(self.bn2(self.fc2(x))))
-        x = self.fc3(x)
-        if y is not None :
-            return loss_fn(x, y)
-        else:
-            return x
-            
-    
 
 def get_args():
     import argparse
@@ -96,6 +76,23 @@ def get_args():
     return parser.parse_args()
 
 
+from scipy.spatial.distance import cosine
+
+
+def nearest_neighbors(fps, fp, top_k=5):    
+    fp = torch.tensor(fp)
+    inds = []
+    dists = []
+    for k in range(5):
+        ind = nn_search_list(fp, fps, k+1)
+        ind = ind.item()
+        inds.append(ind)    
+        dist = cosine(fps[ind], fp)
+        dists.append(dist)
+    return dists, inds
+
+
+
 def skeleton2graph(skeleton):
     graph = nx.MultiDiGraph()
     count = {}
@@ -120,9 +117,9 @@ def main(args):
         same = True
         args_dict = json.load(open(config_path, 'r'))
         for k in args_dict:
-            if k == 'work_dir':
+            if k in ['work_dir', 'ckpt', 'top_k', 'vis_class_criteria', 'max_vis_per_class']:
                 continue
-            if hasattr(args, k) and args_dict[k] != getattr(args, k):
+            if hasattr(args, k) and args_dict[k] != getattr(args, k):                
                 same = False 
     
     all_skeletons = pickle.load(open(args.skeleton_file, 'rb'))          
@@ -130,48 +127,62 @@ def main(args):
     num_per_class = args.num_per_class
     os.makedirs(os.path.join(args.work_dir, 'sks/'), exist_ok=True)
     skeletons = {}    
+    datasets = []
     for index, k in enumerate(all_skeletons):
         if args.datasets and index not in args.datasets:
             continue
         if len(all_skeletons[k]) >= num_per_class:
             sk = Skeleton(k, index=index)
+            datasets.append(index)
             ind = len(skeletons)
             path = os.path.join(os.path.join(args.work_dir, 'sks/'), f'{index}_{ind}.png')
             sk.visualize(path=path)
             skeletons[k] = all_skeletons[k]
+    setattr(args, 'datasets', datasets)
     print(f"{len(skeletons)} classes with >= {num_per_class} per class")
     num_classes = len(skeletons)
     setattr(args, 'num_classes', num_classes)    
+    encoder = MorganFingerprintEncoder(args.fp_radii, nbits)
     lookup = {}
     for i, k in enumerate(skeletons):            
         for j, st in enumerate(skeletons[k]):                
-            try: feats = encoder.encode(st.root.smiles).flatten()                    
-            except: continue
+            try: 
+                feats = encoder.encode(st.root.smiles).flatten()                    
+            except: 
+                continue
             if st.root.smiles not in lookup:
-                lookup[st.root.smiles] = {'labels': np.zeros((len(skeletons),)), 'features': feats}                
-            lookup[st.root.smiles]['labels'][i] = 1    
+                lookup[st.root.smiles] = {'labels': np.zeros((len(skeletons),)), 
+                                          'features': feats,
+                                          'st': st,
+                                          'index': i}
+            lookup[st.root.smiles]['labels'][i] = 1
+    features, labels = [], []
+    smiles, sts = [], []
+    indices = []
+    fps = []
+    for smi in lookup:
+        features.append(lookup[smi]['features'])
+        label = lookup[smi]['labels']
+        st = lookup[smi]['st']
+        fp = encoder.encode(smi).flatten()
+        index = lookup[smi]['index']
+        label = label/label.sum()
+        labels.append(label)
+        smiles.append(smi)
+        sts.append(st)
+        indices.append(index)
+        fps.append(fp)
+    fps = torch.tensor(fps)
     if same:
         train_dataset = pickle.load(open(os.path.join(args.work_dir, 'train_dataset.pkl'), 'rb'))
         valid_dataset = pickle.load(open(os.path.join(args.work_dir, 'valid_dataset.pkl'), 'rb'))
-    else:      
-        encoder = MorganFingerprintEncoder(args.fp_radii, nbits)
-        lookup = {}
-        for i, k in enumerate(skeletons):            
-            for j, st in enumerate(skeletons[k]):                
-                try: feats = encoder.encode(st.root.smiles).flatten()                    
-                except: continue
-                if st.root.smiles not in lookup:
-                    lookup[st.root.smiles] = {'labels': np.zeros((len(skeletons),)), 'features': feats}                
-                lookup[st.root.smiles]['labels'][i] = 1
-        features, labels = [], []
-        for smi in lookup:
-            features.append(lookup[smi]['features'])
-            label = lookup[smi]['labels']
-            label = label/label.sum()
-            labels.append(label)
+        # train_smiles = pickle.load(open(os.path.join(args.work_dir, 'train_smiles.pkl'), 'rb'))
+        # valid_smiles = pickle.load(open(os.path.join(args.work_dir, 'valid_smiles.pkl'), 'rb'))
+    else:          
 
         # X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33, stratify=labels)
-        X_train, X_valid, y_train, y_valid = train_test_split(features, labels, test_size=0.33)
+        
+        X_train, X_valid, y_train, y_valid, smiles_train, smiles_valid = train_test_split(features, labels, smiles, test_size=0.33, random_state=42)
         print("valid unique counts:", np.unique(y_valid, return_counts=True))
         X_train = np.array(X_train)
         y_train = np.array(y_train)
@@ -187,57 +198,132 @@ def main(args):
         )
         pickle.dump(train_dataset, open(os.path.join(args.work_dir, 'train_dataset.pkl'), 'wb+'))
         pickle.dump(valid_dataset, open(os.path.join(args.work_dir, 'valid_dataset.pkl'), 'wb+'))
+        pickle.dump(smiles_train, open(os.path.join(args.work_dir, 'train_smiles.pkl'), 'wb+'))
+        pickle.dump(smiles_valid, open(os.path.join(args.work_dir, 'valid_smiles.pkl'), 'wb+'))
         json.dump(args.__dict__, open(config_path, 'w+'))
 
     if args.ckpt:
         mlp = load_mlp_from_ckpt(args.ckpt)
-
+        knn = pickle.load(open(os.path.join(args.work_dir, 'knn.pkl'), 'rb'))        
         # Analysis
         if args.vis_class_criteria == 'popularity':
             vis_class_criteria = lambda i:len(all_skeletons[list(all_skeletons)[i]])
-        elif args.vis_class_criteria == 'size_small':
-            vis_class_criteria = lambda i:-(len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions))
         elif args.vis_class_criteria == 'size_large':
-            vis_class_criteria = lambda i:len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions)
+            vis_class_criteria = lambda i:len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions)        
         else:
-            raise NotImplementedError
+        # elif args.vis_class_criteria == 'size_small':
+            vis_class_criteria = lambda i:-(len(list(all_skeletons)[i].chemicals)+len(list(all_skeletons)[i].reactions))            
         mlp.eval()
         cmap = plt.get_cmap('tab10')
         top_indices = sorted(range(len(all_skeletons)), key=vis_class_criteria)[-args.top_k:]
+
+        skeleton_path = 'results/viz/skeletons-valid.pkl'
+        valid_skeletons = pickle.load(open(skeleton_path, 'rb'))         
+        valid_conf = {}
+        for ind in range(len(valid_skeletons)):
+            if ind not in args.datasets:
+                continue
+            st = list(valid_skeletons)[ind]
+            index = args.datasets.index(ind)
+            for st in tqdm(valid_skeletons[st][:10]):
+                smi = st.root.smiles
+                fp = encoder.encode(smi)
+                pred = mlp(torch.Tensor(fp))                 
+                # probs = knn.predict_proba(fp)          
+                # only indices same as fp
+                mask = np.array(indices) == index
+                masked_inds = np.argwhere(mask).flatten()
+                fp = fp.flatten()
+                dists, kneis = nearest_neighbors(fps[mask], fp)
+                knei_inds = [masked_inds[knei] for knei in kneis]
+                knei_inds = [(knei_ind, dist) for knei_ind, dist in zip(knei_inds, dists)]
+                knei_inds = sorted(knei_inds, key=lambda x: x[1])
+                knei_inds = [k[0] for k in knei_inds]
+                prob = pred[..., index].item()                
+                data = {'smi': smi, 'prob_mlp': prob, 'st': st, 'ind': ind, 
+                        'kneis': knei_inds, 'dist_knn': dists}
+                valid_conf[ind] = valid_conf.get(ind, []) + [data]
+        
+        rxns = ReactionTemplateFileHandler().load('data/assets/reaction-templates/hb.txt')
+        skviz = lambda sk, *pargs: SkeletonVisualizer(sk, 'results/viz/', *pargs).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
+        for ind in valid_conf:
+            valid_conf[ind] = sorted(valid_conf[ind], key=lambda x: x['prob_mlp'])
+            version = None
+            for k in range(1,min(6, len(valid_conf[ind]))):
+                smi = valid_conf[ind][-k]['smi']
+                prob = valid_conf[ind][-k]['prob_mlp']
+                dist_knn = valid_conf[ind][-k]['dist_knn']                
+                kneis = valid_conf[ind][-k]['kneis']               
+                st = valid_conf[ind][-k]['st']
+                sk = Skeleton(st, ind)
+                sk.attribute_rxns(rxns)
+                viz = skviz(sk, version)
+                if version is None:
+                    version = viz.version
+                sk.mask = np.arange(len(sk.mask))
+                mermaid_txt = viz.write(node_mask=sk.mask)
+                mask_str = ''.join(map(str,sk.mask))
+                outfile = viz.path / f"{sk.index}_{mask_str}_top={k}_prob={prob}.md" 
+                title = f"{smi}_{prob}"
+                SynTreeWriter(prefixer=SkeletonPrefixWriter(title)).write(mermaid_txt).to_file(outfile)
+                for i in range(len(kneis)):
+                    knei = kneis[i]
+                    dist = dist_knn[i]
+                    index = indices[knei]
+                    sk = Skeleton(sts[knei], ind)
+                    sk.attribute_rxns(rxns)
+                    viz = skviz(sk, version)
+                    sk.mask = np.arange(len(sk.mask))
+                    mermaid_txt = viz.write(node_mask=sk.mask)
+                    mask_str = ''.join(map(str,sk.mask))
+                    outfile = viz.path / f"{sk.index}_{mask_str}_top={k}_dist={dist}_{i+1}th_neighbor.md" 
+                    title = f"{smi}_{dist}_{i+1}'th neighbor"
+                    SynTreeWriter(prefixer=SkeletonPrefixWriter(title)).write(mermaid_txt).to_file(outfile)                     
+
+
         val_feats = []
         val_indices = []
         val_max_count = {}
-        for X_val, y_val in valid_dataset:
-            if y_val.sum().item() > 1:
-                continue
-            feats = mlp(X_val[None], return_hidden=True)
-            ind = y_val.argmax().item()
-            if ind not in top_indices:
-                continue
-            if val_max_count.get(ind, 0) >= 30:
-                continue
-            val_max_count[ind] = val_max_count.get(ind, 0)+1
-            val_indices.append(ind)
-            val_feats.append(feats)
+        conf = {}
+        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)
+        for X_val, y_val in tqdm(valid_dataloader, "val dataset"):
+            X_val = X_val[y_val.sum(axis=-1) == 1]
+            y_val = y_val[y_val.sum(axis=-1) == 1]
+            feats = mlp(X_val, return_hidden=True)
+            inds = y_val.argmax(axis=-1)
+            for i in range(inds.shape[0]):
+                ind = inds[i].item()
+                if ind not in top_indices:
+                    continue
+                if val_max_count.get(ind, 0) >= args.max_vis_per_class:
+                    continue
+                val_max_count[ind] = val_max_count.get(ind, 0)+1
+                val_indices.append(ind)
+                feat = feats[i]
+                val_feats.append(feat)
+                                    
         train_feats = []
         train_indices = []
-        train_max_count = {}
-        breakpoint()
-        for X_train, y_train in train_dataset:
-            if y_train.sum().item() > 1:
-                continue
-            feats = mlp(X_train[None], return_hidden=True)
-            ind = y_train.argmax().item()
-            if ind not in top_indices:
-                continue
-            if train_max_count.get(ind, 0) >= args.max_vis_per_class:
-                continue
-            train_max_count[ind] = train_max_count.get(ind, 0)+1
-            train_indices.append(ind)
-            train_feats.append(feats)        
-        val_feats = torch.cat(val_feats, dim=0)
+        train_max_count = {}    
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False)              
+        for X_train, y_train in tqdm(train_dataloader, "train dataset"):
+            X_train = X_train[y_train.sum(axis=-1) == 1]
+            y_train = y_train[y_train.sum(axis=-1) == 1]            
+            feats = mlp(X_train, return_hidden=True)
+            inds = y_train.argmax(axis=-1)
+            for i in range(inds.shape[0]):
+                ind = inds[i].item()
+                if ind not in top_indices:
+                    continue
+                if train_max_count.get(ind, 0) >= args.max_vis_per_class:
+                    continue
+                train_max_count[ind] = train_max_count.get(ind, 0)+1
+                train_indices.append(ind)
+                feat = feats[i]
+                train_feats.append(feat)        
+        val_feats = torch.stack(val_feats, dim=0)
         val_feats = val_feats.detach().cpu().numpy()
-        train_feats = torch.cat(train_feats, dim=0)
+        train_feats = torch.stack(train_feats, dim=0)
         train_feats = train_feats.detach().cpu().numpy()    
         tsne = TSNE(n_components=2, verbose=1, random_state=0, init='pca')    
         X_val = tsne.fit_transform(val_feats)   
@@ -257,9 +343,14 @@ def main(args):
             popularity = len(top_indices)-top_indices.index(ind)
             ax.scatter(X_train[mask,0],X_train[mask,1],c=cmap(popularity-1),label=f"{args.vis_class_criteria}={popularity}")
         ax.legend(title="Skeleton class")    
-        fig.savefig(os.path.join(args.work_dir, 'tsne.png'))
+        fig.savefig(os.path.join(args.work_dir, f'tsne-{args.top_k}.png'))
+        print(os.path.abspath(os.path.join(args.work_dir, f'tsne-{args.top_k}.png')))
 
     else:
+        knn = KNeighborsClassifier(n_neighbors=5)
+        knn.fit(features, [label.argmax() for label in labels])
+        path = os.path.join(args.work_dir, 'knn.pkl')
+        pickle.dump(open(path, 'wb+'))
         mlp = MLP(
             input_dim=args.nbits,
             output_dim=args.num_classes,

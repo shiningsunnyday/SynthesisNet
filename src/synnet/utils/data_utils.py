@@ -2026,6 +2026,13 @@ class Skeleton:
         tree: nx.DiGraph = nx.relabel_nodes(tree, mapping)  # makes a copy
         return Skeleton(st=None, index=self.index, whole_tree=tree, zss_tree=None)
 
+
+    def attribute_rxns(self, rxns):
+        for n in self.tree:
+            if 'rxn_id' in self.tree.nodes[n]:
+                rxn_id = self.tree.nodes[n]['rxn_id']
+                self.tree.nodes[n]['smirks'] = rxns[rxn_id]        
+
     
     
     def do_bfs(self, res, interm=False):

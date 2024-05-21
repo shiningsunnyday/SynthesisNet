@@ -10,8 +10,22 @@ depth_3="0 1 2 3 5 6 8 9 10 13 14 15 16 17 18 20 23 25 28 31 36 39 57 76 84 103 
 #         --datasets ${datasets} \
 #         --num_per_class 0 \
 #         --num_workers 32 \
-#         --cuda 0
+#         --cuda 0 \
+#         --work-dir /ssd/msun415/surrogate/3-REC/
 # done;
+
+for k in {3,4,5,6,7,8,9,10}; do
+    python scripts/predict-skeleton.py \
+        --skeleton-file results/viz/skeletons-train.pkl \
+        --datasets ${depth_3} \
+        --num_per_class 0 \
+        --num_workers 32 \
+        --cuda 0 \
+        --work-dir /ssd/msun415/surrogate/3-REC/ \
+        --ckpt /ssd/msun415/surrogate/3-REC/ckpts.epoch=1-val_loss=0.14.ckpt \
+        --vis_class_criteria popularity \
+        --top_k ${k}
+done;
     
 # # python scripts/predict-skeleton.py \
 # #     --skeleton-file results/viz/skeletons-train.pkl \

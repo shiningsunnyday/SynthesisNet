@@ -28,14 +28,17 @@ python scripts/reconstruct-targets.py \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
+    --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
     --out-dir /home/msun415/SynTreeNet/results/viz/attn/ \
-    --top-k 1 \
+    --top-k 3 \
     --test-correct-method reconstruct \
     --ncpu $ncpu \
     --batch-size $batch_size \
     --mermaid \
     --one-per-class \
     --attn_weights
+    # --sender-filename input_reconstruct.txt \
+    # --receiver-filename output_reconstruct.txt
 
 # python scripts/reconstruct-targets.py \
 #     --skeleton-set-file results/viz/skeletons-valid.pkl \
