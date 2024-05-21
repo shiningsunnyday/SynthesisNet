@@ -31,19 +31,31 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
+    def predict_bt(self, fp):
+        cfg = self.config
+        if cfg.bt_ignore:
+            return None
+        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
+        sk = lookup_skeleton_by_index(sk_index)
+        return utils.skeleton_to_binary_tree(sk)
+
     def initialize(self, path: str) -> Population:
         cfg = self.config
         population = []
         df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
         for smiles in df["smiles"].tolist():
             fp = mol_fp(smiles, _nBits=cfg.fp_bits).astype(np.float32)
-            if cfg.bt_ignore:
-                bt = None
-            else:
-                sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-                sk = lookup_skeleton_by_index(sk_index)
-                bt = utils.skeleton_to_binary_tree(sk)
+            bt = self.predict_bt(fp)
             population.append(Individual(fp=fp, bt=bt, smiles=smiles))
+        return population
+
+    def initialize_random(self) -> Population:
+        cfg = self.config
+        population = []
+        for _ in range(cfg.population_size):
+            fp = np.random.choice([0, 1], size=cfg.fp_bits).astype(np.float32)
+            bt = self.predict_bt(fp)
+            population.append(Individual(fp=fp, bt=bt))
         return population
 
     def validate(self, population: Population):
@@ -128,31 +140,21 @@ class GeneticSearch:
         self,
         population: Population,
         epoch: int,
-        analog: bool, 
     ) -> List[Tuple[Individual, Individual]]:
         population = sorted(population, key=(lambda x: x.fitness))  # ascending
         indices = np.arange(len(population))
 
         cfg = self.config
         p = indices + 10
-        if epoch < 0.8 * cfg.generations:
-            p = p / np.sum(p)
-        else:
-            p = scipy.special.softmax(p)
-
-        offspring_size = cfg.offspring_size
-        if analog:
-            analog_size = cfg.analog_size
-        else:
-            offspring_size += cfg.analog_size
-            analog_size = 0
+        p = p / np.sum(p)
+        p_analog = np.square(p) / np.sum(np.square(p))
 
         choices = []
-        for _ in range(offspring_size):
+        for _ in range(cfg.offspring_size):
             i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
             choices.append((population[i1], population[i2]))
-        for _ in range(analog_size):
-            i = np.random.choice(indices, size=[1], replace=False, p=p).item()
+        for _ in range(cfg.analog_size):
+            i = np.random.choice(indices, size=[1], replace=False, p=p_analog).item()
             choices.append((population[i],))
         return choices
 
@@ -172,12 +174,7 @@ class GeneticSearch:
             fp = np.where(mask, 1 - fp, fp)
 
         # Initialize bt
-        if cfg.bt_ignore:
-            bt = None 
-        else:
-            index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-            sk = lookup_skeleton_by_index(index)
-            bt = utils.skeleton_to_binary_tree(sk)
+        bt = self.predict_bt(fp)
 
         return Individual(fp=fp, bt=bt)
 
@@ -222,10 +219,16 @@ class GeneticSearch:
             )
 
         if cfg.resume_path is not None:
+            print("Initializing from checkpoint", cfg.resume_path)
             with open(cfg.resume_path, "rb") as f:
                 population = pickle.load(f)
+        
+        elif cfg.initialize_path is None:
+            print("Initializing random")
+            population = self.initialize_random()
+
         else:
-            # Initialize population
+            print("Initializing from SMILES", cfg.initialize_path)
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
@@ -239,7 +242,7 @@ class GeneticSearch:
                 ind.fitness = None
 
         # Track some stats
-        analog = False
+        num_calls = 0
         history = collections.deque(maxlen=cfg.early_stop_patience)
         history.append(-1000)
 
@@ -248,23 +251,31 @@ class GeneticSearch:
 
             # Crossover & mutation
             if epoch >= 0:
+                
                 offsprings = []
-                if (not analog) and (history[-1] - history[-2] < cfg.analog_delta): 
-                    print(f"Enabling analogs at {epoch = }")
-                    analog = True
-                for parents in self.choose_couples_and_analogs(population, epoch, analog):
+                for parents in self.choose_couples_and_analogs(population, epoch):
                     if len(parents) == 2:
                         child = self.crossover_and_mutate(parents)
                     else:
                         assert len(parents) == 1
                         child = self.analog_mutate(parents[0])
                     offsprings.append(child)
+                
+                if num_calls + len(offsprings) > cfg.max_oracle_calls:
+                    leftover = cfg.max_oracle_calls - num_calls
+                    offsprings = random.sample(offsprings, k=num_calls)
                 fn(offsprings)
+                num_calls += len(offsprings)
+
                 population = self.cull(population + offsprings)
+            
             elif cfg.resume_path is not None:
                 pass
+            
             else:
                 fn(population)
+                num_calls += len(population)
+            
             self.validate(population)  # sanity check
 
             # Scoring
@@ -289,6 +300,11 @@ class GeneticSearch:
                 and (history[-1] - history[0] < cfg.early_stop_delta)
             ):
                 print("Early stopping.")
+                break
+
+            # Exhausted oracle calls 
+            if num_calls == cfg.max_oracle_calls:
+                print("Exhausted oracle calls")
                 break
 
             # Snap fp to SMILES

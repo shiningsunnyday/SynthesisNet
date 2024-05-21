@@ -26,6 +26,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
     analog_size: int = 128
     analog_delta: float = 0.01
 
+    max_oracle_calls: int = int(1e7)
+
     # Mutation
     fp_mutate_prob: float = 0.5
     fp_mutate_frac: float = (24 / 4096)
@@ -41,7 +43,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     early_stop_patience: int = 10
 
     # IO
-    initialize_path: str = "./data/zinc.csv"
+    initialize_path: Optional[str] = None
     checkpoint_path: Optional[str] = None
     resume_path: Optional[str] = None
     background_set_file: str
