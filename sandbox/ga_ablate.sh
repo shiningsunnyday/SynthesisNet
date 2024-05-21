@@ -15,15 +15,20 @@ python sandbox/optimize.py \
     --top_k_rxn 1 \
     --strategy topological \
     --objective $1 \
+    --wandb \
+    --wandb_project=syntreenet_ga_publish \
     --method=ours \
-    --num_workers=0 \
-    --offspring_size=384 \
-    --analog_size=128 \
+    --num_workers=50 \
+    --offspring_size=512 \
+    --analog_size=64 \
     --fp_bits=2048 \
-    --bt_mutate_edits=$2 \
+    --bt_mutate_edits=2 \
     --early_stop \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
-    --analog_delta=10000000 \
-    --wandb \
+    # --initialize_path ./data/zinc.csv \
+    # --resume_path ablations/population.pkl \
+    # --generations=10 
+    # --checkpoint_path ablations/population.pkl
+    # --max_oracle_calls=5000 \
