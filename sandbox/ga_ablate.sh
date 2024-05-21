@@ -2,7 +2,6 @@ export PYTHONPATH="${HOME}/SynTreeNet/src"
 MAX_NUM_RXNS=4
 MODEL_DIR=/dccstor/graph-design/surrogate
 SKELETON_DIR=results/viz
-
 python sandbox/optimize.py \
     --seed=10 \
     --background_set_file ${SKELETON_DIR}/skeletons-train.pkl \
@@ -18,7 +17,7 @@ python sandbox/optimize.py \
     --wandb \
     --wandb_project=syntreenet_ga_publish \
     --method=ours \
-    --num_workers=50 \
+    --num_workers=0 \
     --offspring_size=512 \
     --analog_size=64 \
     --fp_bits=2048 \
