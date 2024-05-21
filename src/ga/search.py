@@ -169,7 +169,7 @@ class GeneticSearch:
         references = []
         for _ in range(cfg.analog_size):
             i = np.random.choice(indices, size=[1], replace=False, p=p).item()
-            choices.append(population[i])
+            references.append(population[i])
         return references
 
     def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
