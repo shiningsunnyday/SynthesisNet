@@ -17,7 +17,7 @@ python sandbox/optimize.py \
     --wandb \
     --wandb_project=syntreenet_ga_publish \
     --method=ours \
-    --num_workers=50 \
+    --num_workers=0 \
     --offspring_size=512 \
     --analog_size=64 \
     --fp_bits=2048 \
