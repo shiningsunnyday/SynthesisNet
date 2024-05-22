@@ -266,14 +266,14 @@ class GeneticSearch:
             # Crossover & mutation
             if epoch >= 0:
 
-                mutants = [] 
-                references = self.choose_references(population, epoch)
-                for ref in references:
-                    mutants.append(self.analog_mutate(ref))
-                fn(mutants)
-                for ref, mut in zip(references, mutants):
-                    mut.fp = mol_fp(mut.smiles, _nBits=cfg.fp_bits).astype(np.float32)
-                    mut.fitness = ref.fitness
+                # mutants = [] 
+                # references = self.choose_references(population, epoch)
+                # for ref in references:
+                #     mutants.append(self.analog_mutate(ref))
+                # fn(mutants)
+                # for ref, mut in zip(references, mutants):
+                #     mut.fp = mol_fp(mut.smiles, _nBits=cfg.fp_bits).astype(np.float32)
+                #     mut.fitness = ref.fitness
 
                 offsprings = []
                 for parents in self.choose_couples(population + mutants, epoch):
@@ -300,6 +300,14 @@ class GeneticSearch:
             # Scoring
             metrics = self.evaluate(population)
 
+            # Snap fp to SMILES
+            disparity = []
+            for ind in population:
+                old_fp = ind.fp  
+                ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
+                disparity.append(_tanimoto_similarity(old_fp, ind.fp))
+            metrics["drift"] = np.mean(disparity).item()
+
             # Logging
             if cfg.wandb:
                 table = [[epoch, ind.smiles, ind.fitness] for ind in population]
@@ -325,10 +333,6 @@ class GeneticSearch:
             if num_calls == cfg.max_oracle_calls:
                 print("Exhausted oracle calls")
                 break
-
-            # Snap fp to SMILES
-            for ind in population:
-                ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
 
         # Cleanup
         if cfg.wandb:
