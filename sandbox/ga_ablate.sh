@@ -17,11 +17,12 @@ python sandbox/optimize.py \
     --wandb \
     --wandb_project=syntreenet_ga_publish \
     --method=ours \
-    --num_workers=50 \
-    --offspring_size=512 \
+    --num_workers=30 \
+    --offspring_size=448 \
     --analog_size=64 \
     --fp_bits=2048 \
-    --bt_mutate_edits=2 \
+    --bt_mutate_edits=3 \
+    --bt_mutate_topk=1 \
     --early_stop \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
