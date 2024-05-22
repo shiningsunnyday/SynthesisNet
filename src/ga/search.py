@@ -277,7 +277,6 @@ class GeneticSearch:
                 fn(mutants)
                 for ref, mut in zip(references, mutants):
                     mut.fp = mol_fp(mut.smiles, _nBits=cfg.fp_bits).astype(np.float32)
-                    mut.fitness = ref.fitness
 
                 offsprings = []
                 for parents in self.choose_couples(population + mutants, epoch):
