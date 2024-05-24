@@ -237,7 +237,6 @@ def main(args):
         else:
             if args.ncpu == 1:
                 sks_batch = []
-                sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                 for smi in tqdm(target_batch):                        
                     sks = mcmc(deepcopy(lookup[smi]), smi, args.obj, args.max_num_rxns, args.beta, args.mcmc_timesteps)
                     sks_batch.append(sks)                                      

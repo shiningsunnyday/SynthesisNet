@@ -11,6 +11,7 @@ from synnet.data_generation.syntrees import (
     MorganFingerprintEncoder,
     SynTreeFeaturizer,
 )
+import multiprocessing as mp
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 from synnet.utils.analysis_utils import serialize_string
@@ -142,18 +143,29 @@ def decode(sk, smi):
     return sks
 
 
+def get_dist(i, j):
+    trees = globals()['trees']
+    _, tree_1, _ = globals()['skeleton_index_lookup'][trees[i]]
+    _, tree_2, _ = globals()['skeleton_index_lookup'][trees[j]]   
+    d1 = simple_distance(tree_1, tree_2)
+    d2 = simple_distance(tree_2, tree_1)    
+    return d1, d2
+
+
+
 def build_mc(max_num_rxns=-1): # build a markov chain    
     tree_lookup = globals()['skeleton_index_lookup']
     inds = get_skeleton_inds_within_depth(max_num_rxns)
     all_trees = list(tree_lookup)
     trees = [all_trees[ind] for ind in inds]
+    globals()['trees'] = trees
     dists = np.zeros((len(trees), len(trees)))
-    for i in tqdm(range(dists.shape[0])):
-        for j in tqdm(range(i+1, dists.shape[0])):
-            _, tree_1, _ = tree_lookup[trees[i]]
-            _, tree_2, _ = tree_lookup[trees[j]]   
-            dists[i][j] = simple_distance(tree_1, tree_2)
-            dists[j][i] = simple_distance(tree_2, tree_1)
+    args = [(i, j) for i in range(dists.shape[0]) for j in range(i+1, dists.shape[0])]
+    with mp.Pool(50) as p:
+        d2s = p.starmap(get_dist, args)
+    for (i,j), (d1, d2) in zip(args, d2s):
+        dists[i][j] = d1
+        dists[j][i] = d2
         dists[i][i] = float("inf")
     adj = np.exp(-dists)
     # adj = (dists == dists.min(axis=-1, keepdims=True)) # whether smallest possible change
@@ -161,9 +173,12 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(8, 6))
     cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
-    fig.colorbar(cax)
-    ax.set_title('Heatmap Example')
-    fig.savefig('/home/msun415/heatmap.png')  # Save to file    
+    cbar = fig.colorbar(cax, ax=ax, label=f'exp(-dist)')
+    ax.set_title('Proposal Distribution over T_4 x T_4')
+    ax.set_xlabel('Tree Skeleton x')
+    ax.set_ylabel('Tree Skeleton y')
+    fig.savefig('/home/msun415/heatmap.png',bbox_inches='tight')  # Save to file    
+    breakpoint()
     return adj
 
 
@@ -196,6 +211,7 @@ def fetch_oracle(objective):
 def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10):    
     inds = get_skeleton_inds_within_depth(max_num_rxns)
     adj = globals()['mc_adj']
+    breakpoint()
     if objective == 'sim':                
         rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
         ind = np.argmax([r[0] for r in rec])    
@@ -391,20 +407,28 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
         globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
 
-    # if hasattr(args, 'strategy') and args.strategy == 'topological':
-    #     globals()['all_topological_sorts'] = {}
-    #     for index in SKELETON_INDEX:
-    #         sk = Skeleton(sks[index], index)
-    #         if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
-    #             continue
-    #         top_sorts = nx.all_topological_sorts(sk.tree)
-    #         top_sort_set = set()
-    #         for top_sort in top_sorts:
-    #             top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
-    #             top_sort_set.add(tuple(top_sort))    
-    #         tree_key = serialize_string(sk.tree, sk.tree_root)
-    #         globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
-    # globals()['mc_adj'] = build_mc(args.max_num_rxns)
+    if hasattr(args, 'strategy') and args.strategy == 'topological':
+        globals()['all_topological_sorts'] = {}
+        for index in SKELETON_INDEX:
+            sk = Skeleton(sks[index], index)
+            if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
+                continue
+            edges = np.array(sk.tree.edges).T
+            graph = PtrDataset.get_graph(edges)
+            PtrDataset.rewire(graph, PtrDataset.get_root(graph))
+            edges = np.array(graph.edges).T
+            graph = PtrDataset.get_graph(edges)
+            top_sorts = list(nx.all_topological_sorts(graph))  
+            # print(len(list(top_sorts)))
+            # top_sorts = nx.all_topological_sorts(sk.tree)
+            top_sort_set = set()
+            for top_sort in top_sorts:
+                top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
+                top_sort_set.add(tuple(top_sort))    
+            assert len(top_sort_set) == len(top_sorts)
+            tree_key = serialize_string(sk.tree, sk.tree_root)
+            globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
+    globals()['mc_adj'] = build_mc(args.max_num_rxns)
 
     return SKELETON_INDEX
 
