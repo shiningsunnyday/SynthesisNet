@@ -280,7 +280,7 @@ class GeneticSearch:
                 #     mut.fitness = ref.fitness
 
                 offsprings = []
-                for parents in self.choose_couples(population + mutants, epoch):
+                for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
                     offsprings.append(child)
                 
@@ -309,7 +309,7 @@ class GeneticSearch:
             for ind in population:
                 old_fp = ind.fp  
                 ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
-                disparity.append(_tanimoto_similarity(old_fp, ind.fp))
+                disparity.append(1 - _tanimoto_similarity(old_fp, ind.fp))
             metrics["drift"] = np.mean(disparity).item()
 
             # Logging

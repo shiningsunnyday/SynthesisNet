@@ -10,18 +10,18 @@ python sandbox/optimize.py \
     --ckpt_bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --ckpt_recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
     --max_num_rxns ${MAX_NUM_RXNS} \
-    --top_k 1 \
-    --top_k_rxn 1 \
-    --strategy topological \
+    --top_k 3 \
+    --top_k_rxn 3 \
+    --strategy conf \
     --objective $1 \
     --wandb \
     --wandb_project=syntreenet_ga_publish \
     --method=ours \
     --num_workers=30 \
-    --offspring_size=448 \
-    --analog_size=64 \
+    --offspring_size=512 \
+    --analog_size=0 \
     --fp_bits=2048 \
-    --bt_mutate_edits=3 \
+    --bt_mutate_edits=0 \
     --bt_mutate_topk=1 \
     --early_stop \
     --early_stop_delta=0.01 \
