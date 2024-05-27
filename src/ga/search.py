@@ -208,7 +208,7 @@ class GeneticSearch:
             sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
             if sim < minsim:
                 winner, minsim = ind, sim
-        return 0.0
+        return winner
 
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
