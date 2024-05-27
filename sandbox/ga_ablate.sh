@@ -21,7 +21,7 @@ python sandbox/optimize.py \
     --offspring_size=512 \
     --analog_size=0 \
     --fp_bits=2048 \
-    --bt_mutate_edits=0 \
+    --bt_mutate_edits=3 \
     --bt_mutate_topk=1 \
     --early_stop \
     --early_stop_delta=0.01 \
@@ -29,6 +29,6 @@ python sandbox/optimize.py \
     --early_stop_patience=10 \
     # --initialize_path ./data/zinc.csv \
     # --resume_path ablations/population.pkl \
-    # --generations=10 
+    # --generations=10
     # --checkpoint_path ablations/population.pkl
     # --max_oracle_calls=5000 \

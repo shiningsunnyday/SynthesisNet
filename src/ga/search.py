@@ -195,6 +195,7 @@ class GeneticSearch:
         return Individual(fp=ind.fp.copy(), bt=bt)
 
     def promote(
+        self,
         candidates,
         population: Population,
         epoch: int,
@@ -270,7 +271,7 @@ class GeneticSearch:
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
-                    offsprings.append([child, analog_mutate(child)])
+                    offsprings.append([child, self.analog_mutate(child)])
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls

@@ -15,6 +15,7 @@ from torch.multiprocessing import Pool
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
 from synnet.MolEmbedder import MolEmbedder
+from synnet.encoding.fingerprints import mol_fp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
@@ -262,7 +263,7 @@ def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=F
         assert smi is not None
         ind.smiles = Chem.CanonSmiles(smi)
         ind.fitness = oracle(smi)
-        ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
+        ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
 
 
 def main():
