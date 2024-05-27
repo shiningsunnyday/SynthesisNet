@@ -98,13 +98,13 @@ class OptimizeGAConfig(GeneticSearchConfig):
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--seed", type=int, default=10)  
-    parser.add_argument("--background_set_file", type=str)  
-    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")   
+    parser.add_argument("--seed", type=int, default=10)
+    parser.add_argument("--background_set_file", type=str)
+    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")
     parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
-    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")    
-    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")    
-    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)        
+    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")
+    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")
+    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)
     parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
     parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
     parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
@@ -259,12 +259,10 @@ def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=F
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
     for idx, smi in pbar:
         ind = batch[idx]
-        if smi is None:
-            ind.smiles = None
-            ind.fitness = 0.0
-        else:
-            ind.smiles = Chem.CanonSmiles(smi)
-            ind.fitness = oracle(smi)
+        assert smi is not None
+        ind.smiles = Chem.CanonSmiles(smi)
+        ind.fitness = oracle(smi)
+        ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
 
 
 def main():
@@ -300,7 +298,7 @@ def main():
 
         # Load the purchasable building block SMILES to a dictionary
         building_blocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-        
+
         # A dict is used as lookup table for 2nd reactant during inference:
         bb_dict = {block: i for i, block in enumerate(building_blocks)}
 
@@ -314,7 +312,7 @@ def main():
 
         converter = functools.partial(
             get_smiles_synnet,
-            building_blocks=building_blocks, 
+            building_blocks=building_blocks,
             bb_dict=bb_dict,
             rxns=rxns,
             bblocks_molembedder=bblocks_molembedder,

@@ -157,24 +157,6 @@ class GeneticSearch:
             parents.append((population[i1], population[i2]))
         return parents
 
-    def choose_references(
-        self,
-        population: Population,
-        epoch: int,
-    ) -> List[Individual]:
-        population = sorted(population, key=(lambda x: x.fitness))  # ascending
-        indices = np.arange(len(population))
-
-        cfg = self.config
-        p = indices + 10
-        p = np.square(p) / np.sum(np.square(p))
-
-        references = []
-        for _ in range(cfg.analog_size):
-            i = np.random.choice(indices, size=[1], replace=False, p=p).item()
-            references.append(population[i])
-        return references
-
     def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
         cfg = self.config
 
@@ -209,8 +191,23 @@ class GeneticSearch:
                 utils.random_add_leaf(bt, max_internal=cfg.max_num_rxns)
             else:
                 utils.random_remove_leaf(bt)
-    
+
         return Individual(fp=ind.fp.copy(), bt=bt)
+
+    def promote(
+        candidates,
+        population: Population,
+        epoch: int,
+    ):
+        # TODO: schedule or anneal
+
+        # Choose the candidate that is least similar to population
+        winner, minsim = None, 100.0
+        for ind in candidates:
+            sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
+            if sim < minsim:
+                winner, minsim = ind, sim
+        return 0.0
 
     def optimize(self, fn: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -240,7 +237,7 @@ class GeneticSearch:
             print("Initializing from checkpoint", cfg.resume_path)
             with open(cfg.resume_path, "rb") as f:
                 population = pickle.load(f)
-        
+
         elif cfg.initialize_path is None:
             print("Initializing random")
             population = self.initialize_random()
@@ -253,8 +250,8 @@ class GeneticSearch:
             fn(population, usesmiles=True)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
-        
-            # Safety 
+
+            # Safety
             for ind in population:
                 ind.smiles = None
                 ind.fitness = None
@@ -270,47 +267,40 @@ class GeneticSearch:
             # Crossover & mutation
             if epoch >= 0:
 
-                # mutants = [] 
-                # references = self.choose_references(population, epoch)
-                # for ref in references:
-                #     mutants.append(self.analog_mutate(ref))
-                # fn(mutants)
-                # for ref, mut in zip(references, mutants):
-                #     mut.fp = mol_fp(mut.smiles, _nBits=cfg.fp_bits).astype(np.float32)
-                #     mut.fitness = ref.fitness
-
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
-                    offsprings.append(child)
-                
+                    offsprings.append([child, analog_mutate(child)])
+
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
                     offsprings = random.sample(offsprings, k=leftover)
-                fn(offsprings)
                 num_calls += len(offsprings)
 
+                # (!!) fn() this reassigns fps of offsprings
+                # Technically, we do more oracle calls than necessary, but we
+                # don't cheat by leveraging them
+                fn(sum(offsprings, [])) # flatten list
+
+                # Choose the candidate that maximizes internal diversity
+                offsprings = [
+                    self.promote(cands, population, epoch)
+                    for cands in offsprings
+                ]
+
                 population = self.cull(population + offsprings)
-            
+
             elif cfg.resume_path is not None:
                 pass
-            
+
             else:
                 fn(population)
                 num_calls += len(population)
-            
+
             self.validate(population)  # sanity check
 
             # Scoring
             metrics = self.evaluate(population)
-
-            # Snap fp to SMILES
-            disparity = []
-            for ind in population:
-                old_fp = ind.fp  
-                ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
-                disparity.append(1 - _tanimoto_similarity(old_fp, ind.fp))
-            metrics["drift"] = np.mean(disparity).item()
 
             # Logging
             if cfg.wandb:
@@ -333,7 +323,7 @@ class GeneticSearch:
                 print("Early stopping.")
                 break
 
-            # Exhausted oracle calls 
+            # Exhausted oracle calls
             if num_calls == cfg.max_oracle_calls:
                 print("Exhausted oracle calls")
                 break

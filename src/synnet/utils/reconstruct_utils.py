@@ -428,7 +428,7 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             assert len(top_sort_set) == len(top_sorts)
             tree_key = serialize_string(sk.tree, sk.tree_root)
             globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
-    globals()['mc_adj'] = build_mc(args.max_num_rxns)
+    # globals()['mc_adj'] = build_mc(args.max_num_rxns)
 
     return SKELETON_INDEX
 
