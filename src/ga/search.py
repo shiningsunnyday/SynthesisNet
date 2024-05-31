@@ -265,7 +265,7 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            apply_oracle(population, oracle, None)
+            self.apply_oracle(population, oracle, None)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
 
@@ -309,7 +309,7 @@ class GeneticSearch:
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
                     offsprings = random.sample(offsprings, k=leftover)
-                apply_oracle(population, oracle, history)
+                self.apply_oracle(population, oracle, history)
                 num_calls += len(offsprings)
 
                 population = self.cull(population + offsprings)
@@ -319,7 +319,7 @@ class GeneticSearch:
 
             else:
                 surrogate(population)
-                apply_oracle(population, oracle, history)
+                self.apply_oracle(population, oracle, history)
                 num_calls += len(population)
 
             self.validate(population)  # sanity check
