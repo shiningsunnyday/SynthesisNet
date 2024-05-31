@@ -258,7 +258,7 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            apply_oracle(population, oracle)
+            apply_oracle(population, oracle, history)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
 
