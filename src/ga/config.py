@@ -21,10 +21,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     # Search parameters
     generations: int = 200
     population_size: int = 128
-    offspring_size: int = 384
-
-    analog_size: int = 128
-    analog_delta: float = 0.01
+    offspring_size: int = 512
 
     max_oracle_calls: int = int(1e7)
 
@@ -34,9 +31,6 @@ class GeneticSearchConfig(pydantic.BaseModel):
 
     bt_mutate_prob: float = 0.5
     bt_mutate_edits: int = 3
-
-    # Diversity vs. EI strategy
-    explore_warmup: int = 15
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1
