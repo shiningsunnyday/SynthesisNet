@@ -210,9 +210,11 @@ class GeneticSearch:
 
         return filtered
 
-    def apply_oracle(self, population: Population, oracle) -> None:
+    def apply_oracle(self, population: Population, oracle, history) -> None:
         for ind in population:
             ind.fitness = oracle(ind.smiles)
+            history[0].append(ind.fp)
+            history[1].append(ind.fitness)
 
     def optimize(
         self,
@@ -267,6 +269,7 @@ class GeneticSearch:
 
         # Track some stats
         num_calls = 0
+        history = [[], []]
         score_queue = collections.deque(maxlen=cfg.early_stop_patience)
         score_queue.append(-1000)
 
@@ -293,7 +296,7 @@ class GeneticSearch:
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
                     offsprings = random.sample(offsprings, k=leftover)
-                apply_oracle(population, oracle)
+                apply_oracle(population, oracle, history)
                 num_calls += len(offsprings)
 
                 population = self.cull(population + offsprings)
@@ -303,7 +306,7 @@ class GeneticSearch:
 
             else:
                 surrogate(population)
-                apply_oracle(population, oracle)
+                apply_oracle(population, oracle, history)
                 num_calls += len(population)
 
             self.validate(population)  # sanity check
