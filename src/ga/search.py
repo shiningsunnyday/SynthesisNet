@@ -116,29 +116,6 @@ class GeneticSearch:
 
         return metrics
 
-    def cull(self, population: Population) -> Population:
-        N = self.config.population_size
-
-        filtered = []
-        leftover = []
-        seen_smiles = set()
-        for ind in population:
-            if (ind.smiles is not None) and (ind.smiles not in seen_smiles):
-                filtered.append(ind)
-                seen_smiles.add(ind.smiles)
-            else:
-                leftover.append(ind)
-        filtered.sort(key=(lambda x: x.fitness), reverse=True)
-        filtered = filtered[:N]
-
-        # Add top individuals of leftover
-        if len(filtered) < N:
-            leftover.sort(key=(lambda x: x.fitness), reverse=True)
-            filtered += leftover[:(N - len(filtered))]
-            filtered.sort(key=(lambda x: x.fitness), reverse=True)
-
-        return filtered
-
     def choose_couples(
         self,
         population: Population,
@@ -210,7 +187,38 @@ class GeneticSearch:
                 winner, minsim = ind, sim
         return winner
 
-    def optimize(self, fn: Callable[[Population], None]) -> None:
+    def cull(self, population: Population) -> Population:
+        N = self.config.population_size
+
+        filtered = []
+        leftover = []
+        seen_smiles = set()
+        for ind in population:
+            if (ind.smiles is not None) and (ind.smiles not in seen_smiles):
+                filtered.append(ind)
+                seen_smiles.add(ind.smiles)
+            else:
+                leftover.append(ind)
+        filtered.sort(key=(lambda x: x.fitness), reverse=True)
+        filtered = filtered[:N]
+
+        # Add top individuals of leftover
+        if len(filtered) < N:
+            leftover.sort(key=(lambda x: x.fitness), reverse=True)
+            filtered += leftover[:(N - len(filtered))]
+            filtered.sort(key=(lambda x: x.fitness), reverse=True)
+
+        return filtered
+
+    def apply_oracle(self, population: Population, oracle) -> None:
+        for ind in population:
+            ind.fitness = oracle(ind.smiles)
+
+    def optimize(
+        self,
+        surrogate: Callable[[Population], None],
+        oracle: Callable[[str], float]
+    ) -> None:
         """Runs a genetic search.
 
         Args:
@@ -248,7 +256,7 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            fn(population, usesmiles=True)
+            apply_oracle(population, oracle)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
 
@@ -271,17 +279,10 @@ class GeneticSearch:
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
-                    offsprings.append([child, self.analog_mutate(child)])
+                    offsprings.extend([child, self.analog_mutate(child)])
 
-                if num_calls + len(offsprings) > cfg.max_oracle_calls:
-                    leftover = cfg.max_oracle_calls - num_calls
-                    offsprings = random.sample(offsprings, k=leftover)
-                num_calls += len(offsprings)
-
-                # (!!) fn() this reassigns fps of offsprings
-                # Technically, we do more oracle calls than necessary, but we
-                # don't cheat by leveraging them
-                fn(sum(offsprings, [])) # flatten list
+                # (!!) surrogate() this reassigns fps of offsprings
+                surrogate(offsprings)
 
                 # Choose the candidate that maximizes internal diversity
                 offsprings = [
@@ -289,13 +290,20 @@ class GeneticSearch:
                     for cands in offsprings
                 ]
 
+                if num_calls + len(offsprings) > cfg.max_oracle_calls:
+                    leftover = cfg.max_oracle_calls - num_calls
+                    offsprings = random.sample(offsprings, k=leftover)
+                apply_oracle(population, oracle)
+                num_calls += len(offsprings)
+
                 population = self.cull(population + offsprings)
 
             elif cfg.resume_path is not None:
                 pass
 
             else:
-                fn(population)
+                surrogate(population)
+                apply_oracle(population, oracle)
                 num_calls += len(population)
 
             self.validate(population)  # sanity check

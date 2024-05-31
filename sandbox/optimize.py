@@ -243,26 +243,18 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=False):
-    oracle = fetch_oracle(config.objective)
-
-    # Debug option
-    if usesmiles:
-        indexed_smiles = [(idx, ind.smiles) for idx, ind in enumerate(batch)]
-        assert all(smi is not None for _, smi in indexed_smiles)
+def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
+    indexed_batch = list(enumerate(batch))
+    if config.num_workers <= 0:
+        indexed_smiles = map(converter, indexed_batch)
     else:
-        indexed_batch = list(enumerate(batch))
-        if config.num_workers <= 0:
-            indexed_smiles = map(converter, indexed_batch)
-        else:
-            indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
+        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
     for idx, smi in pbar:
         ind = batch[idx]
         assert smi is not None
         ind.smiles = Chem.CanonSmiles(smi)
-        ind.fitness = oracle(smi)
         ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
 
 
@@ -331,9 +323,10 @@ def main():
     else:
         pool = None
 
-    fn = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
+    surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
+    oracle = fetch_oracle(config.objective)
     search = GeneticSearch(config)
-    search.optimize(fn)
+    search.optimize(surrogate=surrogate, oracle=oracle)
 
     if pool is not None:
         pool.close()
