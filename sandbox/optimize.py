@@ -116,7 +116,6 @@ def get_args():
     parser.add_argument("--method", type=str, choices=["ours", "synnet"])
     parser.add_argument("--num_workers", type=int)
     parser.add_argument("--generations", type=int, default=200)
-    parser.add_argument("--offspring_size", type=int)
     parser.add_argument("--max_oracle_calls", type=int, default=10000000)
     parser.add_argument("--fp_bits", type=int)
     parser.add_argument("--bt_ignore", action="store_true")
