@@ -3,6 +3,7 @@ import itertools
 import json
 import pickle
 import random
+from functools import partial
 from typing import Callable, Dict, List, Tuple
 
 import networkx as nx
@@ -15,6 +16,9 @@ import tqdm
 import wandb
 from networkx.algorithms.dag import dag_longest_path
 from rdkit import Chem
+from scipy.stats import norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -171,21 +175,22 @@ class GeneticSearch:
 
         return Individual(fp=ind.fp.copy(), bt=bt)
 
-    def promote(
-        self,
-        candidates,
-        population: Population,
-        epoch: int,
-    ):
-        # TODO: schedule or anneal
-
-        # Choose the candidate that is least similar to population
+     # Choose the candidate that is least similar to population
+    def promote_explore(self, candidates, population: Population):
         winner, minsim = None, 100.0
         for ind in candidates:
             sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
             if sim < minsim:
                 winner, minsim = ind, sim
         return winner
+
+    # Choose the candidate with highest EI
+    def promote_exploit(self, candidates, gp: GaussianProcessRegressor, best):
+        X = np.stack([ind.fp for ind in candidates], axis=0)
+        y, std = gp_model.predict(X, return_std=True)
+        z = (y - best) / std
+        ei = (y - best) * norm.cdf(z) + std * norm.pdf(z)
+        return candidates[ei.argmax()]
 
     def cull(self, population: Population) -> Population:
         N = self.config.population_size
@@ -282,16 +287,21 @@ class GeneticSearch:
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
-                    offsprings.extend([child, self.analog_mutate(child)])
+                    offsprings.append([child, self.analog_mutate(child)])
 
-                # (!!) surrogate() this reassigns fps of offsprings
-                surrogate(offsprings)
+                # (!!) surrogate() reassigns fps of offsprings
+                surrogate(sum(offsprings, []))  # flatten
 
-                # Choose the candidate that maximizes internal diversity
-                offsprings = [
-                    self.promote(cands, population, epoch)
-                    for cands in offsprings
-                ]
+                # Choose the candidate that maximizes internal diversity or EI
+                if epoch <= cfg.explore_warmup:
+                    promote = partial(self.promote_explore, population=population)
+                else:
+                    kernel = RBF(length_scale=1.0)
+                    gp = GaussianProcessRegressor(kernel=kernel)
+                    gp.fit(X=np.stack(history[0], axis=0), y=np.array(history[1]))
+                    best = max(history[1])
+                    promote = partial(self.promote_exploit, gp=gp, best=best)
+                offsprings = list(map(promote, offsprings))
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
