@@ -309,7 +309,7 @@ class GeneticSearch:
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
                     offsprings = random.sample(offsprings, k=leftover)
-                self.apply_oracle(population, oracle, history)
+                self.apply_oracle(offsprings, oracle, history)
                 num_calls += len(offsprings)
 
                 population = self.cull(population + offsprings)
