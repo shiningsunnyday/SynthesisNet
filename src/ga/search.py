@@ -267,8 +267,8 @@ class GeneticSearch:
 
         # Track some stats
         num_calls = 0
-        history = collections.deque(maxlen=cfg.early_stop_patience)
-        history.append(-1000)
+        score_queue = collections.deque(maxlen=cfg.early_stop_patience)
+        score_queue.append(-1000)
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
@@ -322,12 +322,12 @@ class GeneticSearch:
                     pickle.dump(population, f)
 
             # Early-stopping
-            history.append(metrics["scores/mean"])
+            score_queue.append(metrics["scores/mean"])
             if (
                 cfg.early_stop
                 and (epoch > cfg.early_stop_warmup)
-                and (len(history) == cfg.early_stop_patience)
-                and (history[-1] - history[0] < cfg.early_stop_delta)
+                and (len(score_queue) == cfg.early_stop_patience)
+                and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
             ):
                 print("Early stopping.")
                 break
