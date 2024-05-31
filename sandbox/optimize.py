@@ -106,13 +106,9 @@ def get_args():
     parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")
     parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")
     parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'])
     parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
     parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
-        Strategy to decode:
-            Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
-            Topological: Decode every topological order of the rxn+bb nodes."""
-    )
     parser.add_argument("--objective", type=str, default="qed", help="Objective function to optimize")
     parser.add_argument("--out_dir", type=str)
     parser.add_argument("--wandb", action="store_true")
@@ -125,8 +121,9 @@ def get_args():
     parser.add_argument("--max_oracle_calls", type=int, default=10000000)
     parser.add_argument("--fp_bits", type=int)
     parser.add_argument("--bt_ignore", action="store_true")
+    parser.add_argument("--fp_mutate_prob", type=float, default=0.5)
+    parser.add_argument("--bt_mutate_prob", type=float, default=0.5)
     parser.add_argument("--bt_mutate_edits", type=int)
-    parser.add_argument("--bt_mutate_topk", type=int, default=1)
     parser.add_argument("--early_stop", action="store_true")
     parser.add_argument("--early_stop_delta", type=float)
     parser.add_argument("--early_stop_warmup", type=str)

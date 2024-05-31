@@ -35,14 +35,11 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def predict_bt(self, fp, top_k=[1]):
+    def predict_bt(self, fp):
         cfg = self.config
         if cfg.bt_ignore:
             return None
-        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns, top_k=top_k)
-        if isinstance(sk_index, list):
-            assert len(sk_index) == 1
-            sk_index = sk_index[0]
+        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
         sk = lookup_skeleton_by_index(sk_index)
         return utils.skeleton_to_binary_tree(sk)
 
@@ -154,10 +151,14 @@ class GeneticSearch:
             fp = np.where(mask, 1 - fp, fp)
 
         # Initialize bt
-        k = torch.randint(1, cfg.bt_mutate_topk + 1, size=[1]).item()
-        bt = self.predict_bt(fp, top_k=[k])
+        bt = self.predict_bt(fp)
+        ind = Individual(fp=fp, bt=bt)
 
-        return Individual(fp=fp, bt=bt)
+        # Mutate: random tree edit
+        if utils.random_boolean(cfg.bt_mutate_prob):
+            ind = self.analog_mutate(ind)
+
+        return ind
 
     def analog_mutate(self, ind: Individual) -> Individual:
         cfg = self.config
@@ -218,8 +219,9 @@ class GeneticSearch:
     def apply_oracle(self, population: Population, oracle, history) -> None:
         for ind in population:
             ind.fitness = oracle(ind.smiles)
-            history[0].append(ind.fp)
-            history[1].append(ind.fitness)
+            if history is not None:
+                history[0].append(ind.fp)
+                history[1].append(ind.fitness)
 
     def optimize(
         self,
@@ -263,7 +265,7 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            apply_oracle(population, oracle, history)
+            apply_oracle(population, oracle, None)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
 
@@ -274,7 +276,7 @@ class GeneticSearch:
 
         # Track some stats
         num_calls = 0
-        history = [[], []]
+        history = None  # [[], []]
         score_queue = collections.deque(maxlen=cfg.early_stop_patience)
         score_queue.append(-1000)
 
@@ -287,21 +289,22 @@ class GeneticSearch:
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
-                    offsprings.append([child, self.analog_mutate(child)])
+                    offsprings.append(child)
+                    # offsprings.append([child, analog_mutate(child)])
 
                 # (!!) surrogate() reassigns fps of offsprings
-                surrogate(sum(offsprings, []))  # flatten
+                surrogate(offsprings)  # flatten
 
                 # Choose the candidate that maximizes internal diversity or EI
-                if epoch <= cfg.explore_warmup:
-                    promote = partial(self.promote_explore, population=population)
-                else:
-                    kernel = RBF(length_scale=1.0)
-                    gp = GaussianProcessRegressor(kernel=kernel)
-                    gp.fit(X=np.stack(history[0], axis=0), y=np.array(history[1]))
-                    best = max(history[1])
-                    promote = partial(self.promote_exploit, gp=gp, best=best)
-                offsprings = list(map(promote, offsprings))
+                # if epoch <= cfg.explore_warmup:
+                #     promote = partial(self.promote_explore, population=population)
+                # else:
+                #     kernel = RBF(length_scale=1.0)
+                #     gp = GaussianProcessRegressor(kernel=kernel)
+                #     gp.fit(X=np.stack(history[0], axis=0), y=np.array(history[1]))
+                #     best = max(history[1])
+                #     promote = partial(self.promote_exploit, gp=gp, best=best)
+                # offsprings = list(map(promote, offsprings))
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls

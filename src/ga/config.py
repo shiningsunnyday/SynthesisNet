@@ -31,8 +31,9 @@ class GeneticSearchConfig(pydantic.BaseModel):
     # Mutation
     fp_mutate_prob: float = 0.5
     fp_mutate_frac: float = (24 / 4096)
+
+    bt_mutate_prob: float = 0.5
     bt_mutate_edits: int = 3
-    bt_mutate_topk: int = 1
 
     # Diversity vs. EI strategy
     explore_warmup: int = 15
