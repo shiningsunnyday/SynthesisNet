@@ -15,6 +15,7 @@ from torch.multiprocessing import Pool
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
 from synnet.MolEmbedder import MolEmbedder
+from synnet.encoding.fingerprints import mol_fp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
@@ -98,20 +99,16 @@ class OptimizeGAConfig(GeneticSearchConfig):
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--seed", type=int, default=10)  
-    parser.add_argument("--background_set_file", type=str)  
-    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")   
+    parser.add_argument("--seed", type=int, default=10)
+    parser.add_argument("--background_set_file", type=str)
+    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")
     parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
-    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")    
-    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")    
-    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)        
+    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")
+    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")
+    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'])
     parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
     parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
-        Strategy to decode:
-            Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
-            Topological: Decode every topological order of the rxn+bb nodes."""
-    )
     parser.add_argument("--objective", type=str, default="qed", help="Objective function to optimize")
     parser.add_argument("--out_dir", type=str)
     parser.add_argument("--wandb", action="store_true")
@@ -119,11 +116,11 @@ def get_args():
     parser.add_argument("--method", type=str, choices=["ours", "synnet"])
     parser.add_argument("--num_workers", type=int)
     parser.add_argument("--generations", type=int, default=200)
-    parser.add_argument("--offspring_size", type=int)
-    parser.add_argument("--analog_size", type=int)
     parser.add_argument("--max_oracle_calls", type=int, default=10000000)
     parser.add_argument("--fp_bits", type=int)
     parser.add_argument("--bt_ignore", action="store_true")
+    parser.add_argument("--fp_mutate_prob", type=float, default=0.5)
+    parser.add_argument("--bt_mutate_prob", type=float, default=0.5)
     parser.add_argument("--bt_mutate_edits", type=int)
     parser.add_argument("--early_stop", action="store_true")
     parser.add_argument("--early_stop_delta", type=float)
@@ -241,29 +238,19 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-def test_surrogate(batch, converter, pool, config: OptimizeGAConfig, usesmiles=False):
-    oracle = fetch_oracle(config.objective)
-
-    # Debug option
-    if usesmiles:
-        indexed_smiles = [(idx, ind.smiles) for idx, ind in enumerate(batch)]
-        assert all(smi is not None for _, smi in indexed_smiles)
+def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
+    indexed_batch = list(enumerate(batch))
+    if config.num_workers <= 0:
+        indexed_smiles = map(converter, indexed_batch)
     else:
-        indexed_batch = list(enumerate(batch))
-        if config.num_workers <= 0:
-            indexed_smiles = map(converter, indexed_batch)
-        else:
-            indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
+        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
     for idx, smi in pbar:
         ind = batch[idx]
-        if smi is None:
-            ind.smiles = None
-            ind.fitness = 0.0
-        else:
-            ind.smiles = Chem.CanonSmiles(smi)
-            ind.fitness = oracle(smi)
+        assert smi is not None
+        ind.smiles = Chem.CanonSmiles(smi)
+        ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
 
 
 def main():
@@ -299,7 +286,7 @@ def main():
 
         # Load the purchasable building block SMILES to a dictionary
         building_blocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-        
+
         # A dict is used as lookup table for 2nd reactant during inference:
         bb_dict = {block: i for i, block in enumerate(building_blocks)}
 
@@ -313,7 +300,7 @@ def main():
 
         converter = functools.partial(
             get_smiles_synnet,
-            building_blocks=building_blocks, 
+            building_blocks=building_blocks,
             bb_dict=bb_dict,
             rxns=rxns,
             bblocks_molembedder=bblocks_molembedder,
@@ -331,9 +318,10 @@ def main():
     else:
         pool = None
 
-    fn = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
+    surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
+    oracle = fetch_oracle(config.objective)
     search = GeneticSearch(config)
-    search.optimize(fn)
+    search.optimize(surrogate=surrogate, oracle=oracle)
 
     if pool is not None:
         pool.close()

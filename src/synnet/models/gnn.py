@@ -451,8 +451,7 @@ def main(args):
     max_epochs = args.epoch if not args.debug else 100
     # Create trainer
     if args.cuda > -1:
-        gpu_kwargs = {'accelerator': 'gpu'}
-        gpu_kwargs = {'devices': [args.cuda]}
+        gpu_kwargs = {'accelerator': 'gpu', 'devices': [args.cuda]}
     else:        
         gpu_kwargs = {'accelerator': 'cpu'}
     trainer = pl.Trainer(        
@@ -463,7 +462,6 @@ def main(args):
         ],
         logger=[tb_logger, csv_logger],
         fast_dev_run=args.fast_dev_run,
-        use_distributed_sampler=False,
         enable_progress_bar=False,
         **gpu_kwargs
     )

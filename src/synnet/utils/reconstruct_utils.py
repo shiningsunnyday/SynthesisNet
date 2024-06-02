@@ -11,6 +11,7 @@ from synnet.data_generation.syntrees import (
     MorganFingerprintEncoder,
     SynTreeFeaturizer,
 )
+import multiprocessing as mp
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 from synnet.utils.analysis_utils import serialize_string
@@ -52,38 +53,38 @@ def torch_single_threaded():
     old_num_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
-        yield None 
-    finally: 
+        yield None
+    finally:
         torch.set_num_threads(old_num_threads)
 
 
 def get_metrics(targets, all_sks):
     assert len(targets) == len(all_sks)
-    total_incorrect = {} 
+    total_incorrect = {}
     if args.forcing_eval:
         correct_summary = {}
     else:
-        total_correct = {}                     
-        
+        total_correct = {}
+
     for (sk_true, smi), sks in zip(targets, all_sks):
         tree_id = str(np.array(sks[0].tree.edges))
-        if tree_id not in total_incorrect: 
+        if tree_id not in total_incorrect:
             total_incorrect[tree_id] = {}
         if not args.forcing_eval and tree_id not in total_correct:
             total_correct[tree_id] = {'correct': 0, 'total': 0, 'all': []}
         if args.forcing_eval and tree_id not in correct_summary:
-            correct_summary[tree_id] = {'sum_pool_correct': 0, 'total_pool': 0}            
-        if args.forcing_eval:            
-            best_correct_steps = []            
+            correct_summary[tree_id] = {'sum_pool_correct': 0, 'total_pool': 0}
+        if args.forcing_eval:
+            best_correct_steps = []
             for sk in sks:
                 correct_steps = test_correct(sk, sk_true, rxns, method='preorder', forcing=True)
                 if sum(correct_steps) >= sum(best_correct_steps):
-                    best_correct_steps = correct_steps                    
+                    best_correct_steps = correct_steps
             correct_summary[tree_id]['sum_pool_correct'] += sum(best_correct_steps)
-            correct_summary[tree_id]['total_pool'] += len(best_correct_steps)                
-            correct_summary[tree_id]['step_by_step'] = correct_summary[tree_id]['sum_pool_correct']/correct_summary[tree_id]['total_pool']                              
+            correct_summary[tree_id]['total_pool'] += len(best_correct_steps)
+            correct_summary[tree_id]['step_by_step'] = correct_summary[tree_id]['sum_pool_correct']/correct_summary[tree_id]['total_pool']
             summary = {k: v['step_by_step'] for (k, v) in correct_summary.items()}
-            print(f"step-by-step: {summary}")                
+            print(f"step-by-step: {summary}")
         else:
             correct = False
             for sk in sks:
@@ -91,9 +92,9 @@ def get_metrics(targets, all_sks):
                 if args.test_correct_method == 'postorder':
                     correct = match
                 elif args.test_correct_method == 'preorder':
-                    correct, incorrect = match                        
+                    correct, incorrect = match
                     if not correct:
-                        update(total_incorrect[tree_id], incorrect)                    
+                        update(total_incorrect[tree_id], incorrect)
                 else:
                     assert args.test_correct_method == 'reconstruct'
                     correct = max(correct, match)
@@ -105,7 +106,7 @@ def get_metrics(targets, all_sks):
             # print(f"tree: {sk.tree.edges} total_incorrect: {total_incorrect}")
             summary = {k: v['correct']/v['total'] for (k, v) in total_correct.items()}
             if args.test_correct_method == 'preorder':
-                print(f"total summary: {summary}, total incorrect: {total_incorrect}")     
+                print(f"total summary: {summary}, total incorrect: {total_incorrect}")
             else:
                 print(f"total summary: {summary}")
     if args.forcing_eval:
@@ -115,9 +116,9 @@ def get_metrics(targets, all_sks):
 
 
 
-def decode(sk, smi): 
+def decode(sk, smi):
     sk.clear_tree(forcing=args.forcing_eval)
-    sk.modify_tree(sk.tree_root, smiles=smi)              
+    sk.modify_tree(sk.tree_root, smiles=smi)
     if args.mermaid:
         skviz = lambda sk, *pargs: SkeletonVisualizer(sk, args.out_dir, *pargs).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
     else:
@@ -139,22 +140,33 @@ def decode(sk, smi):
 
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
 
-    # ans = serialize_string(sk.tree, sk.tree_root)        
+    # ans = serialize_string(sk.tree, sk.tree_root)
     return sks
 
 
-def build_mc(max_num_rxns=-1): # build a markov chain    
+def get_dist(i, j):
+    trees = globals()['trees']
+    _, tree_1, _ = globals()['skeleton_index_lookup'][trees[i]]
+    _, tree_2, _ = globals()['skeleton_index_lookup'][trees[j]]
+    d1 = simple_distance(tree_1, tree_2)
+    d2 = simple_distance(tree_2, tree_1)
+    return d1, d2
+
+
+
+def build_mc(max_num_rxns=-1): # build a markov chain
     tree_lookup = globals()['skeleton_index_lookup']
     inds = get_skeleton_inds_within_depth(max_num_rxns)
     all_trees = list(tree_lookup)
     trees = [all_trees[ind] for ind in inds]
+    globals()['trees'] = trees
     dists = np.zeros((len(trees), len(trees)))
-    for i in tqdm(range(dists.shape[0])):
-        for j in tqdm(range(i+1, dists.shape[0])):
-            _, tree_1, _ = tree_lookup[trees[i]]
-            _, tree_2, _ = tree_lookup[trees[j]]   
-            dists[i][j] = simple_distance(tree_1, tree_2)
-            dists[j][i] = simple_distance(tree_2, tree_1)
+    args = [(i, j) for i in range(dists.shape[0]) for j in range(i+1, dists.shape[0])]
+    with mp.Pool(50) as p:
+        d2s = p.starmap(get_dist, args)
+    for (i,j), (d1, d2) in zip(args, d2s):
+        dists[i][j] = d1
+        dists[j][i] = d2
         dists[i][i] = float("inf")
     adj = np.exp(-dists)
     # adj = (dists == dists.min(axis=-1, keepdims=True)) # whether smallest possible change
@@ -162,9 +174,12 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(8, 6))
     cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
-    fig.colorbar(cax)
-    ax.set_title('Heatmap Example')
-    fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file    
+    cbar = fig.colorbar(cax, ax=ax, label=f'exp(-dist)')
+    ax.set_title('Proposal Distribution over T_4 x T_4')
+    ax.set_xlabel('Tree Skeleton x')
+    ax.set_ylabel('Tree Skeleton y')
+    fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file
+    breakpoint()
     return adj
 
 
@@ -203,16 +218,17 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
 
     inds = get_skeleton_inds_within_depth(max_num_rxns)
     adj = globals()['mc_adj']
-    if objective == 'sim':                
+    breakpoint()
+    if objective == 'sim':
         rec = [reconstruct(sk, smi) for sk in decode(sk, smi)]
-        ind = np.argmax([r[0] for r in rec])    
+        ind = np.argmax([r[0] for r in rec])
         res = [(rec[ind][0], rec[ind][1], sk.index)]
         for iter in range(1, T+1):
             index = inds.index(sk.index)
             nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
             tree_key_nei = globals()['skeleton_keys'][inds[nei]]
             j_xy = adj[index, nei]
-            j_yx = adj[nei, index]        
+            j_yx = adj[nei, index]
             sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]
             sks_x = decode(sk, smi)
             sks_y = decode(sk_y, smi)
@@ -242,8 +258,8 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
         fp = mol_fp(smi, 2, 2048)
         sks = decode(sk, fp)
         rec = [reconstruct(sk, fp) for sk in sks]
-        ind = np.argmax([r[0] for r in rec])    
-        x_smi = rec[ind][1]        
+        ind = np.argmax([r[0] for r in rec])
+        x_smi = rec[ind][1]
         score_x = oracle(x_smi)
         res = [(score_x, x_smi, sk.index, 1, 1)]
         pi_x = np.exp(beta_anneal(0)*score_x)        
@@ -262,8 +278,8 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
                 nei = np.random.choice(np.arange(adj.shape[1]), p=adj[index])
                 tree_key_nei = globals()['skeleton_keys'][inds[nei]]
                 j_xy = adj[index, nei]
-                j_yx = adj[nei, index]        
-                sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]                
+                j_yx = adj[nei, index]
+                sk_y = globals()['skeleton_index_lookup'][tree_key_nei][2]
                 sks_y = decode(sk_y, fp)
                 key = (''.join(list(map(str, fp))), sk_y.index)
                 if key in reconstruct_lookup:
@@ -271,8 +287,8 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
                 else:
                     sks_y = decode(sk_y, fp)
                     reconstruct_lookup[key] = sks_y
-                y_rec = [reconstruct(sk, fp) for sk in sks_y]                
-                ind_y = np.argmax([y[0] for y in y_rec])                
+                y_rec = [reconstruct(sk, fp) for sk in sks_y]
+                ind_y = np.argmax([y[0] for y in y_rec])
                 y_smi = y_rec[ind_y][1]
                 if y_smi in oracle_lookup:
                     score_y = oracle_lookup[y_smi]
@@ -300,7 +316,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
                     sks_y = decode(sk, fp_y)
                     reconstruct_lookup[key] = sks_y
                 y_rec = [reconstruct(sk, fp_y) for sk in sks_y]
-                ind_y = np.argmax([y[0] for y in y_rec])        
+                ind_y = np.argmax([y[0] for y in y_rec])
                 y_smi = y_rec[ind_y][1]
                 score_y = oracle(y_smi)
                 if y_smi in oracle_lookup:
@@ -351,14 +367,14 @@ def format_metrics(metrics, cum=False):
 
 def load_from_dir(dir, constraint):
     models = {}
-    for version in os.listdir(dir):        
-        hparams_filepath = os.path.join(dir, version, 'hparams.yaml')        
-        hparams_file = yaml.safe_load(open(hparams_filepath))      
+    for version in os.listdir(dir):
+        hparams_filepath = os.path.join(dir, version, 'hparams.yaml')
+        hparams_file = yaml.safe_load(open(hparams_filepath))
         match = True
         for k in constraint:
             if str(constraint[k]) != str(hparams_file[k]):
                 match = False
-        if match:       
+        if match:
             fpaths = list(Path(os.path.join(dir, version)).glob("*.ckpt"))
             if len(fpaths) != 1:
                 print(f"{version} has {len(fpaths)} ckpts")
@@ -373,13 +389,13 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
         if args.ckpt_dir:
             SKELETON_INDEX = []
             for ind in range(len(skeleton_set.sks)):
-                sk = skeleton_set.sks[ind]      
+                sk = skeleton_set.sks[ind]
                 if 'rxn_models' in globals() and 'bb_models' in globals():
                     if ind in globals()['rxn_models'] and ind in globals()['bb_models']:
                         SKELETON_INDEX.append(ind)
                 else:
                     SKELETON_INDEX.append(ind)
-        else:        
+        else:
             dirname = os.path.dirname(args.ckpt_rxn)
             config_file = os.path.join(dirname, 'hparams.yaml')
             config = yaml.safe_load(open(config_file))
@@ -409,25 +425,33 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
         globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
 
-    # if hasattr(args, 'strategy') and args.strategy == 'topological':
-    #     globals()['all_topological_sorts'] = {}
-    #     for index in SKELETON_INDEX:
-    #         sk = Skeleton(sks[index], index)
-    #         if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
-    #             continue
-    #         top_sorts = nx.all_topological_sorts(sk.tree)
-    #         top_sort_set = set()
-    #         for top_sort in top_sorts:
-    #             top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
-    #             top_sort_set.add(tuple(top_sort))    
-    #         tree_key = serialize_string(sk.tree, sk.tree_root)
-    #         globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
+    if hasattr(args, 'strategy') and args.strategy == 'topological':
+        globals()['all_topological_sorts'] = {}
+        for index in SKELETON_INDEX:
+            sk = Skeleton(sks[index], index)
+            if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
+                continue
+            edges = np.array(sk.tree.edges).T
+            graph = PtrDataset.get_graph(edges)
+            PtrDataset.rewire(graph, PtrDataset.get_root(graph))
+            edges = np.array(graph.edges).T
+            graph = PtrDataset.get_graph(edges)
+            top_sorts = list(nx.all_topological_sorts(graph))
+            # print(len(list(top_sorts)))
+            # top_sorts = nx.all_topological_sorts(sk.tree)
+            top_sort_set = set()
+            for top_sort in top_sorts:
+                top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
+                top_sort_set.add(tuple(top_sort))
+            assert len(top_sort_set) == len(top_sorts)
+            tree_key = serialize_string(sk.tree, sk.tree_root)
+            globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
     # globals()['mc_adj'] = build_mc(args.max_num_rxns)
 
     return SKELETON_INDEX
 
 
-def lookup_skeleton_key(zss_tree, tree_key):    
+def lookup_skeleton_key(zss_tree, tree_key):
     if tree_key in globals()['skeleton_index_lookup']:
         return globals()['skeleton_index_lookup'][tree_key][0]
     else: # return skeleton with nearest tree edit distance
@@ -438,7 +462,7 @@ def lookup_skeleton_key(zss_tree, tree_key):
             if dist < min_dist:
                 ans = index
         return ans
-            
+
 
 def lookup_skeleton_by_index(index):
     sks = globals()['skeleton_list']
@@ -447,14 +471,14 @@ def lookup_skeleton_by_index(index):
 
 def set_models(args, logger=None):
     if logger is not None:
-        logger.info("Start loading models from checkpoints...")  
+        logger.info("Start loading models from checkpoints...")
     if args.ckpt_dir and os.path.isdir(args.ckpt_dir):
         constraint = {'valid_loss': 'accuracy_loss'}
         rxn_models = load_from_dir(args.ckpt_dir, constraint)
         globals()['rxn_models'] = rxn_models
         constraint = {'valid_loss': 'nn_accuracy_loss'}
         bb_models = load_from_dir(args.ckpt_dir, constraint)
-        globals()['bb_models'] = bb_models    
+        globals()['bb_models'] = bb_models
     else:
         if not os.path.isfile(args.ckpt_rxn):
             best_ckpt = find_best_model_ckpt(args.ckpt_rxn, key="val_accuracy_loss")
@@ -463,9 +487,9 @@ def set_models(args, logger=None):
         globals()['rxn_gnn'] = rxn_gnn
         if not os.path.isfile(args.ckpt_bb):
             best_ckpt = find_best_model_ckpt(args.ckpt_bb, key="val_nn_accuracy_loss")
-            setattr(args, "ckpt_bb", best_ckpt)        
+            setattr(args, "ckpt_bb", best_ckpt)
         bb_gnn = load_gnn_from_ckpt(Path(args.ckpt_bb))
-        globals()['bb_gnn'] = bb_gnn    
+        globals()['bb_gnn'] = bb_gnn
     if hasattr(args, 'ckpt_recognizer') and args.ckpt_recognizer:
         if os.path.isfile(args.ckpt_recognizer):
             recognizer = load_mlp_from_ckpt(args.ckpt_recognizer)
@@ -476,11 +500,11 @@ def set_models(args, logger=None):
             config_path = os.path.join(Path(args.ckpt_recognizer), 'config.json')
         globals()['recognizer'] = recognizer
         globals()['encoder'] = MorganFingerprintEncoder(2, 2048)
-        
+
         config = json.load(open(config_path)        )
         globals()['skeleton_classes'] = config['datasets']
     if logger is not None:
-        logger.info("...loading models completed.")    
+        logger.info("...loading models completed.")
 
 
 
@@ -489,30 +513,30 @@ def get_anc(cur, rxn_graph):
     lca = cur
     while rxn_graph.nodes[lca]['depth'] != MAX_DEPTH:
         ancs = list(rxn_graph.predecessors(lca))
-        if ancs: 
+        if ancs:
             lca = ancs[0]
-        else: 
-            break         
-    return lca     
+        else:
+            break
+    return lca
 
 
 def filter_imposs(args, rxn_graph, sk, cur, n):
     max_depth = max([rxn_graph.nodes[n]['depth'] for n in rxn_graph])
     paths = []
-    mask_imposs = [False for _ in range(NUM_POSS)]            
+    mask_imposs = [False for _ in range(NUM_POSS)]
     # use sk to filter out reaction type
     bi_mol = len(list(sk.tree.successors(n))) == 2
     for i in range(NUM_POSS):
         if bi_mol != (rxns[i].num_reactant == 2):
-            mask_imposs[i] = True         
+            mask_imposs[i] = True
     if 'rxn' not in args.filter_only:
         return mask_imposs, None
     else:
         assert args.hash_dir
-    rxn_imposs = deepcopy(mask_imposs)    
+    rxn_imposs = deepcopy(mask_imposs)
     attr_name = 'rxn_id_forcing' if args.forcing_eval else 'rxn_id'
     # if max_depth < MAX_DEPTH or rxn_graph.nodes[cur]['depth'] == MAX_DEPTH:
-    #     # try every reaction, and use existence of hash to filter possibilites            
+    #     # try every reaction, and use existence of hash to filter possibilites
     #     term = rxn_graph.nodes[cur][attr_name]
     #     for rxn_id in range(NUM_POSS):
     #         rxn_graph.nodes[cur][attr_name] = rxn_id
@@ -533,24 +557,24 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
     #         p = Program(rxn_graph)
     #         if 'path' not in rxn_graph.nodes[lca]:
     #             breakpoint()
-    #         if rxn_graph.nodes[lca]['path'][-5:] == '.json': # prev lca exist              
-    #             path_stem = rxn_graph.nodes[lca]['path'][:-5]                
+    #         if rxn_graph.nodes[lca]['path'][-5:] == '.json': # prev lca exist
+    #             path_stem = rxn_graph.nodes[lca]['path'][:-5]
     #             path_stem = Path(path_stem).stem
     #             path = os.path.join(args.hash_dir, path_stem, p.get_path())
     #             mask_imposs[rxn_id] = mask_imposs[rxn_id] or not os.path.exists(path)
     #             if os.path.exists(path):
     #                 paths.append(path)
     #             else:
-    #                 paths.append('')                        
+    #                 paths.append('')
     #         else:
     #             mask_imposs[rxn_id] = True
     #             paths.append('')
 
-    #     rxn_graph.nodes[cur][attr_name] = term     
+    #     rxn_graph.nodes[cur][attr_name] = term
     # if sum(mask_imposs) == NUM_POSS:
-    #     mask_imposs = rxn_imposs    
-    if rxn_graph.nodes[cur]['depth'] == 1:    
-        base_case = False                    
+    #     mask_imposs = rxn_imposs
+    if rxn_graph.nodes[cur]['depth'] == 1:
+        base_case = False
         r_preds = list(rxn_graph.predecessors(cur))
         if len(r_preds) == 0:
             base_case = True
@@ -564,7 +588,7 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
             paths = []
             for i in range(91):
                 g = nx.DiGraph()
-                g.add_node(0, rxn_id=i, depth=1)   
+                g.add_node(0, rxn_id=i, depth=1)
                 path = Program(g).get_path()
                 path = os.path.join(args.hash_dir, path)
                 if os.path.exists(path):
@@ -575,15 +599,15 @@ def filter_imposs(args, rxn_graph, sk, cur, n):
                     rxn_imposs[i] = True
             return rxn_imposs, paths
         policy = RxnPolicy(4096+2*91, 2, 2*91, sk.subtree(pred), args.hash_dir, rxns)
-        obs = np.zeros((4096+2*91,))        
+        obs = np.zeros((4096+2*91,))
         rxn_id = rxn_graph.nodes[r_pred]['rxn_id']
-        obs[-91+rxn_id] = 1        
+        obs[-91+rxn_id] = 1
         mask, paths = policy.action_mask(obs, return_paths=True)
         mask_imposs = ~mask[:91]
     elif rxn_graph.nodes[cur]['depth'] == 2:
         pred = sk.pred(n)
         policy = RxnPolicy(4096+2*91, 2, 2*91, sk.subtree(pred), args.hash_dir, rxns)
-        obs = np.zeros((4096+2*91,))        
+        obs = np.zeros((4096+2*91,))
         mask, paths = policy.action_mask(obs, return_paths=True)
         mask_imposs = ~mask[91:]
     else:
@@ -600,18 +624,18 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, top_rxn
         if yes, find LCA (MAX_DEPTH from root), then use the subtree to constrain possibilities
     else
         find LCA (MAX_DEPTH from n), then use it to constrain possibilities
-    """         
-    rxn_graph, node_map, _ = sk.rxn_graph()    
-    if sk.rxns[n]:  
+    """
+    rxn_graph, node_map, _ = sk.rxn_graph()
+    if sk.rxns[n]:
         cur = node_map[n]
         mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
         # assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
-        logits_n[-NUM_POSS:][mask_imposs] = float("-inf")                  
-        rxn_id = logits_n[-NUM_POSS:].argsort(axis=-1)[-top_rxn].item()     
+        logits_n[-NUM_POSS:][mask_imposs] = float("-inf")
+        rxn_id = logits_n[-NUM_POSS:].argsort(axis=-1)[-top_rxn].item()
         # Sanity check for forcing eval
         sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
         sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
-        rxn_graph.nodes[cur]['rxn_id'] = rxn_id                   
+        rxn_graph.nodes[cur]['rxn_id'] = rxn_id
         # mask the intermediates so they're not considered on frontier
         for succ in sk.tree.successors(n):
             if not sk.leaves[succ]:
@@ -619,24 +643,24 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, top_rxn
         if 'rxn' in args.filter_only:
             if len(paths):
                 sk.tree.nodes[n]['path'] = paths[rxn_id]
-        # print("path", os.path.join(args.hash_dir, p.get_path()))            
-    else:           
+        # print("path", os.path.join(args.hash_dir, p.get_path()))
+    else:
         assert sk.leaves[n]
         emb_bb = logits_n[:-NUM_POSS]
-        pred = list(sk.tree.predecessors(n))[0]           
-        if 'bb' in args.filter_only:            
+        pred = list(sk.tree.predecessors(n))[0]
+        if 'bb' in args.filter_only:
             if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
                 exist = False
             else:
                 if 'path' in sk.tree.nodes[pred]:
-                    path = sk.tree.nodes[pred]['path']     
+                    path = sk.tree.nodes[pred]['path']
                     exist = os.path.exists(path)
                 else:
                     exist = False
         else:
             exist = False
         failed = False
-        if exist:                
+        if exist:
             e = str(node_map[pred])
             if rxn_graph.nodes[int(e)]['depth'] == 2:
                 e = '1'
@@ -672,13 +696,13 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, top_rxn
                 indices = bblock_inds
             else:
                 indices = list(range(bb_emb.shape[0]))
-            pred_rxn_id = sk.tree.nodes[pred]['rxn_id']            
+            pred_rxn_id = sk.tree.nodes[pred]['rxn_id']
             if hasattr(rxns[pred_rxn_id], 'bblock_mask'):
                 second = sk.tree.nodes[n]['child'] == 'right'
                 indices = rxns[pred_rxn_id].bblock_mask[second]
             bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=min(top_bb, len(indices))).item()
             smiles = bbs[indices[bb_ind]]
-        sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')    
+        sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')
 
 
 
@@ -718,11 +742,11 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
     """Generate a filled-in skeleton given the input which is only filled with the target."""
     model_rxn.eval()
     model_bb.eval()
-    # Following how SynNet reports reconstruction accuracy, we decode top-3 reactants, 
+    # Following how SynNet reports reconstruction accuracy, we decode top-3 reactants,
     # corresponding to the first bb chosen
     # To make the code more general, we implement this with a stack
     if args.strategy == 'topological':
-        # sks = []        
+        # sks = []
         # tree_key = serialize_string(sk.tree, sk.tree_root)
         # for top_sort in globals()['all_topological_sorts'][tree_key]:
         #     sks.append((deepcopy(sk), list(top_sort))
@@ -738,19 +762,19 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
     elif args.strategy == 'conf':
         sks = [sk]
     else:
-        raise NotImplementedError    
+        raise NotImplementedError
     if args.mermaid:
         # set ids so don't forget
         for sk in sks:
             if isinstance(sk, tuple):
                 sk_n = sk[0]
-                sk_n.uuid = uuid.uuid4()        
+                sk_n.uuid = uuid.uuid4()
             else:
-                sk.uuid = uuid.uuid4()     
+                sk.uuid = uuid.uuid4()
         skviz_version = skviz(sks[0][0] if isinstance(sks[0], tuple) else sks[0]).version
         assert args.top_k == 1
         assert args.top_k_rxn == 1
-    final_sks = [] 
+    final_sks = []
     while len(sks):
         sk = sks.pop(-1)
         if isinstance(sk, tuple):
@@ -764,17 +788,17 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 predict on all of these
                 pick the highest confidence one
                 fill it in
-            """        
+            """
             # print(f"decode step {sk.mask}")
-            # prediction problem        
+            # prediction problem
             _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
             for i in range(len(X)):
                 if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
                     X[i] = 0
-            
+
             edges = sk.tree_edges
             tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
-            edge_input = torch.tensor(tree_edges, dtype=torch.int64)        
+            edge_input = torch.tensor(tree_edges, dtype=torch.int64)
             if model_rxn.layers[0].in_channels != X.shape[1]:
                 pe = PtrDataset.positionalencoding1d(32, len(X))
                 x_input_rxn = np.concatenate((X, pe), axis=-1)
@@ -782,7 +806,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 x_input_rxn = X
             if model_bb.layers[0].in_channels != X.shape[1]:
                 pe = PtrDataset.positionalencoding1d(32, len(X))
-                x_input_bb = np.concatenate((X, pe), axis=-1)            
+                x_input_bb = np.concatenate((X, pe), axis=-1)
             else:
                 x_input_bb = X
             with torch_single_threaded():
@@ -802,10 +826,10 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             for n in frontier_nodes:
                 if sk.rxns[n]:
                     logits[n] = logits_rxn[n]
-                else:                
-                    assert sk.leaves[n]               
-                    logits[n] = logits_bb[n]        
-            if args.strategy =='topological':        
+                else:
+                    assert sk.leaves[n]
+                    logits[n] = logits_bb[n]
+            if args.strategy =='topological':
                 poss_n = [next_node.pop(0)]
             else:
                 poss_n = pick_node(sk, logits, bb_emb)
@@ -814,7 +838,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 sk_n = deepcopy(sk)
                 first_bb = sk_n.leaves[n] and (sk_n.leaves)[sk_n.mask == 1].sum() == 0
                 first_rxn = sk_n.rxns[n] and (sk_n.rxns)[sk_n.mask == 1].sum() == 0
-                if top_k_bb > 1 and first_bb: # first bb                
+                if top_k_bb > 1 and first_bb: # first bb
                     for k in range(1, 1+top_k_bb):
                         sk_copy = deepcopy(sk_n)
                         fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k, bblock_inds=bblock_inds)
@@ -829,38 +853,38 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                         if next_node is None:
                             sks.append(sk_copy)
                         else:
-                            sks.append((sk_copy, deepcopy(next_node)))                    
+                            sks.append((sk_copy, deepcopy(next_node)))
                 else:
                     fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1, bblock_inds=bblock_inds)
                     if next_node is None:
                         sks.append(sk_n)
                     else:
                         sks.append((sk_n, next_node))
-                    if skviz is not None:  
-                        skviz_n = skviz(sk_n, skviz_version)                                              
-                        mermaid_txt = skviz_n.write(node_mask=sk_n.mask)             
+                    if skviz is not None:
+                        skviz_n = skviz(sk_n, skviz_version)
+                        mermaid_txt = skviz_n.write(node_mask=sk_n.mask)
                         mask_str = ''.join(map(str,sk_n.mask))
-                        outfile = skviz_n.path / f"skeleton_{sk_n.uuid}_{sk_n.index}_{mask_str}.md"  
+                        outfile = skviz_n.path / f"skeleton_{sk_n.uuid}_{sk_n.index}_{mask_str}.md"
                         SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
                         if args.attn_weights:
                             mask = edge_input[1] == n
-                            if sk.rxns[n]:                                
+                            if sk.rxns[n]:
                                 attns = torch.stack([rxn_attns[layer][mask] for layer in range(len(rxn_attns))], dim=0).mean(axis=0)
                             else:
                                 attns = torch.stack([bb_attns[layer][mask] for layer in range(len(bb_attns))], dim=0).mean(axis=0)
                             attns = attns.mean(axis=-1)
                             fpath = os.path.join(outfile.parent, f"{outfile.stem}.png")
                             sk.visualize(fpath, attn=(edge_input[:, mask], attns))
-                        print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))            
+                        print(f"Generated markdown file.", os.path.join(os.getcwd(), outfile))
         else:
             if args.mermaid:
                 sk_copy = deepcopy(sk)
                 sk_copy.reconstruct(rxns, keep_main=True) # later we will reconstruct again
                 good = bool(sk_copy.tree.nodes[sk_copy.tree_root]['smiles'])
                 skviz_n = skviz(sk_copy, skviz_version)
-                mermaid_txt = skviz_n.write(node_mask=sk_copy.mask)             
+                mermaid_txt = skviz_n.write(node_mask=sk_copy.mask)
                 mask_str = ''.join(map(str,sk_copy.mask))
-                outfile = skviz_n.path / f"skeleton_{sk_copy.uuid}_{sk_copy.index}_done_{good}.md"  
+                outfile = skviz_n.path / f"skeleton_{sk_copy.uuid}_{sk_copy.index}_done_{good}.md"
                 SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
             final_sks.append(sk)
     # print(len(final_sks), "beams")
@@ -873,25 +897,25 @@ def test_correct(sk, sk_true, rxns, method='preorder', forcing=False):
             for n in sk.tree:
                 attrs = [attr for attr in list(sk.tree.nodes[n]) if '_forcing' in attr]
                 for attr in attrs:
-                    # we re-store the attributes containing predictions into 
+                    # we re-store the attributes containing predictions into
                     # original attributes
                     sk.tree.nodes[n][attr[:-len('_forcing')]] = sk.tree.nodes[n][attr]
         total_incorrect = {}
         preorder = list(nx.dfs_preorder_nodes(sk.tree, source=sk.tree_root))
         correct = True
         seq_correct = []
-        for i in preorder:                
+        for i in preorder:
             if sk.rxns[i]:
                 if sk.tree.nodes[i]['rxn_id'] != sk_true.tree.nodes[i]['rxn_id']:
                     correct = False
-                    total_incorrect[i] = 1                    
+                    total_incorrect[i] = 1
                 seq_correct.append(i not in total_incorrect)
             elif sk.leaves[i]:
                 if sk.tree.nodes[i]['smiles'] != sk_true.tree.nodes[i]['smiles']:
                     correct = False
-                    total_incorrect[i] = 1   
+                    total_incorrect[i] = 1
                 seq_correct.append(i not in total_incorrect)
-        if forcing:                     
+        if forcing:
             return seq_correct
         else:
             return correct, total_incorrect
@@ -928,7 +952,7 @@ def load_data(args, logger=None):
     rxns = ReactionSet().load(args.rxns_collection_file).rxns
     if logger is not None:
         logger.info(f"Successfully read {args.rxns_collection_file}.")
-    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)    
+    rxn_templates = ReactionTemplateFileHandler().load(args.rxn_templates_file)
 
     # # ... building blocks
     bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
@@ -943,25 +967,25 @@ def load_data(args, logger=None):
     # bblocks_molembedder = (
     #     MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
     # )
-    # bb_emb = bblocks_molembedder.get_embeddings()    
+    # bb_emb = bblocks_molembedder.get_embeddings()
     # bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
     if logger is not None:
-        logger.info(f"Successfully read {args.embeddings_knn_file}.")    
-        logger.info("...loading data completed.")            
+        logger.info(f"Successfully read {args.embeddings_knn_file}.")
+        logger.info("...loading data completed.")
     # remember indices of bblocks
     bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
     for i, r in tqdm(enumerate(rxns), desc="Loading reaction data"):
         bblock_mask = []
         for j in range(len(r.available_reactants)):
-            mask = [False for _ in bblocks]            
+            mask = [False for _ in bblocks]
             for k in range(len(r.available_reactants[j])):
                 bb_index = bb_index_lookup[r.available_reactants[j][k]]
                 mask[bb_index] = True
             bblock_mask.append(np.argwhere(mask).flatten())
         setattr(r, 'bblock_mask', bblock_mask)
     globals()['rxns'] = rxns
-    globals()['rxn_templates'] = rxn_templates    
+    globals()['rxn_templates'] = rxn_templates
     globals()['bblocks'] = bblocks
     globals()['bb_emb'] = bb_emb
     globals()['args'] = args
@@ -972,7 +996,7 @@ def get_skeleton_inds_within_depth(max_num_rxns):
     inds = []
     for d in range(1, max_num_rxns+1):
         for ind, _, _ in globals()['skeleton_index_lookup_by_num_rxns'][d].values():
-            inds.append(ind)    
+            inds.append(ind)
     return inds
 
 
@@ -980,21 +1004,21 @@ def get_skeleton_inds_within_depth(max_num_rxns):
 def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
     assert 'recognizer' in globals()
     model = globals()['recognizer']
-    model.eval()    
-    encoder = globals()['encoder']    
+    model.eval()
+    encoder = globals()['encoder']
     def argmax(x, ks=[1]):
         if ks == [1]:
             return x.argmax(axis=-1).item()
-        else:                        
+        else:
             sorted_args = x.argsort(axis=-1)
             return [sorted_args[-k].item() for k in ks]
     if fp is None:
         fp = encoder.encode(smiles)
     elif fp.ndim == 1:
         fp = fp[None, :]
-    probs = model(torch.from_numpy(fp.astype(np.float32)))    
+    probs = model(torch.from_numpy(fp.astype(np.float32)))
     if max_num_rxns == -1:
-        ind = argmax(probs, k=top_k)        
+        ind = argmax(probs, k=top_k)
         if top_k == [1]:
             return globals()['skeleton_classes'][ind]
         else:
@@ -1005,7 +1029,7 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
         sorted_inds = sorted(inds)
         inds = [globals()['skeleton_classes'].index(ind) for ind in sorted_inds]
         assert probs.shape[0] == 1
-        ind = argmax(probs[0, inds], ks=top_k)        
+        ind = argmax(probs[0, inds], ks=top_k)
         if top_k == [1]:
             ind = inds[ind]
             return globals()['skeleton_classes'][ind]
@@ -1017,7 +1041,7 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
         return classes
 
 # For reconstruct without true skeleton
-def reconstruct(sk, smi): 
+def reconstruct(sk, smi):
     rxns = globals()['rxns']
     sk.reconstruct(rxns)
     smiles = []
@@ -1030,7 +1054,7 @@ def reconstruct(sk, smi):
     else:
         smi2 = Chem.CanonSmiles(smi)
         sims = tanimoto_similarity(mol_fp(smi2, 2, 4096), smiles)
-    correct = max(sims)                    
+    correct = max(sims)
     best_smi = smiles[np.argmax(sims)]
     return correct, best_smi
 

@@ -3,6 +3,7 @@ import itertools
 import json
 import pickle
 import random
+from functools import partial
 from typing import Callable, Dict, List, Tuple
 
 import networkx as nx
@@ -15,6 +16,9 @@ import tqdm
 import wandb
 from networkx.algorithms.dag import dag_longest_path
 from rdkit import Chem
+from scipy.stats import norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -113,6 +117,82 @@ class GeneticSearch:
 
         return metrics
 
+    def choose_couples(
+        self,
+        population: Population,
+        epoch: int,
+    ) -> List[Tuple[Individual, Individual]]:
+        population = sorted(population, key=(lambda x: x.fitness))  # ascending
+        indices = np.arange(len(population))
+
+        cfg = self.config
+        p = indices + 10
+        p = p / np.sum(p)
+
+        parents = []
+        for _ in range(cfg.offspring_size):
+            i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
+            parents.append((population[i1], population[i2]))
+        return parents
+
+    def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
+        cfg = self.config
+
+        # Crossover: random bit swap
+        n = cfg.fp_bits
+        k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
+        k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
+        mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
+        fp = np.where(mask, parents[0].fp, parents[1].fp)
+
+        # Mutate: random bit flip
+        if utils.random_boolean(cfg.fp_mutate_prob):
+            mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
+            fp = np.where(mask, 1 - fp, fp)
+
+        # Initialize bt
+        bt = self.predict_bt(fp)
+        ind = Individual(fp=fp, bt=bt)
+
+        # Mutate: random tree edit
+        if utils.random_boolean(cfg.bt_mutate_prob):
+            ind = self.analog_mutate(ind)
+
+        return ind
+
+    def analog_mutate(self, ind: Individual) -> Individual:
+        cfg = self.config
+        if cfg.bt_ignore:
+            return Individual(fp=ind.fp.copy(), bt=None)
+        bt = ind.bt.copy()
+
+        # bt: random add or delete nodes
+        num_edits = torch.randint(1, cfg.bt_mutate_edits + 1, size=[1]).item()
+        for _ in range(num_edits):
+            if utils.random_boolean(0.5):
+                utils.random_add_leaf(bt, max_internal=cfg.max_num_rxns)
+            else:
+                utils.random_remove_leaf(bt)
+
+        return Individual(fp=ind.fp.copy(), bt=bt)
+
+     # Choose the candidate that is least similar to population
+    def promote_explore(self, candidates, population: Population):
+        winner, minsim = None, 100.0
+        for ind in candidates:
+            sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
+            if sim < minsim:
+                winner, minsim = ind, sim
+        return winner
+
+    # Choose the candidate with highest EI
+    def promote_exploit(self, candidates, gp: GaussianProcessRegressor, best):
+        X = np.stack([ind.fp for ind in candidates], axis=0)
+        y, std = gp_model.predict(X, return_std=True)
+        z = (y - best) / std
+        ei = (y - best) * norm.cdf(z) + std * norm.pdf(z)
+        return candidates[ei.argmax()]
+
     def cull(self, population: Population) -> Population:
         N = self.config.population_size
 
@@ -136,79 +216,18 @@ class GeneticSearch:
 
         return filtered
 
-    def choose_couples(
+    def apply_oracle(self, population: Population, oracle, history) -> None:
+        for ind in population:
+            ind.fitness = oracle(ind.smiles)
+            if history is not None:
+                history[0].append(ind.fp)
+                history[1].append(ind.fitness)
+
+    def optimize(
         self,
-        population: Population,
-        epoch: int,
-    ) -> List[Tuple[Individual, Individual]]:
-        population = sorted(population, key=(lambda x: x.fitness))  # ascending
-        indices = np.arange(len(population))
-
-        cfg = self.config
-        p = indices + 10
-        p = p / np.sum(p)
-
-        parents = []
-        for _ in range(cfg.offspring_size):
-            i1, i2 = np.random.choice(indices, size=[2], replace=False, p=p)
-            parents.append((population[i1], population[i2]))
-        return parents
-
-    def choose_references(
-        self,
-        population: Population,
-        epoch: int,
-    ) -> List[Individual]:
-        population = sorted(population, key=(lambda x: x.fitness))  # ascending
-        indices = np.arange(len(population))
-
-        cfg = self.config
-        p = indices + 10
-        p = np.square(p) / np.sum(np.square(p))
-
-        references = []
-        for _ in range(cfg.analog_size):
-            i = np.random.choice(indices, size=[1], replace=False, p=p).item()
-            references.append(population[i])
-        return references
-
-    def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
-        cfg = self.config
-
-        # Crossover: random bit swap
-        n = cfg.fp_bits
-        k = np.random.normal(loc=(n / 2), scale=(n / 10), size=1)
-        k = np.clip(k, a_min=(0.2 * n), a_max=(0.8 * n))
-        mask = utils.random_bitmask(cfg.fp_bits, k=int(k))
-        fp = np.where(mask, parents[0].fp, parents[1].fp)
-
-        # Mutate: random bit flip
-        if utils.random_boolean(cfg.fp_mutate_prob):
-            mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
-            fp = np.where(mask, 1 - fp, fp)
-
-        # Initialize bt
-        bt = self.predict_bt(fp)
-
-        return Individual(fp=fp, bt=bt)
-
-    def analog_mutate(self, ind: Individual) -> Individual:
-        cfg = self.config
-        if cfg.bt_ignore:
-            return Individual(fp=ind.fp.copy(), bt=None)
-        bt = ind.bt.copy()
-
-        # bt: random add or delete nodes
-        num_edits = torch.randint(1, cfg.bt_mutate_edits + 1, size=[1]).item()
-        for _ in range(num_edits):
-            if utils.random_boolean(0.5):
-                utils.random_add_leaf(bt, max_internal=cfg.max_num_rxns)
-            else:
-                utils.random_remove_leaf(bt)
-    
-        return Individual(fp=ind.fp.copy(), bt=bt)
-
-    def optimize(self, fn: Callable[[Population], None]) -> None:
+        surrogate: Callable[[Population], None],
+        oracle: Callable[[str], float]
+    ) -> None:
         """Runs a genetic search.
 
         Args:
@@ -236,7 +255,7 @@ class GeneticSearch:
             print("Initializing from checkpoint", cfg.resume_path)
             with open(cfg.resume_path, "rb") as f:
                 population = pickle.load(f)
-        
+
         elif cfg.initialize_path is None:
             print("Initializing random")
             population = self.initialize_random()
@@ -246,28 +265,26 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            fn(population, usesmiles=True)
+            self.apply_oracle(population, oracle, None)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
-        
-            # Safety 
+
+            # Safety
             for ind in population:
                 ind.smiles = None
                 ind.fitness = None
 
         # Track some stats
         num_calls = 0
-        history = collections.deque(maxlen=cfg.early_stop_patience)
-        history.append(-1000)
+        history = None  # [[], []]
+        score_queue = collections.deque(maxlen=cfg.early_stop_patience)
+        score_queue.append(-1000)
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
 
             # Crossover & mutation
             if epoch >= 0:
-
-                mutants = [] 
-                references = self.choose_references(population, epoch)
                 # # TODO: delete
                 # fn([child])
                 # if child.fitness > parents[0].fitness:
@@ -278,34 +295,43 @@ class GeneticSearch:
                 #         sk1 = binary_tree_to_skeleton(parents[0].bt)
                 #         sk2 = binary_tree_to_skeleton(child.bt)
                 #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
-                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')                
-                for ref in references:
-                    mutants.append(self.analog_mutate(ref))
-                fn(mutants)
-                for ref, mut in zip(references, mutants):
-                    mut.fp = mol_fp(mut.smiles, _nBits=cfg.fp_bits).astype(np.float32)
-                    mut.fitness = ref.fitness
-
+                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')  
                 offsprings = []
-                for parents in self.choose_couples(population + mutants, epoch):
+                for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
                     offsprings.append(child)
-                
+                    # offsprings.append([child, analog_mutate(child)])
+
+                # (!!) surrogate() reassigns fps of offsprings
+                surrogate(offsprings)  # flatten
+
+                # Choose the candidate that maximizes internal diversity or EI
+                # if epoch <= cfg.explore_warmup:
+                #     promote = partial(self.promote_explore, population=population)
+                # else:
+                #     kernel = RBF(length_scale=1.0)
+                #     gp = GaussianProcessRegressor(kernel=kernel)
+                #     gp.fit(X=np.stack(history[0], axis=0), y=np.array(history[1]))
+                #     best = max(history[1])
+                #     promote = partial(self.promote_exploit, gp=gp, best=best)
+                # offsprings = list(map(promote, offsprings))
+
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
-                    offsprings = random.sample(offsprings, k=num_calls)
-                fn(offsprings)
+                    offsprings = random.sample(offsprings, k=leftover)
+                self.apply_oracle(offsprings, oracle, history)
                 num_calls += len(offsprings)
 
                 population = self.cull(population + offsprings)
-            
+
             elif cfg.resume_path is not None:
                 pass
-            
+
             else:
-                fn(population)
+                surrogate(population)
+                self.apply_oracle(population, oracle, history)
                 num_calls += len(population)
-            
+
             self.validate(population)  # sanity check
 
             # Scoring
@@ -322,24 +348,20 @@ class GeneticSearch:
                     pickle.dump(population, f)
 
             # Early-stopping
-            history.append(metrics["scores/mean"])
+            score_queue.append(metrics["scores/mean"])
             if (
                 cfg.early_stop
                 and (epoch > cfg.early_stop_warmup)
-                and (len(history) == cfg.early_stop_patience)
-                and (history[-1] - history[0] < cfg.early_stop_delta)
+                and (len(score_queue) == cfg.early_stop_patience)
+                and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
             ):
                 print("Early stopping.")
                 break
 
-            # Exhausted oracle calls 
+            # Exhausted oracle calls
             if num_calls == cfg.max_oracle_calls:
                 print("Exhausted oracle calls")
                 break
-
-            # Snap fp to SMILES
-            for ind in population:
-                ind.fp = mol_fp(ind.smiles, _nBits=cfg.fp_bits).astype(np.float32)
 
         # Cleanup
         if cfg.wandb:

@@ -1,9 +1,9 @@
 obj=drd2
-MAX_NUM_RXNS=3
+MAX_NUM_RXNS=4
 TOP_K=3
-TOP_K_RXN=3
+TOP_K_RXN=4
 MAX_RXNS=-1
-STRATEGY=conf
+STRATEGY=topological
 use_case="mcmc_${obj}_top_k=${TOP_K}_top_k_rxn=${TOP_K_RXN}_max_rxns=${MAX_RXNS}_max_num_rxns=${MAX_NUM_RXNS}_strategy=${STRATEGY}"
 batch_size=1000
 
@@ -24,7 +24,7 @@ python scripts/mcmc.py \
     --beta 10. 100. \
     --mcmc_timesteps 1000 \
     --obj ${obj} \
-    --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.txt
+    # --sender-filename input_${use_case}.txt \
+    # --receiver-filename output_${use_case}.txt
     # --chunk_size 5 \
     # --ncpu $ncpu \   ddk 
