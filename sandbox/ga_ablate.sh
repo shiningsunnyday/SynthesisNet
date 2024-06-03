@@ -25,4 +25,4 @@ python sandbox/optimize.py \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
     --fp_mutate_prob=0.5 \
-    --bt_mutate_prob=0.5 \
+    --child2_strategy=semantic

@@ -28,9 +28,10 @@ class GeneticSearchConfig(pydantic.BaseModel):
     # Mutation
     fp_mutate_prob: float = 0.5
     fp_mutate_frac: float = (24 / 4096)
-
-    bt_mutate_prob: float = 0.5
     bt_mutate_edits: int = 3
+
+    child2_strategy: Literal["analog", "semantic"] = "analog"
+    explore_warmup: int = -100
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1
