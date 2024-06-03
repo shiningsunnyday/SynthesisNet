@@ -1,4 +1,5 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
+export OMP_NUM_THREADS=1
 MAX_NUM_RXNS=4
 MODEL_DIR=/dccstor/graph-design/surrogate
 SKELETON_DIR=results/viz
@@ -24,5 +25,5 @@ python sandbox/optimize.py \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
-    --fp_mutate_prob=0.5 \
-    --bt_mutate_prob=0.5 \
+    --fp_mutate_prob=$2 \
+    --bt_mutate_prob=$3 \
