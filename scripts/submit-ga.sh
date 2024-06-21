@@ -17,17 +17,17 @@
 # done
 
 cpus=50
-for obj in {'gsk',};
-do  
-    for fp_prob in {0,0.5};
-    do
-        for bt_prob in {0,0.5};
+for seed in {11,12};
+do
+    for obj in {'gsk','jnk'};
+    do  
+        for strategy in {'semantic','analog'};
         do
             jbsub -proj syntreenet \
                 -queue x86_24h \
-                -name ga-analog.obj=${obj}.fp_prob=${fp_prob}.bt_prob=${bt_prob} \
+                -name ga-analog.obj=${obj}.strategy=${strategy} \
                 -mem 20g \
-                -cores ${cpus} sh ./sandbox/ga_ablate.sh ${obj} ${fp_prob} ${bt_prob}
+                -cores ${cpus} sh ./sandbox/ga_ablate.sh ${obj} ${strategy} ${seed}
         done
-    done    
+    done
 done

@@ -4,7 +4,7 @@ MAX_NUM_RXNS=4
 MODEL_DIR=/dccstor/graph-design/surrogate
 SKELETON_DIR=results/viz
 python sandbox/optimize.py \
-    --seed=10 \
+    --seed=$3 \
     --background_set_file ${SKELETON_DIR}/skeletons-train.pkl \
     --skeleton_set_file ${SKELETON_DIR}/skeletons-valid.pkl \
     --ckpt_rxn ${MODEL_DIR}/${MAX_NUM_RXNS}-RXN/ \
