@@ -15,6 +15,7 @@ import multiprocessing as mp
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 from synnet.utils.analysis_utils import serialize_string
+from ga.utils import skeleton_to_binary_tree
 from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
@@ -1041,21 +1042,30 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
         return classes
 
 # For reconstruct without true skeleton
-def reconstruct(sk, smi):
+def reconstruct(sk, smi, return_bt=False):
     rxns = globals()['rxns']
     sk.reconstruct(rxns)
     smiles = []
+    nodes = []
     for n in sk.tree:
         if 'smiles' in sk.tree.nodes[n]:
             if sk.tree.nodes[n]['smiles']:
-                smiles += sk.tree.nodes[n]['smiles'].split(DELIM)
+                smile_list = sk.tree.nodes[n]['smiles'].split(DELIM)
+                smiles += smile_list
+                nodes += [n for _ in smile_list]
     if isinstance(smi, np.ndarray):
         sims = tanimoto_similarity(smi, smiles)
     else:
         smi2 = Chem.CanonSmiles(smi)
         sims = tanimoto_similarity(mol_fp(smi2, 2, 4096), smiles)
     correct = max(sims)
-    best_smi = smiles[np.argmax(sims)]
+    best_ind = np.argmax(sims)
+    best_smi = smiles[best_ind]
+    if return_bt:        
+        best_n = nodes[best_ind]
+        best_sk = sk.subtree(best_n)
+        best_bt = skeleton_to_binary_tree(best_sk)
+        return correct, best_smi, best_bt
     return correct, best_smi
 
 
