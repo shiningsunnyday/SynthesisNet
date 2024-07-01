@@ -266,7 +266,7 @@ class Reaction:
         if keep_main:
             uniqps = uniqps[:1]
             uniqps = uniqps[0]
-        # >>> TODO: Always return list[str] (currently depends on "keep_main")        
+        # >>> TODO: Always return list[str] (currently depends on "keep_main")
         # <<< ^ delete this line if resolved.
         return uniqps
 
@@ -327,7 +327,7 @@ class Reaction:
 
 
 class ProductMap:
-    def __init__(self, fpath, loaded=True):         
+    def __init__(self, fpath, loaded=True):
         self.fpath = fpath
         if loaded:
             self._product_map = {}
@@ -337,11 +337,11 @@ class ProductMap:
             self._product_map = None
             self._loaded = False
 
-    
+
     def save(self):
         logger = logging.getLogger('global_logger')
         logger.info(f"begin saving product map")
-        assert self._loaded, "need to call load() first"      
+        assert self._loaded, "need to call load() first"
         if PRODUCT_JSON:
             ProductMap.json_dump(self._product_map, open(self.fpath, 'w+'))
         else:
@@ -354,9 +354,9 @@ class ProductMap:
     def unload(self):
         if self._loaded:
             self._product_map = None
-            self._loaded = False        
+            self._loaded = False
 
-    
+
 
     @staticmethod
     def str_key_to_int(dic):
@@ -365,12 +365,12 @@ class ProductMap:
         """
         if isinstance(dic, dict):
             str_keys = [int(k) if isinstance(k, str) and k.isdigit() else k for k in dic]
-            dic = dict(zip(str_keys, dic.values()))        
+            dic = dict(zip(str_keys, dic.values()))
             for k in dic:
                 dic[k] = ProductMap.str_key_to_int(dic[k])
         return dic
 
-    
+
     @staticmethod
     def json_dump(dic=None, f=None):
         # simple wrapper that converts tuple keys into - delimited keys
@@ -384,7 +384,7 @@ class ProductMap:
             json.dump(dic, f)
         return dic
 
-    
+
     @staticmethod
     def json_load(f=None, dic=None):
         # simple wrapper that restores - delimited keys into tuple keys
@@ -398,22 +398,22 @@ class ProductMap:
             tup_keys = [tuple(map(int, (k.split(DELIM)))) if DELIM in k else k for k in dic]
             dic = dict(zip(tup_keys, dic.values()))
             str_keys = [int(k) if isinstance(k, str) and k.isdigit() else k for k in dic]
-            dic = dict(zip(str_keys, dic.values()))                              
+            dic = dict(zip(str_keys, dic.values()))
             for k in dic:
                 dic[k] = ProductMap.json_load(dic=dic[k])
         return dic
-        
 
-    
+
+
     def load(self):
-        if not self._loaded:      
+        if not self._loaded:
             if PRODUCT_JSON:
-                self._product_map = ProductMap.json_load(open(self.fpath, 'r'))       
+                self._product_map = ProductMap.json_load(open(self.fpath, 'r'))
             else:
                 self._product_map = pickle.load(open(self.fpath, 'rb'))
                 self._product_map = self.str_key_to_int(self._product_map)
             self._loaded = True
-    
+
 
     def get_num_interms(self, key):
         if key not in self._product_map:
@@ -422,32 +422,32 @@ class ProductMap:
             breakpoint()
         return len(self._product_map[key])
 
-    
-    def __setitem__(self, key, val):   
+
+    def __setitem__(self, key, val):
         assert self._loaded
-        assert isinstance(key, tuple)   
+        assert isinstance(key, tuple)
         assert len(key) == 3
         n, interm, e = key
         if n not in self._product_map:
             self._product_map[n] = {}
         if interm not in self._product_map[n]:
-            self._product_map[n][interm] = {}        
+            self._product_map[n][interm] = {}
         self._product_map[n][interm][e] = val
 
 
-    def __getitem__(self, key):   
+    def __getitem__(self, key):
         assert self._loaded
-        assert isinstance(key, tuple)   
+        assert isinstance(key, tuple)
         if len(key) == 3:
             n, interm, e = key
-            return self._product_map[n][interm][e]  
+            return self._product_map[n][interm][e]
         elif len(key) == 2:
             n, interm = key
             return self._product_map[n][interm]
         elif len(key) == 1:
             n = key[0]
             return self._product_map[n]
-    
+
 
     def copy(self):
         ext = "json" if PRODUCT_JSON else "pkl"
@@ -460,7 +460,7 @@ class ProductMap:
             ProductMap.json_dump(self._product_map, open(new_fpath, 'w+'))
         else:
             pickle.dump(self._product_map, open(new_fpath, 'wb+'))
-        new_pmap = ProductMap(new_fpath, loaded=False)        
+        new_pmap = ProductMap(new_fpath, loaded=False)
         self.unload()
         return new_pmap
 
@@ -475,8 +475,8 @@ class ProductMap:
             for r in other._product_map[n]:
                 for e, v in other._product_map[n][r].items():
                     self[(n+offset, r, e+offset)] = v
-        # combine self.product_map's and correct for entries            
-                
+        # combine self.product_map's and correct for entries
+
 
 
 
@@ -489,7 +489,7 @@ class ProductMapLink:
         copy(): create a new ProductMapLink with new (copied) list of files
         combine(): combine two ProductMapLinks, by combining base files with disjoint keys
         __getitem__
-        __setitem__        
+        __setitem__
     """
     def __init__(self, fpaths):
         self.fpaths = fpaths
@@ -497,13 +497,13 @@ class ProductMapLink:
         self._product_map = None
         self._loaded = False
         for fpath in self.fpaths.values():
-            assert os.path.exists(fpath)   
+            assert os.path.exists(fpath)
 
 
     def load(self):
         logger = logging.getLogger('global_logger')
-        logger.info(f"begin loading product map link")        
-        if not self._loaded:    
+        logger.info(f"begin loading product map link")
+        if not self._loaded:
             self._product_map = {}
             self._loaded = True
             for entry_key, fpath in self.fpaths.items():
@@ -512,8 +512,8 @@ class ProductMapLink:
                 offset = 0
                 if isinstance(fpath, tuple):
                     offset, fpath = fpath
-                    self.fpaths[entry_key] = fpath  
-                try:                       
+                    self.fpaths[entry_key] = fpath
+                try:
                     f = open(fpath, 'r' if PRODUCT_JSON else 'rb')
                     self._product_map[entry_key] = (ProductMap.json_load if PRODUCT_JSON else pickle.load)(f)
                 except:
@@ -524,20 +524,20 @@ class ProductMapLink:
                         entries = list(self._product_map[n][r].keys())
                         for e in entries:
                             if isinstance(e, tuple):
-                                offset_key = (int(e[0])+offset, int(e[1])) 
+                                offset_key = (int(e[0])+offset, int(e[1]))
                             else:
                                 offset_key = int(e)+offset
                             assert offset_key not in self[(n,r)]
-                            self[(n, r, offset_key)] = self._product_map[n][r][e]                                
+                            self[(n, r, offset_key)] = self._product_map[n][r][e]
                         for e in entries:
                             self._product_map[n][r].pop(e)
         logger.info(f"done loading product map link")
 
-    
+
     def save(self):
         logger = logging.getLogger('global_logger')
         logger.info(f"begin saving product map")
-        assert self._loaded, "need to call load() first" 
+        assert self._loaded, "need to call load() first"
         for entry_key in self._product_map:
             if entry_key in self.fpaths:
                 fpath = self.fpaths[entry_key]
@@ -545,7 +545,7 @@ class ProductMapLink:
                 ext = "json" if PRODUCT_JSON else "pkl"
                 fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
                 while os.path.exists(fpath):
-                    fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")                
+                    fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
                 self.fpaths[entry_key] = fpath
             with FileLock(f"{fpath}.lock"):
                 with open(fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
@@ -558,7 +558,7 @@ class ProductMapLink:
     def unload(self):
         if self._loaded:
             self._product_map = None
-            self._loaded = False        
+            self._loaded = False
 
 
     def copy(self):
@@ -570,14 +570,14 @@ class ProductMapLink:
         if not self._loaded:
             # since product map not loaded, we can copy without loading
             new_fpaths = {}
-            for entry_key, fpath in self.fpaths.items():                
+            for entry_key, fpath in self.fpaths.items():
                 new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
                 while os.path.exists(new_fpath):
                     new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
                 shutil.copyfile(fpath, new_fpath)
                 new_fpaths[entry_key] = new_fpath
-            new_pmap = ProductMapLink(new_fpaths)        
-        else:                        
+            new_pmap = ProductMapLink(new_fpaths)
+        else:
             new_fpaths = {}
             for entry_key in self._product_map:
                 new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
@@ -586,16 +586,16 @@ class ProductMapLink:
                 with open(new_fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
                     (ProductMap.json_dump if PRODUCT_JSON else pickle.dump)(self._product_map[entry_key], f)
                 new_fpaths[entry_key] = new_fpath
-            new_pmap = ProductMapLink(new_fpaths)        
+            new_pmap = ProductMapLink(new_fpaths)
             self.unload()
-        return new_pmap    
+        return new_pmap
 
 
     def combine(self, other, offset):
         """
         combine two maplinks by combining the fpaths
         unsaved work on _product_map will not be carried over
-        NOTE: when loading fpath, the innermost keys will also need to be offset                
+        NOTE: when loading fpath, the innermost keys will also need to be offset
         """
         assert not self._loaded
         assert not other._loaded
@@ -604,38 +604,38 @@ class ProductMapLink:
 
 
 
-    def __setitem__(self, key, val):   
+    def __setitem__(self, key, val):
         assert self._loaded
-        assert isinstance(key, tuple)   
+        assert isinstance(key, tuple)
         assert len(key) == 3
         n, interm, e = key
         if n not in self._product_map:
             self._product_map[n] = {}
         if interm not in self._product_map[n]:
-            self._product_map[n][interm] = {}        
+            self._product_map[n][interm] = {}
         self._product_map[n][interm][e] = val
 
 
-    def __getitem__(self, key):   
+    def __getitem__(self, key):
         assert self._loaded
-        assert isinstance(key, tuple)   
+        assert isinstance(key, tuple)
         if len(key) == 3:
             n, interm, e = key
-            return self._product_map[n][interm][e]  
+            return self._product_map[n][interm][e]
         elif len(key) == 2:
             n, interm = key
             return self._product_map[n][interm]
         elif len(key) == 1:
             n = key[0]
-            return self._product_map[n]  
-    
+            return self._product_map[n]
+
 
     def get_num_interms(self, key):
         if key not in self._product_map:
             print(self.fpaths, f"{key} has no interms!")
             print(self._product_map.keys())
             breakpoint()
-        return len(self._product_map[key])                 
+        return len(self._product_map[key])
 
 
 
@@ -651,8 +651,8 @@ class Program:
             for each node n, store its intermediates
             for each intermediate, store the entry nodes
             for each entry, store the indices in .available_reactants
-            """        
-            ext = "json" if PRODUCT_JSON else "pkl"              
+            """
+            ext = "json" if PRODUCT_JSON else "pkl"
             fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
             while os.path.exists(fpath):
                 fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
@@ -661,13 +661,13 @@ class Program:
             # assert 'depth' in self.rxn_tree.graph
 
 
-    def copy(self):        
+    def copy(self):
         other = Program(deepcopy(self.rxn_tree))
-        other.rxn_map = deepcopy(self.rxn_map)        
+        other.rxn_map = deepcopy(self.rxn_map)
         other.keep_prods = self.keep_prods
         other._entries = self._entries
         if self.keep_prods:
-            other.product_map = self.product_map.copy()        
+            other.product_map = self.product_map.copy()
         return other
 
 
@@ -676,12 +676,12 @@ class Program:
     def entries(self):
         return self._entries
 
-    
+
     @staticmethod
     def make_default_dict():
-        return defaultdict(dict)  
-    
-    
+        return defaultdict(dict)
+
+
     @staticmethod
     def input_length(p, rxns=None):
         react = []
@@ -701,7 +701,7 @@ class Program:
             return np.prod(react)
         else:
             return 0
-    
+
 
     @staticmethod
     def avg_input_length(progs):
@@ -710,17 +710,17 @@ class Program:
             num_poss.append(Program.input_length(p))
         return np.mean(num_poss) if len(num_poss) else 0
 
-    
+
     @staticmethod
     def hash_str(s):
         # s is bytes string
-        return hashlib.md5(s).hexdigest() # deterministic hashing 
+        return hashlib.md5(s).hexdigest() # deterministic hashing
 
 
     @staticmethod
     def hash_json(json_data):
-        return Program.hash_str(json.dumps(json_data, sort_keys=True).encode())    
-    
+        return Program.hash_str(json.dumps(json_data, sort_keys=True).encode())
+
 
     def get_path(self):
         mask = []
@@ -734,7 +734,7 @@ class Program:
             mask.append(b)
         hash_val = self.hash(mask)
         return f"{hash_val}.json"
-    
+
 
     def hash(self, mask, return_json=False, attrs=['rxn_id', 'depth', 'child']):
         # used to hash the partial state defined by mask
@@ -751,15 +751,15 @@ class Program:
             if not mask[n]:
                 data[n] = rxn_tree_copy.nodes[n]['rxn_id']
                 rxn_tree_copy.nodes[n].pop('rxn_id')
-        json_data = nx.tree_data(rxn_tree_copy, len(rxn_tree_copy)-1)        
+        json_data = nx.tree_data(rxn_tree_copy, len(rxn_tree_copy)-1)
         ans = self.hash_json(json_data)
         for n, r in data.items():
             rxn_tree_copy.nodes[n]['rxn_id'] = r
         if return_json:
-            return json_data        
+            return json_data
         return str(ans)
 
-    
+
     def hash_program(self):
         return self.hash_json(self.output_dict)
 
@@ -769,12 +769,12 @@ class Program:
             'rxn_tree': nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1),
             'entries': self._entries,
             'rxn_map': {r: rxn.__dict__ for r, rxn in self.rxn_map.items()},
-            'keep_prods': self.keep_prods            
+            'keep_prods': self.keep_prods
         }
-        if self.keep_prods:            
+        if self.keep_prods:
             dic['product_map'] = self.product_map.fpath
         return dic
-    
+
 
     def combine_bi_mol(self, rxn_id, child='left'):
         """
@@ -794,13 +794,13 @@ class Program:
         idx = 1 if child == 'left' else 0
         self._entries = self._entries + [(key, idx)]
 
-    
+
 
     def add_rxn(self, id, left, right=None):
         assert left in self.rxn_tree.nodes()
         assert right is None or right in self.rxn_tree.nodes()
         key = len(self.rxn_tree)
-        self.rxn_tree.add_node(key, rxn_id=id)                
+        self.rxn_tree.add_node(key, rxn_id=id)
         self.rxn_tree.add_edge(key, left)
         self.rxn_tree.nodes[left]['child'] = 'left'
         depth = self.rxn_tree.nodes[left]['depth'] +1
@@ -809,13 +809,13 @@ class Program:
             depth = max(depth, self.rxn_tree.nodes[right]['depth'] +1)
             self.rxn_tree.add_edge(key, right)
         self.rxn_tree.nodes[key]['depth'] = depth
-    
 
-    def combine(self, other):    
+
+    def combine(self, other):
         offset = len(self.rxn_tree)
         self.rxn_tree = nx.disjoint_union(self.rxn_tree, other.rxn_tree)
         apply_offset = lambda e, offset: (e[0]+offset, e[1]) if isinstance(e, tuple) else e+offset
-        self._entries = self.entries + [apply_offset(e, offset) for e in other.entries]               
+        self._entries = self.entries + [apply_offset(e, offset) for e in other.entries]
         for n in other.rxn_map:
             self.rxn_map[n+offset] = other.rxn_map[n]
         # combine rxn_map's
@@ -823,7 +823,7 @@ class Program:
         if self.keep_prods:
             self.product_map.combine(other.product_map, offset=offset)
         return self
-    
+
 
     @staticmethod
     def fill_reactant_indices(res, all_reactant_idxes):
@@ -840,41 +840,41 @@ class Program:
     @staticmethod
     def fill_product_reactant_indices(res, all_reactant_idxes, product_map=None):
         for r, index in tqdm(res):
-            idxes = Program.infer_product_index(index, interm_counts, entries, rxn_map, return_idx=True)            
+            idxes = Program.infer_product_index(index, interm_counts, entries, rxn_map, return_idx=True)
             assert len(idxes) == len(all_reactant_idxes)
             prod = {}
             for i in range(len(all_reactant_idxes)):
                 idx = idxes[i]
                 assert len(idx) == len(all_reactant_idxes[i])
                 for j in range(len(idx)):
-                    all_reactant_idxes[i][j][idx[j]] += 1            
+                    all_reactant_idxes[i][j][idx[j]] += 1
                 prod[entries[i]] = idxes[i]
-            if product_map is not None:           
+            if product_map is not None:
                 if r not in product_map:
                     product_map[r] = prod
-    
+
 
     def init_rxns(self, rxns):
         """
-        Init rxns will look at the top node, n, in rxn_tree which should not be in rxn_map        
+        Init rxns will look at the top node, n, in rxn_tree which should not be in rxn_map
         Then use rxns to add the reaction to self.rxn_map
         Also, it will retrieve the products of each of n's successors
         Then use n's reaction to filter them
         Then re-index all the entry nodes for each successor
         """
-        logger = logging.getLogger('global_logger')  
+        logger = logging.getLogger('global_logger')
         new_nodes = [n for n in self.rxn_tree if n not in self.rxn_map]
         assert len(new_nodes) == 1
-        new_node = new_nodes[0]          
-        n = new_node               
+        new_node = new_nodes[0]
+        n = new_node
         rxn = deepcopy(rxns[self.rxn_tree.nodes[n]['rxn_id']])
         assert rxn.available_reactants is not None
         self.rxn_map[n] = rxn
-        count = Program.input_length(self)  
+        count = Program.input_length(self)
         # if (self.rxn_tree.nodes[0]=={'rxn_id': 41, 'depth': 1, 'child': 'left'}) and (self.rxn_tree.nodes[1]=={'rxn_id': 1, 'depth': 2}):
         #     breakpoint()
         if self.keep_prods:
-            # do we really need to load?            
+            # do we really need to load?
             # self.keep_prods specifies the length of the longest root-leave path
             # we need to load if one of new node's successors has depth <= self.keep_prods
             need_load = False
@@ -882,28 +882,28 @@ class Program:
                 if self.keep_prods >= self.rxn_tree.nodes[succ]['depth']:
                     need_load = True
             if need_load:
-                self.product_map.load()          
+                self.product_map.load()
         """
-        For each of new node's successor, if its depth is <= self.keep_prods, then we can use the product map to filter the reactants of the 
+        For each of new node's successor, if its depth is <= self.keep_prods, then we can use the product map to filter the reactants of the
         successor's subtree's entry nodes
-        """        
-        for succ in self.rxn_tree.successors(n):           
+        """
+        for succ in self.rxn_tree.successors(n):
             """
             for each child of n, we can define a filter function depending on if it's the left or right child
             left also includes uni-molecular reaction
             """
-            if self.keep_prods < self.rxn_tree.nodes[succ]['depth']: 
+            if self.keep_prods < self.rxn_tree.nodes[succ]['depth']:
                 continue
             """
             n is a new reaction node, but we can filter the entry reactants using the interms
             """
             if self.rxn_tree.nodes[succ]['child'] == 'left':
-                filter_func = rxn.is_reactant_first 
+                filter_func = rxn.is_reactant_first
             else:
                 filter_func = rxn.is_reactant_second
-            res = []    
-            num_interms = self.product_map.get_num_interms(succ)        
-            bad_interms = []                
+            res = []
+            num_interms = self.product_map.get_num_interms(succ)
+            bad_interms = []
             """
             product_map stores the interms at n's successor
             """
@@ -911,7 +911,7 @@ class Program:
                 with mp.Pool(100) as p:
                     pass_filter = p.map(filter_func, tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms"))
             else:
-                pass_filter = [filter_func(interm) for interm in tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms")]               
+                pass_filter = [filter_func(interm) for interm in tqdm(self.product_map[(succ,)], desc=f"filtering {num_interms} interms")]
             last_interm = None
             for interm_pass, interm in tqdm(zip(pass_filter, self.product_map[(succ,)]), desc=f"sorting good vs bad interms"):
                 if interm_pass:
@@ -920,50 +920,50 @@ class Program:
                         appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
                         if sorted(appear_entries) != appear_entries:
                             breakpoint()
-                            
+
                     entry_reactants = []
                     for e in self.product_map[(succ, interm)]:
                         e_reactants = []
                         for (i, ind) in enumerate(self.product_map[(succ, interm, e)]):
                             # e_reactants.append(self.rxn_map[e].available_reactants[i][ind])
-                            e_reactants.append(ind)                            
+                            e_reactants.append(ind)
                         entry_reactants.append(e_reactants)
                     res.append((interm, entry_reactants))
                 else:
-                    bad_interms.append(interm)            
+                    bad_interms.append(interm)
                 last_interm = interm
             if last_interm is None:
                 breakpoint()
-            entries = list(self.product_map[(succ, last_interm)].keys())                        
+            entries = list(self.product_map[(succ, last_interm)].keys())
             appear_entries = [self.entries.index(p) for p in list(self.product_map[(succ, interm)].keys())]
             if sorted(appear_entries) != appear_entries:
-                breakpoint()            
-                 
+                breakpoint()
+
             if count >= MP_MIN_COMBINATIONS and NUM_THREADS > 1:
                 threads = []
                 elems_per_thread = (len(res)+NUM_THREADS-1) // NUM_THREADS
                 all_reactant_indices = []
                 for e in entries:
-                    zero_count = []               
+                    zero_count = []
                     if isinstance(e, tuple):
                         zero_array = [0 for _ in range(len(self.rxn_map[e[0]].available_reactants[e[1]]))]
-                        arr = Array('i', zero_array)            
+                        arr = Array('i', zero_array)
                         zero_count.append(arr)
                     else:
                         for i in range(len(self.rxn_map[e].available_reactants)):
-                            zero_array = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]            
-                            arr = Array('i', zero_array)            
-                            zero_count.append(arr)                        
-                    all_reactant_indices.append(zero_count)                
+                            zero_array = [0 for _ in range(len(self.rxn_map[e].available_reactants[i]))]
+                            arr = Array('i', zero_array)
+                            zero_count.append(arr)
+                    all_reactant_indices.append(zero_count)
                 for i in range(NUM_THREADS):
                     start = i*elems_per_thread
-                    end = (i+1)*elems_per_thread                
+                    end = (i+1)*elems_per_thread
                     thread = threading.Thread(target=self.fill_reactant_indices, args=(res[start:end], all_reactant_indices))
                     threads.append(thread)
                     thread.start()
                 for thread in threads:
                     thread.join()
-            else:         
+            else:
                 all_reactant_indices = []
                 for e in entries:
                     zero_count = []
@@ -972,7 +972,7 @@ class Program:
                         if NUM_THREADS > 1:
                             arr = Array('i', zero_array)
                         else:
-                            arr = zero_array                
+                            arr = zero_array
                         zero_count.append(arr)
                     else:
                         for i in range(len(self.rxn_map[e].available_reactants)):
@@ -982,24 +982,24 @@ class Program:
                             else:
                                 arr = zero_array
                             zero_count.append(arr)
-                    all_reactant_indices.append(zero_count)                                   
+                    all_reactant_indices.append(zero_count)
                 self.fill_reactant_indices(res, all_reactant_indices)
             rxn_map_copy = deepcopy(self.rxn_map)
             for n in entries:
                 idx = -1
                 if isinstance(n, tuple):
-                    n, idx = n                
+                    n, idx = n
                 cur = self.rxn_map[n].available_reactants
                 available_reactants = []
                 for i, reactants in enumerate(cur):
                     if idx > -1 and i != idx:
                         available_reactants.append(reactants)
                     else:
-                        available_reactants.append([])                
-                self.rxn_map[n].available_reactants = tuple(available_reactants)                 
+                        available_reactants.append([])
+                self.rxn_map[n].available_reactants = tuple(available_reactants)
 
             """
-            A simple algorithm to re-index all_reactant_indices            
+            A simple algorithm to re-index all_reactant_indices
             """
             assert len(entries) == len(all_reactant_indices)
             for i, e in enumerate(entries): # per entry
@@ -1008,17 +1008,17 @@ class Program:
                     e, idx = e
                     reactant_indices = [idx]
                 else:
-                    reactant_indices = range(len(all_reactant_indices[i]))                
+                    reactant_indices = range(len(all_reactant_indices[i]))
                 for idx, j in enumerate(reactant_indices): # per reactant
                     c = 0
                     idxes = all_reactant_indices[i][idx]
                     for k in range(len(idxes)): # per available reactant
-                        # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                            
+                        # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]
                         if idxes[k]:
                             # add this reactant to self.rxn_map
                             reactant = rxn_map_copy[e].available_reactants[j][k]
                             self.rxn_map[e].available_reactants[j].append(reactant)
-                            idxes[k] = c                                
+                            idxes[k] = c
                             c += 1
                         else:
                             idxes[k] = -1
@@ -1027,25 +1027,25 @@ class Program:
             """
             logging.info(f"begin re-indexing product map")
             # remove the bad interms
-            for interm in bad_interms:                            
-                self.product_map[tuple([succ])].pop(interm)                    
-          
+            for interm in bad_interms:
+                self.product_map[tuple([succ])].pop(interm)
+
             self.reindex_product_map(succ, entries, all_reactant_indices)
             # re-index the entry_reactant indices of self.product_map
             logging.info(f"done re-indexing product map")
 
             """
             Sanity check: there exists successor with zero products iff program length is 0
-            """            
+            """
             zero_prods = len(self.product_map[tuple([succ])]) == 0
             if zero_prods:
                 assert Program.input_length(self) == 0
-            
+
         if self.keep_prods and need_load:
             new_count = Program.input_length(self)
             logger.info(f"{count}->{new_count} products")
             self.product_map.save()
-            
+
 
     @staticmethod
     def infer_product_index(i, interm_counts, entries, rxn_map, return_idx=False):
@@ -1054,11 +1054,11 @@ class Program:
         # entries[0] has 8 choices for reactant1 and 4 for reactant2
         # index can be 0 to 32*8-1
         # the trick is to use the intermediate counts [32,8]
-        # then repeat for (index//8, [8,4]) and (index%8, [8])        
+        # then repeat for (index//8, [8,4]) and (index%8, [8])
         # I comment the code with index 42 as an example
         assert len(interm_counts) == len(entries)
         entry_indices = [[] for _ in entries]
-        for j in range(len(interm_counts)-1,-1,-1):                     
+        for j in range(len(interm_counts)-1,-1,-1):
             if isinstance(entries[j], tuple):
                 num_reactants = 1
                 r, idx = entries[j]
@@ -1077,7 +1077,7 @@ class Program:
             assert reactant_i == 0
             entry_indices[j] = reactant_indices # [2, -1] [1, 0]
             i //= interm_counts[j] # 5 0
-        assert i == 0        
+        assert i == 0
         entry_reactants = []
         for entry, entry_reactant_indices in zip(entries, entry_indices):
             entry_reactants.append([])
@@ -1098,8 +1098,8 @@ class Program:
         """
         Use the index and rxn_map to infer the reactant combination
         index refers to position in product(product(reactants))
-        """        
-        entry_reactants = Program.infer_product_index(i, interm_counts, entries, rxn_map)       
+        """
+        entry_reactants = Program.infer_product_index(i, interm_counts, entries, rxn_map)
         good = True
         product_map = {}
         for node in nx.dfs_postorder_nodes(rxn_tree, len(rxn_tree)-1):
@@ -1112,7 +1112,7 @@ class Program:
                 _, reactant_index = entries[entry]
                 reactant = entry_reactants[entry]
                 succ = list(rxn_tree.successors(node))
-                assert len(reactant) == 1                
+                assert len(reactant) == 1
                 assert len(succ) == 1
                 reactant = reactant[0]
                 succ = succ[0]
@@ -1122,7 +1122,7 @@ class Program:
                 if not rxn_map[node].is_reactant_first(reactants[0]):
                     good = False
                 if not rxn_map[node].is_reactant_second(reactants[1]):
-                    good = False                    
+                    good = False
                 if good:
                     product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
                 else:
@@ -1133,33 +1133,33 @@ class Program:
                 assert len(succ) in [1, 2]
                 if len(succ) == 2 and rxn_tree.nodes[succ[-1]]['child'] == 'left':
                     succ = succ[::-1]
-                for i, n in enumerate(succ):     
+                for i, n in enumerate(succ):
                     if i == 0:
                         if rxn_map[node].is_reactant_first(product_map[n]):
                             reactants.append(product_map[n])
-                        else: 
+                        else:
                             good = False
                     if i == 1:
                         if rxn_map[node].is_reactant_second(product_map[n]):
                             reactants.append(product_map[n])
-                        else: 
-                            good = False                            
+                        else:
+                            good = False
                     if not good:
-                        break                        
+                        break
                 if good:
                     product_map[node] = rxn_map[node].run_reaction(tuple(reactants))
-                else:                  
+                else:
                     break
         if good:
             return product_map[len(rxn_tree)-1]
-        else:          
-            return None             
+        else:
+            return None
 
 
     @staticmethod
     def retrieve_entry(r, i):
         return (r, Program.infer_product_index(i, interm_counts, entries, rxn_map))
-    
+
 
 
     def reindex_product_map(self, n, entries, all_reactant_indices):
@@ -1171,39 +1171,39 @@ class Program:
             assert list(self.product_map[tuple([n])][interm]) == entries
             for entry in self.product_map[tuple([n])][interm]:
                 e = entries.index(entry)
-                for i in range(len(self.product_map[tuple([n])][interm][entry])):                    
-                    idx = self.product_map[tuple([n])][interm][entry][i]                        
-                    new_idx = all_reactant_indices[e][i][idx]               
+                for i in range(len(self.product_map[tuple([n])][interm][entry])):
+                    idx = self.product_map[tuple([n])][interm][entry][i]
+                    new_idx = all_reactant_indices[e][i][idx]
                     assert new_idx != -1
-                    self.product_map[tuple([n])][interm][entry][i] = new_idx       
-    
+                    self.product_map[tuple([n])][interm][entry][i] = new_idx
 
-    def run_rxn_tree(self): 
-        # Assume entry inputs satisfy everything except the "root"        
+
+    def run_rxn_tree(self):
+        # Assume entry inputs satisfy everything except the "root"
         # reactant_map = {}
         # if self.rxn_tree.graph['super']:
         #     breakpoint()
         # for n in self.entries:
         #     reactant_map[n] = product(*[reactants for reactants in self.rxn_map[n].available_reactants])
         # all_entry_reactants = list(product(*[reactant_map[n] for n in self.entries]))
-        logger = logging.getLogger('global_logger')  
+        logger = logging.getLogger('global_logger')
         prods = []
-        for n in self.entries:            
+        for n in self.entries:
             if isinstance(n, tuple):
                 r, idx = n
                 poss_reactants = len(self.rxn_map[r].available_reactants[idx])
-            else:                
+            else:
                 poss_reactants = np.prod([len(reactants) for reactants in self.rxn_map[n].available_reactants])
-            prods.append(poss_reactants)            
-        
+            prods.append(poss_reactants)
+
         res = []
         if len(prods):
             interm_counts = prods
-            count = np.prod(prods)        
+            count = np.prod(prods)
         else:
-            count = 0          
+            count = 0
             return 0, None
-        
+
         rxn_tree = self.rxn_tree
         rxn_map = self.rxn_map
         entries = self.entries
@@ -1213,21 +1213,21 @@ class Program:
         globals()["interm_counts"] = interm_counts
         globals()["entries"] = entries
         # globals()["all_entry_reactants"] = all_entry_reactants # debug
-        if count >= MP_MIN_COMBINATIONS:            
+        if count >= MP_MIN_COMBINATIONS:
             logger.info(f"running {count} entry_reactants")
             with mp.Pool(MAX_PROCESSES) as p:
-                res = p.map(self.run_rxns, tqdm(range(count), desc="executing reactions"))           
+                res = p.map(self.run_rxns, tqdm(range(count), desc="executing reactions"))
                 assert len(res) == count
         else:
             res = [self.run_rxns(i) for i in range(count)]
-        
+
         res = [(r, i) for (r, i) in zip(res, range(count)) if r is not None]
         # Update the reactants to only valid inputs
         rxn_map_copy = deepcopy(self.rxn_map)
-        for n in self.entries:                    
+        for n in self.entries:
             idx = -1
             if isinstance(n, tuple):
-                n, idx = n        
+                n, idx = n
             cur = rxn_map_copy[n].available_reactants
             available_reactants = []
             for i, reactants in enumerate(cur):
@@ -1248,19 +1248,19 @@ class Program:
             for e in self.product_map._product_map:
                 for interm in self.product_map._product_map[e]:
                     if list(self.product_map._product_map[e][interm]) == [(1, 1), 0]:
-                        breakpoint()              
+                        breakpoint()
         logger.info(f"begin post-processing {len(res)} products")
 
-        
+
         # rxn_map_debug = deepcopy(rxn_map_copy)
         # product_map_debug = self.product_map.copy()
         # product_map_debug.load()
-        # for r, index in tqdm(res, desc="post-processing products"):               
-        #     entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)            
+        # for r, index in tqdm(res, desc="post-processing products"):
+        #     entry_reactants = Program.infer_product_index(index, interm_counts, entries, rxn_map)
         #     for entry_reactant, n in zip(entry_reactants, self.entries):
         #         entry_point = []
         #         for i, reactant in enumerate(entry_reactant):
-        #             if reactant not in avail_index[n][i]:                        
+        #             if reactant not in avail_index[n][i]:
         #                 avail_index[n][i][reactant] = len(rxn_map_debug[n].available_reactants[i])
         #                 rxn_map_debug[n].available_reactants[i].append(reactant)
         #             if keep_prods:
@@ -1282,7 +1282,7 @@ class Program:
                 if NUM_THREADS > 1:
                     arr = Array('i', zero_array)
                 else:
-                    arr = zero_array                
+                    arr = zero_array
                 zero_count.append(arr)
             else:
                 for i in range(len(self.rxn_map[e].available_reactants)):
@@ -1292,7 +1292,7 @@ class Program:
                     else:
                         arr = zero_array
                     zero_count.append(arr)
-            all_reactant_indices.append(zero_count)   
+            all_reactant_indices.append(zero_count)
 
         if keep_prods:
             product_map = self.product_map._product_map
@@ -1306,16 +1306,16 @@ class Program:
         if count >= MP_MIN_COMBINATIONS and NUM_THREADS > 1:
             for i in range(NUM_THREADS):
                 start = i*elems_per_thread
-                end = (i+1)*elems_per_thread                
-                thread = threading.Thread(target=self.fill_product_reactant_indices, 
-                                          args=(res[start:end], 
-                                          all_reactant_indices, 
+                end = (i+1)*elems_per_thread
+                thread = threading.Thread(target=self.fill_product_reactant_indices,
+                                          args=(res[start:end],
+                                          all_reactant_indices,
                                           product_map[len(rxn_tree)-1] if product_map is not None else None))
                 threads.append(thread)
                 thread.start()
             for thread in threads:
-                thread.join()    
-        else:  
+                thread.join()
+        else:
             self.fill_product_reactant_indices(res, all_reactant_indices, product_map[len(rxn_tree)-1] if product_map is not None else None)
 
         if keep_prods: # sanity check
@@ -1325,7 +1325,7 @@ class Program:
                         breakpoint()
 
         """
-        A simple algorithm to re-index all_reactant_indices            
+        A simple algorithm to re-index all_reactant_indices
         """
         for i in range(len(all_reactant_indices)): # per entry
             entry = self.entries[i]
@@ -1339,49 +1339,49 @@ class Program:
                 c = 0
                 idxes = all_reactant_indices[i][idx]
                 for k in range(len(idxes)): # per available reactant
-                    # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]                                                
+                    # [0, 0, 1, 0, 1, 0, 1] -> [-1, -1, 0, -1, 1, -1, 2]
                     if idxes[k]:
                         # add this reactant to self.rxn_map
                         reactant = self.rxn_map[entry].available_reactants[j][k]
                         rxn_map_copy[entry].available_reactants[j].append(reactant)
-                        idxes[k] = c                                
+                        idxes[k] = c
                         c += 1
                     else:
-                        idxes[k] = -1 
+                        idxes[k] = -1
 
 
         # for e1, e2 in zip(rxn_map_copy, rxn_map_debug):
         #     assert e1 == e2
         #     if rxn_map_copy[e1].available_reactants != rxn_map_debug[e2].available_reactants:
-        #         breakpoint()        
-   
+        #         breakpoint()
+
         if keep_prods:
             product_map[len(rxn_tree)-1] = dict(product_map[len(rxn_tree)-1])
             self.product_map._product_map = product_map
-            logging.info(f"begin re-indexing product map")               
+            logging.info(f"begin re-indexing product map")
             self.reindex_product_map(len(rxn_tree)-1, self.entries, all_reactant_indices)
             # if self.product_map._product_map != product_map_debug._product_map:
-            #     breakpoint()            
-            
-        # re-index the entry_reactant indices of self.product_map
-        logging.info(f"done re-indexing product map")         
-                                           
+            #     breakpoint()
 
-        
+        # re-index the entry_reactant indices of self.product_map
+        logging.info(f"done re-indexing product map")
+
+
+
         logger.info(f"done post-processing {len(res)} products")
         if keep_prods:
             for e in self.product_map._product_map:
                 for interm in self.product_map._product_map[e]:
                     if list(self.product_map._product_map[e][interm]) == [(1, 1), 0]:
-                        breakpoint()            
+                        breakpoint()
             self.product_map.save()
-            
+
         self.rxn_map = rxn_map_copy
         return count, res
-                        
+
 
     def logging_info(self):
-        return nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)  
+        return nx.tree_data(self.rxn_tree, len(self.rxn_tree)-1)
 
 
     @staticmethod
@@ -1396,7 +1396,7 @@ class Program:
         new_fpaths = {}
         for entry_key in p.product_map._product_map:
             new_fpath = os.path.join(PRODUCT_DIR, f"{str(uuid.uuid4())}.{ext}")
-            new_fpaths[entry_key] = new_fpath                        
+            new_fpaths[entry_key] = new_fpath
             with open(new_fpath, 'w+' if PRODUCT_JSON else 'wb+') as f:
                 (ProductMap.json_dump if PRODUCT_JSON else pickle.dump)(p.product_map[(entry_key,)], f)
         pmap_link = ProductMapLink(new_fpaths)
@@ -1487,10 +1487,10 @@ class Node:
         smiles: Union[str, None] = None,
         parent = None,
         rxn_id: Union[int, None] = None,
-        rtype: Union[int, None] = None,        
+        rtype: Union[int, None] = None,
         child : Union[list, None] = [],
         is_leaf: bool = False,
-        is_root: bool = False     
+        is_root: bool = False
     ):
         self.smiles = smiles
         self.parent = parent
@@ -1498,7 +1498,7 @@ class Node:
         self.rtype = rtype
         self.child = child
         self.is_leaf = is_leaf
-        self.is_root = is_root   
+        self.is_root = is_root
 
 
 class NodeRxn:
@@ -1603,13 +1603,13 @@ class SyntheticTree:
         breakpoint()
         sk1 = Skeleton(self, -1)
         sk2 = Skeleton(other, -1)
-        
-        
+
+
         def serialize(tree, root, ans):
             bfs = deque([root])
             while len(bfs):
                 cur = bfs.popleft()
-                childs = list(tree[cur])                
+                childs = list(tree[cur])
                 if len(childs):
                     if tree.nodes[childs[0]]['child'] == 'right':
                         childs = childs[::-1]
@@ -1618,21 +1618,21 @@ class SyntheticTree:
                 else:
                     bfs += [0, 0]
 
-        
+
 
         if len(self.nodes) != len(other.nodes): return False
 
 
         self_nodes = self.nodes
-        other_nodes = other.nodes    
+        other_nodes = other.nodes
         self_tree = nx.DiGraph(self.edges)
         other_tree = nx.DiGraph(other.edges)
         return rooted_tree_isomorphism(self_tree, len(self_tree)-1, other_tree, len(other_tree)-1)
         # for perm in permutations(range(len(other.nodes))):
 
-        #     if try_perm(perm, self_nodes, other_nodes): 
+        #     if try_perm(perm, self_nodes, other_nodes):
         #         return True
-                    
+
 
 
 
@@ -1723,7 +1723,7 @@ class SyntheticTree:
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
             self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
-            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))            
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))
 
         elif action == 1 and mol2 is None:  # Expand with uni-mol rxn
             node_mol1 = self.chemicals[self.get_node_index(mol1)]
@@ -1791,8 +1791,8 @@ class SyntheticTree:
             self.chemicals.append(node_product)
             self.reactions.append(node_rxn)
             self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol1)))
-            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))            
-            
+            self.edges.append((self.chemicals.index(node_product), self.chemicals.index(node_mol2)))
+
 
         elif action == 0 and mol2 is None:  # Add with uni-mol rxn
             node_mol1 = NodeChemical(
@@ -1885,7 +1885,7 @@ class SyntheticTree:
             raise ValueError("Check input")
 
         return None
-    
+
 
     def build_tree(self):
         nodes = []
@@ -1900,7 +1900,7 @@ class SyntheticTree:
         self.nodes = nodes
         assert nodes[-1].is_root
         return nodes[-1]
-        
+
 
 class Skeleton:
 
@@ -1908,25 +1908,25 @@ class Skeleton:
         """
         st: example of SyntheticTree with the skeleton
         This is a dual use class. It also remembers st for later use.
-        """   
+        """
         if st is not None:
             i = 0 # chemical index
             j = 0 # reaction index
             interms = []
-            whole_tree = nx.DiGraph()        
+            whole_tree = nx.DiGraph()
             for action in st.actions:
                 n = len(whole_tree)-1
-                if action == 0:                
-                    if st.reactions[j].rtype == 1:                    
+                if action == 0:
+                    if st.reactions[j].rtype == 1:
                         whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child='left')
                         whole_tree.add_node(n+2, rxn_id=st.reactions[j].rxn_id)
                         whole_tree.add_edge(n+2, n+1)
                         whole_tree.add_node(n+3, smiles=st.chemicals[i+1].smiles)
                         whole_tree.add_edge(n+3, n+2)
                         interms.append(n+3)
-                        i += 2                    
+                        i += 2
                     else:
-                        child = st.reactions[j].child.index(st.chemicals[i].smiles)                    
+                        child = st.reactions[j].child.index(st.chemicals[i].smiles)
                         whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child=['left', 'right'][child])
                         whole_tree.add_node(n+2, smiles=st.chemicals[i+1].smiles, child=['right', 'left'][child])
                         whole_tree.add_node(n+3, rxn_id=st.reactions[j].rxn_id)
@@ -1952,7 +1952,7 @@ class Skeleton:
                         child = st.reactions[j].child.index(whole_tree.nodes[n]['smiles'])
                         whole_tree.nodes[n]['child'] = ['left', 'right'][child]
                         whole_tree.add_node(n+1, smiles=st.chemicals[i].smiles, child=['right', 'left'][child])
-                        whole_tree.add_node(n+2, rxn_id=st.reactions[j].rxn_id)                
+                        whole_tree.add_node(n+2, rxn_id=st.reactions[j].rxn_id)
                         whole_tree.add_edge(n+2, n)
                         whole_tree.add_edge(n+2, n+1)
                         whole_tree.add_node(n+3, smiles=st.chemicals[i+1].smiles)
@@ -1976,42 +1976,42 @@ class Skeleton:
                     i += 1
                     j += 1
                 elif action == 3:
-                    break            
+                    break
         else:
-            assert (whole_tree is not None)            
+            assert (whole_tree is not None)
 
-        postorder = []    
+        postorder = []
         self.do_postorder(whole_tree, next(v for v, d in whole_tree.in_degree() if d == 0), postorder)
         whole_tree = nx.relabel_nodes(whole_tree, dict(zip(postorder, range(len(whole_tree)))))
-        self.tree = whole_tree  
+        self.tree = whole_tree
 
         zss_nodes = [zss.Node(i) for i in range(whole_tree.number_of_nodes())]
         for src, dst in whole_tree.edges:
             assert src > dst
             zss_nodes[src].addkid(zss_nodes[dst])
-        self.zss_tree = zss_nodes[-1]        
+        self.zss_tree = zss_nodes[-1]
 
-        self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)            
+        self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)
         assert self.tree_root == len(whole_tree)-1
-        self.tree_edges = np.array(self.tree.edges).T   
+        self.tree_edges = np.array(self.tree.edges).T
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
-        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])                
+        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])
         self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree))])
         self.bidir_edges = np.concatenate((self.tree_edges, self.tree_edges[::-1]), axis=-1)
         self.index = index
         # bottom-most 2 reactions
         nodes = {}
-        self.lowest_rxns(self.tree, self.tree_root, nodes)        
+        self.lowest_rxns(self.tree, self.tree_root, nodes)
         self.bottom_2_rxns = [n for n in nodes if nodes[n] in [1,3]]
-        self.correct_bottom_2_mask = [i for i in range(len(self.tree)) if i == self.tree_root or i in self.bottom_2_rxns]        
+        self.correct_bottom_2_mask = [i for i in range(len(self.tree)) if i == self.tree_root or i in self.bottom_2_rxns]
         # bfs order
         bfs = []
         self.do_bfs(bfs)
         self.correct_bfs_mask = bfs
         self.reset()
 
-    
-    def subtree(self, n):     
+
+    def subtree(self, n):
         def dfs(tree, cur):
             res = [cur]
             for nei in tree[cur]:
@@ -2024,8 +2024,8 @@ class Skeleton:
         tree: nx.DiGraph = nx.relabel_nodes(tree, mapping)  # makes a copy
         return Skeleton(st=None, index=self.index, whole_tree=tree, zss_tree=None)
 
-    
-    
+
+
     def do_bfs(self, res, interm=False):
         dq = deque([self.tree_root])
         while dq:
@@ -2047,7 +2047,7 @@ class Skeleton:
             for nei in neis:
                 dq.append(nei)
 
-    
+
     @staticmethod
     def do_postorder(tree, cur, res):
         neis = list(tree[cur])
@@ -2066,7 +2066,7 @@ class Skeleton:
             w, l = pos_np.max(axis=0)-pos_np.min(axis=0)
             w = max(w, 1) # in case uni-mol rxns only
             fig = plt.Figure(figsize=(20*w, 20*l))
-            ax = fig.add_subplot(1, 1, 1)        
+            ax = fig.add_subplot(1, 1, 1)
         else:
             fig = None
         if Xy:
@@ -2083,10 +2083,10 @@ class Skeleton:
         else:
             node_colors = [['gray', 'red'][self.mask[n]] for n in self.tree]
 
-        widths = [1. for _ in self.tree.edges]       
+        widths = [1. for _ in self.tree.edges]
         edge_color = ['k' for _ in self.tree.edges]
-        if attn is not None:                
-            attn_edges, attn = attn            
+        if attn is not None:
+            attn_edges, attn = attn
             attn_ind = 0
             edge_tuples = [tuple(e) for e in np.array(self.tree.edges)]
             attn_edge_tuples = [tuple(e) for e in attn_edges.numpy().T]
@@ -2105,28 +2105,28 @@ class Skeleton:
             if fig is not None:
                 if path is not None:
                     fig.savefig(path)
-                    print(os.path.abspath(path))            
-        else:            
+                    print(os.path.abspath(path))
+        else:
             node_labels = {}
             node_sizes = []
             for n in self.tree:
                 if 'smiles' in self.tree.nodes[n]:
-                    smiles = self.tree.nodes[n]['smiles']                                       
+                    smiles = self.tree.nodes[n]['smiles']
                     if isinstance(smiles, np.ndarray):
                         smiles = 'fp'
                     else:
                         if len(smiles):
-                            m = int(math.sqrt(len(smiles))) 
+                            m = int(math.sqrt(len(smiles)))
                             l = (len(smiles)+m-1)//m
-                            smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])                    
+                            smiles = '\n'.join([smiles[m*i:m*i+m] for i in range(l)])
                     node_labels[n] = f"{n}: {smiles}"
                     node_sizes.append(5000)
                 else:
                     rxn_id = self.tree.nodes[n]['rxn_id']
                     node_labels[n] = f"{n}: {rxn_id}"
                     node_sizes.append(1000)
-            nx.draw_networkx(self.tree, pos=pos, ax=ax, 
-                            node_color=node_colors, 
+            nx.draw_networkx(self.tree, pos=pos, ax=ax,
+                            node_color=node_colors,
                             edge_color=edge_color,
                             labels=node_labels,
                             node_size=node_sizes,
@@ -2143,13 +2143,13 @@ class Skeleton:
         """
         self._mask = np.zeros(len(self.tree), dtype=np.int8)
         self.leaves_up = True
-        self.all_leaves = False        
+        self.all_leaves = False
         self.frontier = True # because we have target?
         if mask is not None:
             self.mask = mask
 
-    
-        
+
+
     def modify_tree(self, i, smiles=None, rxn_id=-1, suffix=''):
         """
         Fills node i with smiles or rxn_id
@@ -2168,14 +2168,14 @@ class Skeleton:
 
     def clear_tree(self, save=[], forcing=False):
         """
-        Clears the semantic information in the tree    
+        Clears the semantic information in the tree
         """
         for n in self.tree:
             if n in save:
                 continue
             if 'smiles' in self.tree.nodes[n]:
                 if forcing:
-                    self.tree.nodes[n]['smiles_forcing'] = ''    
+                    self.tree.nodes[n]['smiles_forcing'] = ''
                 else:
                     self.tree.nodes[n]['smiles'] = ''
             elif 'rxn_id' in self.tree.nodes[n]:
@@ -2189,7 +2189,7 @@ class Skeleton:
                 raise
         self.reset()
 
-    
+
     def reconstruct(self, rxns, keep_main=False):
         postorder = list(nx.dfs_postorder_nodes(self.tree, source=self.tree_root))
         for i in self.tree:
@@ -2211,26 +2211,26 @@ class Skeleton:
                     interms = rxn.run_reaction(reactants, keep_main=keep_main)
                     if interms is not None:
                         if not isinstance(interms, list):
-                            interms = [interms]                        
+                            interms = [interms]
                         pred = list(self.tree.predecessors(i))[0]
                         poss_res += interms
                 if len(poss_res) == 0:
                     return False
                 self.tree.nodes[pred]['smiles'] = DELIM.join(poss_res)
-        
+
 
 
     @property
     def mask(self):
         return self._mask
 
-    
+
     def pred(self, n):
         return list(self.tree.predecessors(n))[0]
-    
+
     def succ(self, n):
         return list(self.tree.successors(n))[0]
-    
+
     @staticmethod
     def lowest_rxns(tree, cur, ans): # returns depth
         # get all nodes whose bottom-up depth is in max_depths
@@ -2246,25 +2246,25 @@ class Skeleton:
         count = 'rxn_id' in tree.nodes[cur]
         for nei in tree[cur]:
             count += Skeleton.num_rxns(tree, nei, nums)
-        nums[cur] = count        
+        nums[cur] = count
         return count
 
 
     @mask.setter
     def mask(self, mask):
-        self._mask[mask] = 1        
+        self._mask[mask] = 1
         src = self.mask[self.non_root_tree_edges[0]]
         dest = self.mask[self.non_root_tree_edges[1]]
         self.leaves_up = not (src > dest).any()
         self.all_leaves = self.mask[self.leaves].all()
         non_mask_rxns = ~(self.mask == 1) & self.rxns
         src_in_mask = self.mask[self.bidir_edges.T[:, 0]]
-        self.frontier_nodes = self.bidir_edges.T[src_in_mask == 1][:, 1]        
+        self.frontier_nodes = self.bidir_edges.T[src_in_mask == 1][:, 1]
         self.rxn_frontier = non_mask_rxns[self.frontier_nodes].any()
         self.bb_frontier = self.mask.sum() < len(self.mask) # bad only when no frontier
         src = self.mask[self.tree_edges[0]]
         dest = self.mask[self.tree_edges[1]]
-        self.target_down = (src >= dest).all()     
+        self.target_down = (src >= dest).all()
 
         # check that if true, all parent of parent is true
         non_target_interms = (self.mask & ~self.rxns)
@@ -2287,25 +2287,25 @@ class Skeleton:
                 if self.leaves[n]:
                     self.rxn_target_down_bb = False
                 self.rxn_target_down_interm = False
-        
+
         # test if mask satisfies precomputed criteria
         mask_inds = np.argwhere(self.mask).flatten().tolist()
         self.leaf_up_2 = mask_inds == self.correct_bottom_2_mask
         self.bfs = sorted(mask_inds) == sorted(self.correct_bfs_mask[:len(mask_inds)])
-        
-    
+
+
     @staticmethod
     def one_hot(n, ind):
         zeros = np.zeros(n)
         zeros[ind] = 1.
         return zeros
-    
+
 
     def fill_node(self, n, y):
         if 'smiles' in self.tree.nodes[n]:
             if self.tree.nodes[n]['smiles']:
-                y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])    
-                # print(self.tree.nodes[n])            
+                y[n][:256] = fp_256(self.tree.nodes[n]['smiles'])
+                # print(self.tree.nodes[n])
             else:
                 pass
                 # print("bad smiles")
@@ -2318,13 +2318,13 @@ class Skeleton:
         else:
             print("bad node")
 
-           
-    def get_state(self, leaves_up=False, 
-                        rxn_frontier=False, 
-                        bb_frontier=False, 
-                        target_down=False, 
-                        rxn_target_down=False, 
-                        rxn_target_down_bb=False, 
+
+    def get_state(self, leaves_up=False,
+                        rxn_frontier=False,
+                        bb_frontier=False,
+                        target_down=False,
+                        rxn_target_down=False,
+                        rxn_target_down_bb=False,
                         rxn_target_down_interm=False,
                         bfs=False):
         """
@@ -2342,13 +2342,13 @@ class Skeleton:
         rxn_target_down_bb: same as leaves_up but from target down, and for reactions and leaves only
         rxn_target_down_interm: same as leaves_up but from target down, and for reactions and interms/leaves
         bfs: predict the next node in binary tree bfs order
-        """        
+        """
         X = np.zeros((len(self.tree), 2*2048+91))
         y = np.zeros((len(self.tree), 256+91))
-        for n in self.tree.nodes():             
+        for n in self.tree.nodes():
             # is target, or parent is target, or parent rxn is fulfilled
             rxn_parent = (n == self.tree_root) or self.pred(n) == self.tree_root or (self.mask & self.rxns)[self.pred(self.pred(n))]
-            # if is rxn, then rxn_parent; if is leaf, then parent is fulfilled        
+            # if is rxn, then rxn_parent; if is leaf, then parent is fulfilled
             rxn_parent_bb = (not self.rxns[n] or rxn_parent) and (not self.leaves[n] or self.mask[self.pred(n)]) and (self.rxns[n] or self.leaves[n])
             # if is rxn, then rxn_parent; if is interm/leaf, then parent is fulfilled
             rxn_parent_interm = (not self.rxns[n] or rxn_parent_bb) and (self.rxns[n] or n == self.tree_root or self.mask[self.pred(n)])
@@ -2358,7 +2358,7 @@ class Skeleton:
             is_frontier_bb = is_frontier and not self.rxns[n] and not self.rxn_frontier
             if is_frontier_rxn:
                 assert self.mask[self.bidir_edges.T[self.bidir_edges[1] == n][:, 0]].any()
-                assert 'rxn_id' in self.tree.nodes[n]                                
+                assert 'rxn_id' in self.tree.nodes[n]
             if self.mask[n]:
                 # if leaves_filled and list(self.tree.neighbors(n)):
                 #     if 'smiles' in self.tree.nodes[n]: # impossible
@@ -2384,27 +2384,27 @@ class Skeleton:
                         self.fill_node(n, y)
                 if bb_frontier:
                     if is_frontier_bb:
-                        self.fill_node(n, y)                
-                if rxn_target_down:    
+                        self.fill_node(n, y)
+                if rxn_target_down:
                     if rxn_parent: # is rxn
                         self.fill_node(n, y)
                     elif rxn_target_down_bb and rxn_parent_bb: # is bb
                         # accomodate bb's
                         self.fill_node(n, y)
                     elif rxn_target_down_interm and rxn_parent_interm: # is bb/interm
-                        self.fill_node(n, y)                    
+                        self.fill_node(n, y)
                 if target_down:
                     if is_frontier:
-                        self.fill_node(n, y)                    
+                        self.fill_node(n, y)
                 if leaves_up:
                     if leaves_filled:
-                        self.fill_node(n, y)                    
+                        self.fill_node(n, y)
                 if bfs:
                     if n == self.correct_bfs_mask[self.mask.sum()]:
                         self.fill_node(n, y)
 
         return np.atleast_2d(self.mask), X, y
-    
+
 
     def get_partial_state(self, poss, node):
         """
@@ -2436,15 +2436,15 @@ class Skeleton:
                 assert not (('smiles' in self.tree.nodes[n]) ^ ('smiles' in self.tree.nodes[node]))
                 assert not (('rxn_id' in self.tree.nodes[n]) ^ ('rxn_id' in self.tree.nodes[node]))
                 if 'smiles' in self.tree.nodes[n]:
-                    try: 
+                    try:
                         y[n][:256] = fp_256(self.tree.nodes[node]['smiles'])
-                    except: 
+                    except:
                         pass
                 elif 'rxn_id' in self.tree.nodes[node]:
                     y[n][256:] = self.one_hot(91,self.tree.nodes[node]['rxn_id'])
                 else:
-                    print("bad node")    
-        return np.atleast_2d(self.mask), X, y                
+                    print("bad node")
+        return np.atleast_2d(self.mask), X, y
 
 
     @staticmethod
@@ -2452,27 +2452,27 @@ class Skeleton:
 
         '''
         From Joel's answer at https://stackoverflow.com/a/29597209/2966723
-        Licensed under Creative Commons Attribution-Share Alike 
-        
-        If the graph is a tree this will return the positions to plot this in a 
+        Licensed under Creative Commons Attribution-Share Alike
+
+        If the graph is a tree this will return the positions to plot this in a
         hierarchical layout.
-        
+
         G: the graph (must be a tree)
-        
-        root: the root node of current branch 
-        - if the tree is directed and this is not given, 
+
+        root: the root node of current branch
+        - if the tree is directed and this is not given,
         the root will be found and used
-        - if the tree is directed and this is given, then 
+        - if the tree is directed and this is given, then
         the positions will be just for the descendants of this node.
-        - if the tree is undirected and not given, 
+        - if the tree is undirected and not given,
         then a random choice will be used.
-        
+
         width: horizontal space allocated for this branch - avoids overlap with other branches
-        
+
         vert_gap: gap between levels of hierarchy
-        
+
         vert_loc: vertical location of root
-        
+
         xcenter: horizontal location of root
         '''
         if not nx.is_tree(G):
@@ -2492,38 +2492,38 @@ class Skeleton:
             parent: parent of this branch. - only affects it if non-directed
 
             '''
-        
+
             if pos is None:
                 pos = {root:(xcenter,vert_loc)}
             else:
                 pos[root] = (xcenter, vert_loc)
             children = list(G.neighbors(root))
             if not isinstance(G, nx.DiGraph) and parent is not None:
-                children.remove(parent)  
+                children.remove(parent)
             if len(children)!=0:
                 if 'child' in G.nodes[children[0]]:
                     if G.nodes[children[0]]['child'] == 'right':
                         children = children[::-1]
-                dx = width/len(children) 
+                dx = width/len(children)
                 nextx = xcenter - width/2 - dx/2
                 for child in children:
                     nextx += dx
-                    pos = _hierarchy_pos(G,child, width = dx, vert_gap = vert_gap, 
+                    pos = _hierarchy_pos(G,child, width = dx, vert_gap = vert_gap,
                                         vert_loc = vert_loc-vert_gap, xcenter=nextx,
                                         pos=pos, parent = root)
             return pos
 
-                
+
         return _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
 
 
     @staticmethod
     def ego_graph(graph, cur, level):
         # re-index first, making sure the indexing is consistent with post-order during program synthesis
-        # bottom-first, left-first                    
+        # bottom-first, left-first
         graph = nx.ego_graph(graph, cur, level)
         relabel = dict(zip(nx.dfs_postorder_nodes(graph), range(len(graph))))
-        graph = nx.relabel_nodes(graph, relabel)         
+        graph = nx.relabel_nodes(graph, relabel)
         dists = dict(nx.shortest_path_length(graph, source=relabel[cur]))
         max_depth = max(dists.values())+1
         for tgt in dists:
@@ -2551,18 +2551,18 @@ class Skeleton:
             for b in g:
                 if self.pred(b) == self.tree_root:
                     root = b
-                    continue                
+                    continue
                 if self.pred(self.pred(b)) == a:
-                    child = self.tree.nodes[self.pred(b)]['child']                        
+                    child = self.tree.nodes[self.pred(b)]['child']
                     g.add_edge(a, b)
-                    g.nodes[b]['child'] = child    
-        
-        Skeleton.label_depth(g, root)        
+                    g.nodes[b]['child'] = child
+
+        Skeleton.label_depth(g, root)
         node_map = dict(zip(g.nodes(), range(self.rxns.sum())))
         reverse_node_map = dict(zip(range(self.rxns.sum()), g.nodes()))
         g = nx.relabel_nodes(g, node_map)
         return g, node_map, reverse_node_map
-    
+
 
     def rxn_prog(self):
         g, _, reverse_node_map = self.rxn_graph()
@@ -2571,20 +2571,20 @@ class Skeleton:
         max_dist = 0
         for i in g:
             g.nodes[i]['depth'] = dists[reverse_node_map[i]]//2
-            max_dist = max(g.nodes[i]['depth'], max_dist)            
+            max_dist = max(g.nodes[i]['depth'], max_dist)
         root = 0
         for i in g:
             g.nodes[i]['depth'] = max_dist+1-g.nodes[i]['depth']
             if g.nodes[i]['depth'] > g.nodes[root]['depth']:
-                root = i                       
-        return p       
+                root = i
+        return p
 
 
     def hash(self):
         """
-        Build rxn tree        
+        Build rxn tree
         """
-        p = self.rxn_prog()      
+        p = self.rxn_prog()
         val = p.hash(self.mask[self.rxns])
         return val
 
@@ -2684,12 +2684,12 @@ def compute_md(tree, root_ind):
         dists = dict(nx.all_pairs_shortest_path_length(tree))
         for k in range(len(tree)):
             for i in range(len(tree)):
-                for j in range(len(tree)):  
+                for j in range(len(tree)):
                     if i == j: continue
                     ik = ancs[(i,k)] if (i,k) in ancs else ancs[(k,i)]
                     jk = ancs[(j,k)] if (j,k) in ancs else ancs[(k,j)]
                     d1 = dists[ik][i]+dists[ik][k]
-                    d2 = dists[jk][j]+dists[jk][k]    
+                    d2 = dists[jk][j]+dists[jk][k]
                     if d1 == d2:
                         ntable[k] = ntable.get(k, []) + [(i, j)]
         for k in ntable:
@@ -2716,13 +2716,13 @@ def compute_md(tree, root_ind):
                 break
             if i == 1:
                 break
-            
+
     else:
         r_set = [root_ind]
     return r_set
-            
 
-def get_bool_mask(i, size=-1):    
+
+def get_bool_mask(i, size=-1):
     mask = list(map(bool, map(int, format(i,'b'))))
     if size > -1:
         mask = [0 for _ in range(size-len(mask))] + mask
@@ -2735,7 +2735,7 @@ def inds_to_i(inds, length, min_r_set):
     """
     zeros = np.zeros((length,), dtype=int)
     zeros[inds] = 1
-    zeros[min_r_set] = -1    
+    zeros[min_r_set] = -1
     return int(''.join(map(str, filter(lambda x: x !=- 1, zeros))), 2)
 
 
@@ -2752,11 +2752,11 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
     kwargs = {}
     if args.determine_criteria in ['leaves_up', 'all_leaves']:
         kwargs['leaves_up'] = True
-    elif args.determine_criteria == 'rxn_frontier':        
-        kwargs['rxn_frontier'] = True        
-    elif args.determine_criteria == 'bb_frontier':        
+    elif args.determine_criteria == 'rxn_frontier':
         kwargs['rxn_frontier'] = True
-        kwargs['bb_frontier'] = True        
+    elif args.determine_criteria == 'bb_frontier':
+        kwargs['rxn_frontier'] = True
+        kwargs['bb_frontier'] = True
     elif args.determine_criteria == 'target_down':
         kwargs['target_down'] = True
     elif args.determine_criteria == 'rxn_target_down':
@@ -2768,7 +2768,7 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         kwargs['rxn_target_down'] = True
         kwargs['rxn_target_down_interm'] = True
     elif args.determine_criteria == 'bfs':
-        kwargs['bfs'] = True    
+        kwargs['bfs'] = True
     if anchors is not None:
         poss_vals = []
         val = get_wl_kernel(sk.tree, min_r_set[:2+len(anchors)])
@@ -2780,32 +2780,32 @@ def process_syntree_mask(i, sk, args, min_r_set, anchors=None):
         if len(poss_vals) > 1:
             breakpoint()
         # featurize prediction problem of next anchor, which can be any of poss_vals
-        node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])        
+        node_mask, X, y = sk.get_partial_state(poss_vals, min_r_set[len(anchors)+1])
     else:
         sk.reset(min_r_set)
-        zero_mask_inds = np.where(sk.mask == 0)[0]    
+        zero_mask_inds = np.where(sk.mask == 0)[0]
         bool_mask = get_bool_mask(i)
-        sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
-        node_mask, X, y = sk.get_state(**kwargs)        
+        sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]
+        node_mask, X, y = sk.get_state(**kwargs)
         if args.determine_criteria == 'all_leaves':
             assert sk.all_leaves
 
     # visualize to help debug
-    
+
     path = os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}.png")
     if not os.path.exists(path):
         sk.visualize(path)
         sk.visualize(os.path.join(args.visualize_dir, f"{sk.index}_{args.determine_criteria}_{i}_Xy.png"), Xy=(X, y))
 
 
-    return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])        
+    return (node_mask, X, y, sk.tree.nodes[sk.tree_root]['smiles'])
 
 
 def test_is_leaves_up(i, sk, min_r_set):
     sk.reset(min_r_set)
-    zero_mask_inds = np.where(sk.mask == 0)[0]    
+    zero_mask_inds = np.where(sk.mask == 0)[0]
     bool_mask = get_bool_mask(i)
-    sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]   
+    sk.mask = zero_mask_inds[-len(bool_mask):][bool_mask]
     return sk.leaves_up
 
 
@@ -2816,18 +2816,18 @@ def load_skeletons(args):
         skeletons = pickle.load(open(args.skeleton_file, 'rb'))
         if args.skeleton_canonical_file:
             canon_skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
-            class_nums = {k: len(canon_skeletons[k]) for k in canon_skeletons}        
+            class_nums = {k: len(canon_skeletons[k]) for k in canon_skeletons}
         else:
             return skeletons
-      
+
         # sanity checks
         for sk, sk_canon in zip(skeletons, canon_skeletons):
             if sk.edges != sk_canon.edges:
-                breakpoint()                
+                breakpoint()
     else:
         sts = []
         for st in syntree_collection.sts:
-            if st: 
+            if st:
                 try:
                     st.build_tree()
                 except:
@@ -2835,7 +2835,7 @@ def load_skeletons(args):
                 sts.append(st)
             else:
                 breakpoint()
-        
+
         # use the train set to define the skeleton classes
         if args.skeleton_canonical_file:
             skeletons = pickle.load(open(args.skeleton_canonical_file, 'rb'))
@@ -2845,12 +2845,12 @@ def load_skeletons(args):
         for i, st in tqdm(enumerate(sts)):
             done = False
             for sk in skeletons:
-                if st.is_isomorphic(sk): 
+                if st.is_isomorphic(sk):
                     done = True
                     skeletons[sk].append(st)
                     break
-                    
-            if not done: 
+
+            if not done:
                 skeletons[st] = [st]
         if args.skeleton_canonical_file:
             if list(class_nums.keys()) != list(skeletons.keys()):
@@ -2858,7 +2858,7 @@ def load_skeletons(args):
             for k in class_nums:
                 skeletons[k] = skeletons[k][class_nums[k]:]
         for k, v in skeletons.items():
-            print(f"count: {len(v)}") 
+            print(f"count: {len(v)}")
 
         pickle.dump(skeletons, open(args.skeleton_file, 'wb+'))
     return skeletons
@@ -2896,17 +2896,17 @@ class SyntheticTreeSet:
     def save(self, file: str) -> None:
         """Save a collection of synthetic trees to a `*.json.gz` file."""
         assert str(file).endswith(".json.gz"), f"Incompatible file extension for file {file}"
-          
+
 
         st_list = {"trees": [st.output_dict() for st in self.sts if st is not None]}
         with gzip.open(file, "wt") as f:
             f.write(json.dumps(st_list))
 
-        
-        pkl_file = str(file).replace(".json.gz", ".pkl")      
+
+        pkl_file = str(file).replace(".json.gz", ".pkl")
         sts = []
         for st in self.sts:
-            if st: 
+            if st:
                 try:
                     st.build_tree()
                 except:
@@ -2915,7 +2915,7 @@ class SyntheticTreeSet:
 
         done = False
         skeletons = {}
-        
+
         for st in sts:
             for sk in skeletons:
                 if st.is_isomorphic(sk):
@@ -2924,11 +2924,11 @@ class SyntheticTreeSet:
             if done: continue
             skeletons[st] = [st]
 
-        
-        for k, v in skeletons.items():
-            print(f"count: {len(v)}") 
 
-        pickle.dump(skeletons, open(pkl_file, 'wb+'))        
+        for k, v in skeletons.items():
+            print(f"count: {len(v)}")
+
+        pickle.dump(skeletons, open(pkl_file, 'wb+'))
 
     def _print(self, x=3):
         """Helper function for debugging."""
@@ -2949,25 +2949,25 @@ class SkeletonSet:
         self.sks = None
         self.coords = None
         self.sim = None
-        
+
 
     def load_skeletons(self, skeletons):
         """
-        This converts skeletons into a lookup from smiles to 
+        This converts skeletons into a lookup from smiles to
         the skeletons of its synthetic tree(s)
         """
         lookup = {} # should be multi-set?
         sks = []
-        for st, sts in skeletons.items():            
+        for st, sts in skeletons.items():
             for st in sts:
                 sk = Skeleton(st, len(sks)) # uses representative syntree
                 lookup[st.root.smiles] = lookup.get(st.root.smiles, []) + [sk]
             sks.append(sk)
         self.lookup = lookup
-        self.sks = sks   
+        self.sks = sks
         self.skeletons = skeletons
         return self
-    
+
     @staticmethod
     def compute_dists(i, j, sk1, sk2):
         # dist = nx.graph_edit_distance(sk1, sk2, roots=(len(sk1)-1, len(sk2)-1), upper_bound=6)
@@ -2995,7 +2995,7 @@ class SkeletonSet:
         print("begin mds")
         coords = ms.fit_transform(sim)
         self.coords = coords
-    
+
 
 
 if __name__ == "__main__":
