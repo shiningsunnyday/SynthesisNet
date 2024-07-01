@@ -336,7 +336,7 @@ class GeneticSearch:
                 pass
 
             else:
-                surrogate(population)
+                surrogate(population, desc="Evaluating initial")
                 self.apply_oracle(population, oracle)
                 num_calls += len(population)
                 X_history, y_history = self.record_history(population)
