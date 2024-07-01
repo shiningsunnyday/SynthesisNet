@@ -293,18 +293,25 @@ class GeneticSearch:
                 #         sk1 = binary_tree_to_skeleton(parents[0].bt)
                 #         sk2 = binary_tree_to_skeleton(child.bt)
                 #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
-                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')  
+                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
+                    offsprings.append(child)
+
+                # (!!) surrogate() reassigns fps and bts of offsprings
+                surrogate(offsprings, desc="Surrogate offsprings")  # flatten
+
+                child2s = []
+                for child in offsprings:
                     if cfg.child2_strategy == "analog":
                         child2 = self.analog_mutate(child)
                     else:
-                        child2 = self.crossover_and_mutate(parents)
-                    offsprings.append([child, child2])
+                        raise NotImplementedError()
+                    child2s.append(child2)
+                surrogate(child2s, desc="Surrogate child2s")
 
-                # (!!) surrogate() reassigns fps of offsprings
-                surrogate(sum(offsprings, []))  # flatten
+                offsprings = list(zip(offsprings, child2s))
 
                 # Choose the candidate that maximizes internal diversity or EI
                 if epoch <= cfg.explore_warmup:

@@ -189,12 +189,14 @@ def get_smiles_ours(idx_and_ind):
 
     ans = 0.0
     best_smi = ""
+    best_bt = None
     for sk in decode(sk0, ind.fp):
         score, smi, bt = reconstruct(sk, ind.fp, return_bt=True) # do stuff with bt
         if score > ans:
             ans = score
             best_smi = smi
-    return idx, best_smi
+            best_bt = bt
+    return idx, best_smi, best_bt
 
 
 def get_smiles_synnet(
@@ -238,19 +240,20 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
+def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     indexed_batch = list(enumerate(batch))
     if config.num_workers <= 0:
         indexed_smiles = map(converter, indexed_batch)
     else:
         indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
-    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
-    for idx, smi in pbar:
+    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
+    for idx, smi, bt in pbar:
         ind = batch[idx]
         assert smi is not None
         ind.smiles = Chem.CanonSmiles(smi)
         ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+        ind.bt = bt
 
 
 def main():
