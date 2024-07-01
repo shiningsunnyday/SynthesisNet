@@ -70,7 +70,7 @@ class GeneticSearch:
             if cfg.bt_ignore:
                 assert ind.bt is None
             else:
-                assert 2 <= ind.bt.number_of_nodes()
+                assert 1 <= ind.bt.number_of_nodes()
                 assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
                 assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
 
