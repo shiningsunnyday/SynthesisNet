@@ -1,4 +1,3 @@
-#!~/anaconda3/envs/synnet/bin/python
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 MAX_NUM_RXNS=$3
 MODEL_DIR=/dccstor/graph-design/surrogate

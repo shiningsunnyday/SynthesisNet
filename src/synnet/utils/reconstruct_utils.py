@@ -1063,8 +1063,11 @@ def reconstruct(sk, smi, return_bt=False):
     best_smi = smiles[best_ind]
     if return_bt:        
         best_n = nodes[best_ind]
-        best_sk = sk.subtree(best_n)
-        best_bt = skeleton_to_binary_tree(best_sk)
+        if sk.leaves[best_n]:
+            best_bt = ...
+        else:
+            best_sk = sk.subtree(best_n)
+            best_bt = skeleton_to_binary_tree(best_sk)
         return correct, best_smi, best_bt
     return correct, best_smi
 
