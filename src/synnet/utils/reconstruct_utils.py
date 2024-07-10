@@ -15,7 +15,7 @@ import multiprocessing as mp
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 from synnet.utils.analysis_utils import serialize_string
-from ga.utils import skeleton_to_binary_tree
+from ga.utils import skeleton_to_binary_tree, random_name
 from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
@@ -1062,9 +1062,13 @@ def reconstruct(sk, smi, return_bt=False):
     best_ind = np.argmax(sims)
     best_smi = smiles[best_ind]
     if return_bt:        
-        best_n = nodes[best_ind]
-        best_sk = sk.subtree(best_n)
-        best_bt = skeleton_to_binary_tree(best_sk)
+        best_n = nodes[best_ind]        
+        if sk.leaves[best_n]:
+            best_bt = nx.DiGraph()
+            best_bt.add_node(random_name())
+        else:
+            best_sk = sk.subtree(best_n)
+            best_bt = skeleton_to_binary_tree(best_sk)
         return correct, best_smi, best_bt
     return correct, best_smi
 

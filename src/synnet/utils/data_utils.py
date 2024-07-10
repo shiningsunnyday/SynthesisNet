@@ -1993,9 +1993,12 @@ class Skeleton:
 
         self.tree_root = next(v for v, d in self.tree.in_degree() if d == 0)
         assert self.tree_root == len(whole_tree)-1
-        self.tree_edges = np.array(self.tree.edges).T
+        if len(self.tree.edges):
+            self.tree_edges = np.array(self.tree.edges).T
+        else:
+            self.tree_edges = np.empty((2, 0), dtype=int)
         self.non_root_tree_edges = self.tree_edges[:, (self.tree_edges != self.tree_root).all(axis=0)] # useful later
-        self.leaves = np.array([((t not in self.tree_edges[0]) and t != self.tree_root) for t in range(len(self.tree))])
+        self.leaves = np.array([((t not in self.tree_edges[0])) for t in range(len(self.tree))])
         self.rxns = np.array(['rxn_id' in self.tree.nodes[n] for n in range(len(self.tree))])
         self.bidir_edges = np.concatenate((self.tree_edges, self.tree_edges[::-1]), axis=-1)
         self.index = index
@@ -2023,7 +2026,7 @@ class Skeleton:
         mapping = {k: i for i, k in enumerate(reversed(list(nx.topological_sort(tree))))}
         tree: nx.DiGraph = nx.relabel_nodes(tree, mapping)  # makes a copy
         return Skeleton(st=None, index=self.index, whole_tree=tree, zss_tree=None)
-
+        
 
 
     def do_bfs(self, res, interm=False):
