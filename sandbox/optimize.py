@@ -50,6 +50,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Input file for the pre-computed embeddings (*.npy)
     embeddings_knn_file: str = "data/assets/building-blocks/enamine_us_emb_fp_256.npy"
+    embeddings_knn_file_large: str = "data/assets/building-blocks/enamine_us_emb_fp_2048.npy"
 
     # If given, consider only these bbs
     top_bbs_file: Optional[str] = None
