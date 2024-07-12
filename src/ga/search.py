@@ -19,6 +19,7 @@ from rdkit import Chem
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
+from tdc import Oracle
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -28,6 +29,56 @@ from synnet.utils.data_utils import binary_tree_to_skeleton
 from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
+
+
+def dock_drd3(smi):
+    # define the oracle function from the TDC
+    _drd3 = Oracle(name="drd3_docking")
+
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_drd3(smi)
+        except:
+            return 0.0
+
+
+def dock_7l11(smi):
+    # define the oracle function from the TDC
+    _7l11 = Oracle(name="7l11_docking")
+
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_7l11(smi)
+        except:
+            return 0.0
+
+
+def fetch_oracle(objective):
+    if objective == "qed":
+        # define the oracle function from the TDC
+        return Oracle(name="QED")
+    elif objective == "logp":
+        # define the oracle function from the TDC
+        return Oracle(name="LogP")
+    elif objective == "jnk":
+        # return oracle function from the TDC
+        return Oracle(name="JNK3")
+    elif objective == "gsk":
+        # return oracle function from the TDC
+        return Oracle(name="GSK3B")
+    elif objective == "drd2":
+        # return oracle function from the TDC
+        return Oracle(name="DRD2")
+    elif objective == "7l11":
+        return dock_7l11
+    elif objective == "drd3":
+        return dock_drd3
+    else:
+        raise ValueError("Objective function not implemented")
 
 
 class GeneticSearch:
@@ -217,14 +268,24 @@ class GeneticSearch:
         y = np.array([ind.fitness for ind in population])
         return X, y
 
-    def apply_oracle(self, population: Population, oracle) -> None:
-        for ind in population:
-            ind.fitness = oracle(ind.smiles)
+    @staticmethod
+    def init_oracle(objective):
+        global oracle
+        oracle = fetch_oracle(objective)
+
+    def apply_oracle_job(self, smi):
+        global oracle
+        return oracle(smi)
+
+    def apply_oracle(self, population: Population, pool) -> None:
+        smiles = [ind.smiles for ind in population]
+        for i, score in enumerate(pool.map(self.apply_oracle_job, smiles)):
+            population[i].fitness = score
 
     def optimize(
         self,
         surrogate: Callable[[Population], None],
-        oracle: Callable[[str], float]
+        pool,
     ) -> None:
         """Runs a genetic search.
 
@@ -263,7 +324,7 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            self.apply_oracle(population, oracle)
+            self.apply_oracle(population, pool)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
 
@@ -326,7 +387,7 @@ class GeneticSearch:
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
                     offsprings = random.sample(offsprings, k=leftover)
-                self.apply_oracle(offsprings, oracle)
+                self.apply_oracle(offsprings, pool)
                 num_calls += len(offsprings)
                 X_history, y_history = self.record_history(population + offsprings)
 
@@ -337,7 +398,7 @@ class GeneticSearch:
 
             else:
                 surrogate(population, desc="Evaluating initial")
-                self.apply_oracle(population, oracle)
+                self.apply_oracle(population, pool)
                 num_calls += len(population)
                 X_history, y_history = self.record_history(population)
 
