@@ -5,6 +5,7 @@ import multiprocessing as mp
 import pickle
 import random
 from functools import partial
+from multiprocessing import Pool
 from typing import Callable, Dict, List, Tuple
 
 import networkx as nx
@@ -21,7 +22,6 @@ from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 from tdc import Oracle
-from torch.multiprocessing import Pool
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -309,7 +309,6 @@ class GeneticSearch:
             processes=cfg.max_oracle_workers,
             initializer=self.init_oracle,
             initargs=[objective],
-            context=mp.get_context("spawn"),
         )
 
         # Initialize WandB
@@ -446,3 +445,6 @@ class GeneticSearch:
         # Cleanup
         if cfg.wandb:
             wandb.finish()
+
+        pool.close()
+        pool.join()

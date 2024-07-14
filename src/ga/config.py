@@ -24,6 +24,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     offspring_size: int = 512
 
     max_oracle_calls: int = int(1e7)
+    max_oracle_workers: int = 5
 
     # Mutation
     fp_mutate_prob: float = 0.5
