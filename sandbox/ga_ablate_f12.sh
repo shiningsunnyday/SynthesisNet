@@ -1,4 +1,5 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
+export LD_LIBRARY_PATH=/home/alston/miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
 export OMP_NUM_THREADS=1
 
