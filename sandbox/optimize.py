@@ -269,13 +269,12 @@ def main():
     search = GeneticSearch(config)
 
     if config.num_workers > 0:
-        pool = Pool(processes=config.num_workers, initializer=search.init_oracle, initargs=[config.objective])
+        pool = Pool(processes=config.num_workers)
     else:
-        search.init_oracle(config.objective)
         pool = None
 
     surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
-    search.optimize(surrogate=surrogate, pool=pool)
+    search.optimize(surrogate=surrogate, objective=config.objective)
 
     if pool is not None:
         pool.close()

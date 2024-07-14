@@ -1,6 +1,7 @@
 import collections
 import itertools
 import json
+import multiprocessing as mp
 import pickle
 import random
 from functools import partial
@@ -20,6 +21,7 @@ from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 from tdc import Oracle
+from torch.multiprocessing import Pool
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -285,7 +287,7 @@ class GeneticSearch:
     def optimize(
         self,
         surrogate: Callable[[Population], None],
-        pool,
+        objective,
     ) -> None:
         """Runs a genetic search.
 
@@ -301,6 +303,14 @@ class GeneticSearch:
 
         # Seeding
         pl.seed_everything(cfg.seed)
+
+        # Oracle Pool
+        pool = Pool(
+            processes=cfg.max_oracle_workers,
+            initializer=self.init_oracle,
+            initargs=[objective],
+            context=mp.get_context("spawn"),
+        )
 
         # Initialize WandB
         if cfg.wandb:
