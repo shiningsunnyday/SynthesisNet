@@ -83,9 +83,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     filter_only: List[Literal["rxn", "bb"]] = []
 
-    # Objective function to optimize
-    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
-
     num_workers: int = 0
     chunksize: int = 1
 
@@ -274,7 +271,7 @@ def main():
         pool = None
 
     surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
-    search.optimize(surrogate=surrogate, objective=config.objective)
+    search.optimize(surrogate=surrogate)
 
     if pool is not None:
         pool.close()

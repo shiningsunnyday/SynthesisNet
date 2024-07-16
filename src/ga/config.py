@@ -19,6 +19,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
     bt_ignore: bool = False
 
     # Search parameters
+    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
+
     generations: int = 200
     population_size: int = 128
     offspring_size: int = 512

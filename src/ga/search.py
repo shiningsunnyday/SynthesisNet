@@ -33,32 +33,6 @@ from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_ske
 Population = List[Individual]
 
 
-def dock_drd3(smi):
-    # define the oracle function from the TDC
-    _drd3 = Oracle(name="drd3_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_drd3(smi)
-        except:
-            return 0.0
-
-
-def dock_7l11(smi):
-    # define the oracle function from the TDC
-    _7l11 = Oracle(name="7l11_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_7l11(smi)
-        except:
-            return 0.0
-
-
 def fetch_oracle(objective):
     if objective == "qed":
         # define the oracle function from the TDC
@@ -76,9 +50,9 @@ def fetch_oracle(objective):
         # return oracle function from the TDC
         return Oracle(name="DRD2")
     elif objective == "7l11":
-        return dock_7l11
+        return Oracle(name="7l11_docking")
     elif objective == "drd3":
-        return dock_drd3
+        return Oracle(name="drd3_docking")
     else:
         raise ValueError("Objective function not implemented")
 
@@ -277,18 +251,26 @@ class GeneticSearch:
 
     def apply_oracle_job(self, smi):
         global oracle
-        return oracle(smi)
+
+        try:
+            score = oracle(smi)
+            if not np.isfinite(score):
+                print("Oracle NaN on", smi)
+                score = 0.0
+        except:
+            print("Oracle erorr on", smi)
+            score = 0.0
+        if self.config.objective in ["7l11", "drd3"]:
+            score = -score
+
+        return score
 
     def apply_oracle(self, population: Population, pool) -> None:
         smiles = [ind.smiles for ind in population]
         for i, score in enumerate(pool.map(self.apply_oracle_job, smiles)):
             population[i].fitness = score
 
-    def optimize(
-        self,
-        surrogate: Callable[[Population], None],
-        objective,
-    ) -> None:
+    def optimize(self, surrogate: Callable[[Population], None]) -> None:
         """Runs a genetic search.
 
         Args:
@@ -308,7 +290,7 @@ class GeneticSearch:
         pool = Pool(
             processes=cfg.max_oracle_workers,
             initializer=self.init_oracle,
-            initargs=[objective],
+            initargs=[cfg.objective],
         )
 
         # Initialize WandB
