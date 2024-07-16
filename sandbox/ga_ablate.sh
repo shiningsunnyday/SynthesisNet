@@ -18,7 +18,7 @@ python sandbox/optimize.py \
     --wandb \
     --wandb_project=syntreenet_ga_rebuttal \
     --method=ours \
-    --num_workers=0 \
+    --num_workers=40 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
     --early_stop \

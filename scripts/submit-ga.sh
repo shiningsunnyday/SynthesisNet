@@ -19,7 +19,7 @@
 cpus=50
 for seed in {11,12};
 do
-    for obj in {'gsk','jnk'};
+    for obj in {'7l11','drd3'};
     do  
         for strategy in {'semantic','analog'};
         do
