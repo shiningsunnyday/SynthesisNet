@@ -15,7 +15,7 @@ import multiprocessing as mp
 from synnet.MolEmbedder import MolEmbedder
 from synnet.utils.predict_utils import mol_fp, tanimoto_similarity
 from synnet.utils.analysis_utils import serialize_string
-from ga.utils import skeleton_to_binary_tree
+from ga.utils import skeleton_to_binary_tree, random_name
 from synnet.policy import RxnPolicy
 import rdkit.Chem as Chem
 from synnet.config import DATA_PREPROCESS_DIR, DATA_RESULT_DIR, MAX_PROCESSES, MAX_DEPTH, NUM_POSS, DELIM
@@ -263,7 +263,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
         x_smi = rec[ind][1]
         score_x = oracle(x_smi)
         res = [(score_x, x_smi, sk.index, 1, 1)]
-        pi_x = np.exp(beta_anneal(0)*score_x)        
+        pi_x = np.exp(beta_anneal(0)*score_x)
         oracle_lookup = {x_smi: score_x}
         key = (''.join(list(map(str, fp))), sk.index)
         reconstruct_lookup = {key: sks}
@@ -324,7 +324,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
                     score_y = oracle_lookup[y_smi]
                 else:
                     score_y = oracle(y_smi)
-                    oracle_lookup[y_smi] = score_y                
+                    oracle_lookup[y_smi] = score_y
                 pi_y = np.exp(beta_anneal(iter)*score_y)
                 a_xy = min(1, pi_y/pi_x)
                 if random.random() < a_xy: # accept
@@ -334,7 +334,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
                     x_smi = y_smi
                     res.append((score_y, y_smi, sk_y.index, len(reconstruct_lookup), len(oracle_lookup)))
                 else:
-                    res.append((score_x, x_smi, sk.index, len(reconstruct_lookup), len(oracle_lookup)))                
+                    res.append((score_x, x_smi, sk.index, len(reconstruct_lookup), len(oracle_lookup)))
             uniq_analogs[res[-1][1]] = 1
             fig = plt.Figure()
             ax = fig.add_subplot(1,1,1)
@@ -971,8 +971,10 @@ def load_data(args, logger=None):
     # bb_emb = bblocks_molembedder.get_embeddings()
     # bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
+    bb_emb_large = torch.FloatTensor(np.load(args.embeddings_knn_file_large))
     if logger is not None:
         logger.info(f"Successfully read {args.embeddings_knn_file}.")
+        logger.info(f"Successfully read {args.embeddings_knn_file_large}.")
         logger.info("...loading data completed.")
     # remember indices of bblocks
     bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
@@ -989,6 +991,7 @@ def load_data(args, logger=None):
     globals()['rxn_templates'] = rxn_templates
     globals()['bblocks'] = bblocks
     globals()['bb_emb'] = bb_emb
+    globals()['bb_emb_large'] = bb_emb_large
     globals()['args'] = args
 
 
@@ -1043,16 +1046,22 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
 
 # For reconstruct without true skeleton
 def reconstruct(sk, smi, return_bt=False):
-    rxns = globals()['rxns']
-    sk.reconstruct(rxns)
-    smiles = []
-    nodes = []
-    for n in sk.tree:
-        if 'smiles' in sk.tree.nodes[n]:
-            if sk.tree.nodes[n]['smiles']:
-                smile_list = sk.tree.nodes[n]['smiles'].split(DELIM)
-                smiles += smile_list
-                nodes += [n for _ in smile_list]
+    if sk.tree_edges.size == 0:  # stump case
+        bb_ind = nn_search_list(torch.tensor(smi), bb_emb_large, top_k=1).item()
+        smiles = [bblocks[bb_ind]]
+        nodes = [0]
+    else:
+        rxns = globals()['rxns']
+        sk.reconstruct(rxns)
+        smiles = []
+        nodes = []
+        for n in sk.tree:
+            if 'smiles' in sk.tree.nodes[n]:
+                if sk.tree.nodes[n]['smiles']:
+                    smile_list = sk.tree.nodes[n]['smiles'].split(DELIM)
+                    smiles += smile_list
+                    nodes += [n for _ in smile_list]
+
     if isinstance(smi, np.ndarray):
         sims = tanimoto_similarity(smi, smiles)
     else:
@@ -1061,15 +1070,18 @@ def reconstruct(sk, smi, return_bt=False):
     correct = max(sims)
     best_ind = np.argmax(sims)
     best_smi = smiles[best_ind]
-    if return_bt:        
-        best_n = nodes[best_ind]
+    best_n = nodes[best_ind]
+
+    if return_bt:
         if sk.leaves[best_n]:
-            best_bt = ...
+            best_bt = nx.DiGraph()
+            best_bt.add_node(random_name())
         else:
             best_sk = sk.subtree(best_n)
             best_bt = skeleton_to_binary_tree(best_sk)
         return correct, best_smi, best_bt
-    return correct, best_smi
+    else:
+        return correct, best_smi
 
 
 

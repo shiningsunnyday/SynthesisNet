@@ -9,7 +9,6 @@ from typing import List, Literal, Optional
 import numpy as np
 import tqdm
 from rdkit import Chem
-from tdc import Oracle
 from torch.multiprocessing import Pool
 
 from ga.config import GeneticSearchConfig
@@ -50,6 +49,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Input file for the pre-computed embeddings (*.npy)
     embeddings_knn_file: str = "data/assets/building-blocks/enamine_us_emb_fp_256.npy"
+    embeddings_knn_file_large: str = "data/assets/building-blocks/enamine_us_emb_fp_2048.npy"
 
     # If given, consider only these bbs
     top_bbs_file: Optional[str] = None
@@ -82,9 +82,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     top_k_rxn: int = 3
 
     filter_only: List[Literal["rxn", "bb"]] = []
-
-    # Objective function to optimize
-    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
 
     num_workers: int = 0
     chunksize: int = 1
@@ -133,68 +130,20 @@ def get_args():
     return parser.parse_args()
 
 
-def dock_drd3(smi):
-    # define the oracle function from the TDC
-    _drd3 = Oracle(name="drd3_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_drd3(smi)
-        except:
-            return 0.0
-
-
-def dock_7l11(smi):
-    # define the oracle function from the TDC
-    _7l11 = Oracle(name="7l11_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_7l11(smi)
-        except:
-            return 0.0
-
-
-def fetch_oracle(objective):
-    if objective == "qed":
-        # define the oracle function from the TDC
-        return Oracle(name="QED")
-    elif objective == "logp":
-        # define the oracle function from the TDC
-        return Oracle(name="LogP")
-    elif objective == "jnk":
-        # return oracle function from the TDC
-        return Oracle(name="JNK3")
-    elif objective == "gsk":
-        # return oracle function from the TDC
-        return Oracle(name="GSK3B")
-    elif objective == "drd2":
-        # return oracle function from the TDC
-        return Oracle(name="DRD2")
-    elif objective == "7l11":
-        return dock_7l11
-    elif objective == "drd3":
-        return dock_drd3
-    else:
-        raise ValueError("Objective function not implemented")
-
-
 def get_smiles_ours(idx_and_ind):
     idx, ind = idx_and_ind
     sk0 = binary_tree_to_skeleton(ind.bt)
 
     ans = 0.0
     best_smi = ""
+    best_bt = None
     for sk in decode(sk0, ind.fp):
         score, smi, bt = reconstruct(sk, ind.fp, return_bt=True) # do stuff with bt
         if score > ans:
             ans = score
             best_smi = smi
-    return idx, best_smi
+            best_bt = bt
+    return idx, best_smi, best_bt
 
 
 def get_smiles_synnet(
@@ -238,19 +187,20 @@ def get_smiles_synnet(
         return idx, tree.chemicals[max_score_idx].smiles
 
 
-def test_surrogate(batch, converter, pool, config: OptimizeGAConfig):
+def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     indexed_batch = list(enumerate(batch))
     if config.num_workers <= 0:
         indexed_smiles = map(converter, indexed_batch)
     else:
         indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
-    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc="Evaluating")
-    for idx, smi in pbar:
+    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
+    for idx, smi, bt in pbar:
         ind = batch[idx]
         assert smi is not None
         ind.smiles = Chem.CanonSmiles(smi)
         ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+        ind.bt = bt
 
 
 def main():
@@ -313,15 +263,15 @@ def main():
     else:
         raise NotImplementedError()
 
+    search = GeneticSearch(config)
+
     if config.num_workers > 0:
         pool = Pool(processes=config.num_workers)
     else:
         pool = None
 
     surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
-    oracle = fetch_oracle(config.objective)
-    search = GeneticSearch(config)
-    search.optimize(surrogate=surrogate, oracle=oracle)
+    search.optimize(surrogate=surrogate)
 
     if pool is not None:
         pool.close()

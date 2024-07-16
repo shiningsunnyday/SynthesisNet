@@ -1,9 +1,11 @@
 import collections
 import itertools
 import json
+import multiprocessing as mp
 import pickle
 import random
 from functools import partial
+from multiprocessing import Pool
 from typing import Callable, Dict, List, Tuple
 
 import networkx as nx
@@ -19,6 +21,7 @@ from rdkit import Chem
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
+from tdc import Oracle
 
 from ga import utils
 from ga.config import GeneticSearchConfig, Individual
@@ -28,6 +31,30 @@ from synnet.utils.data_utils import binary_tree_to_skeleton
 from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
+
+
+def fetch_oracle(objective):
+    if objective == "qed":
+        # define the oracle function from the TDC
+        return Oracle(name="QED")
+    elif objective == "logp":
+        # define the oracle function from the TDC
+        return Oracle(name="LogP")
+    elif objective == "jnk":
+        # return oracle function from the TDC
+        return Oracle(name="JNK3")
+    elif objective == "gsk":
+        # return oracle function from the TDC
+        return Oracle(name="GSK3B")
+    elif objective == "drd2":
+        # return oracle function from the TDC
+        return Oracle(name="DRD2")
+    elif objective == "7l11":
+        return Oracle(name="7l11_docking")
+    elif objective == "drd3":
+        return Oracle(name="drd3_docking")
+    else:
+        raise ValueError("Objective function not implemented")
 
 
 class GeneticSearch:
@@ -70,7 +97,7 @@ class GeneticSearch:
             if cfg.bt_ignore:
                 assert ind.bt is None
             else:
-                assert 2 <= ind.bt.number_of_nodes()
+                assert 1 <= ind.bt.number_of_nodes()
                 assert utils.num_internal(ind.bt) <= cfg.max_num_rxns
                 assert all((0 <= d <= 2) for _, d in ind.bt.out_degree())
 
@@ -217,15 +244,33 @@ class GeneticSearch:
         y = np.array([ind.fitness for ind in population])
         return X, y
 
-    def apply_oracle(self, population: Population, oracle) -> None:
-        for ind in population:
-            ind.fitness = oracle(ind.smiles)
+    @staticmethod
+    def init_oracle(objective):
+        global oracle
+        oracle = fetch_oracle(objective)
 
-    def optimize(
-        self,
-        surrogate: Callable[[Population], None],
-        oracle: Callable[[str], float]
-    ) -> None:
+    def apply_oracle_job(self, smi):
+        global oracle
+
+        try:
+            score = oracle(smi)
+            if not np.isfinite(score):
+                print("Oracle NaN on", smi)
+                score = 0.0
+        except:
+            print("Oracle erorr on", smi)
+            score = 0.0
+        if self.config.objective in ["7l11", "drd3"]:
+            score = -score
+
+        return score
+
+    def apply_oracle(self, population: Population, pool) -> None:
+        smiles = [ind.smiles for ind in population]
+        for i, score in enumerate(pool.map(self.apply_oracle_job, smiles)):
+            population[i].fitness = score
+
+    def optimize(self, surrogate: Callable[[Population], None]) -> None:
         """Runs a genetic search.
 
         Args:
@@ -240,6 +285,13 @@ class GeneticSearch:
 
         # Seeding
         pl.seed_everything(cfg.seed)
+
+        # Oracle Pool
+        pool = Pool(
+            processes=cfg.max_oracle_workers,
+            initializer=self.init_oracle,
+            initargs=[cfg.objective],
+        )
 
         # Initialize WandB
         if cfg.wandb:
@@ -263,7 +315,7 @@ class GeneticSearch:
             population = self.initialize(cfg.initialize_path)
 
             # Let's also log the seed stats
-            self.apply_oracle(population, oracle)
+            self.apply_oracle(population, pool)
             metrics = self.evaluate_scores(population, prefix="seeds")
             wandb.log({"generation": -1, **metrics}, commit=True)
 
@@ -293,18 +345,25 @@ class GeneticSearch:
                 #         sk1 = binary_tree_to_skeleton(parents[0].bt)
                 #         sk2 = binary_tree_to_skeleton(child.bt)
                 #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
-                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')  
+                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')
                 offsprings = []
                 for parents in self.choose_couples(population, epoch):
                     child = self.crossover_and_mutate(parents)
+                    offsprings.append(child)
+
+                # (!!) surrogate() reassigns fps and bts of offsprings
+                surrogate(offsprings, desc="Surrogate offsprings")  # flatten
+
+                child2s = []
+                for child in offsprings:
                     if cfg.child2_strategy == "analog":
                         child2 = self.analog_mutate(child)
                     else:
-                        child2 = self.crossover_and_mutate(parents)
-                    offsprings.append([child, child2])
+                        raise NotImplementedError()
+                    child2s.append(child2)
+                surrogate(child2s, desc="Surrogate child2s")
 
-                # (!!) surrogate() reassigns fps of offsprings
-                surrogate(sum(offsprings, []))  # flatten
+                offsprings = list(zip(offsprings, child2s))
 
                 # Choose the candidate that maximizes internal diversity or EI
                 if epoch <= cfg.explore_warmup:
@@ -319,7 +378,7 @@ class GeneticSearch:
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
                     offsprings = random.sample(offsprings, k=leftover)
-                self.apply_oracle(offsprings, oracle)
+                self.apply_oracle(offsprings, pool)
                 num_calls += len(offsprings)
                 X_history, y_history = self.record_history(population + offsprings)
 
@@ -329,8 +388,8 @@ class GeneticSearch:
                 pass
 
             else:
-                surrogate(population)
-                self.apply_oracle(population, oracle)
+                surrogate(population, desc="Evaluating initial")
+                self.apply_oracle(population, pool)
                 num_calls += len(population)
                 X_history, y_history = self.record_history(population)
 
@@ -368,3 +427,6 @@ class GeneticSearch:
         # Cleanup
         if cfg.wandb:
             wandb.finish()
+
+        pool.close()
+        pool.join()

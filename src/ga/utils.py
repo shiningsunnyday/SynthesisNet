@@ -66,7 +66,7 @@ def random_binary_tree(n: int) -> nx.DiGraph:
     return tree
 
 
-def num_internal(tree: nx.digraph): 
+def num_internal(tree: nx.digraph):
     return sum(1 for v, d in tree.out_degree() if (d > 0))
 
 
@@ -89,7 +89,7 @@ def random_add_leaf(tree: nx.DiGraph, max_internal: int) -> None:
 
 
 def random_remove_leaf(tree: nx.DiGraph) -> None:
-    if tree.number_of_nodes() <= 2:
+    if tree.number_of_nodes() <= 1:
         return
     leaves = [v for v, d in tree.out_degree() if (d == 0)]
     victim = random.choice(leaves)
@@ -141,11 +141,11 @@ def skeleton_to_binary_tree(skeleton):
 
     bt = nx.DiGraph()
     for node, ndata in list(tree.nodes(data=True)):
-        if "smiles" not in ndata:  # rxn node 
-            continue 
+        if "smiles" not in ndata:  # rxn node
+            continue
         rxns = list(tree.successors(node))
         if not rxns:
-            continue 
+            continue
         assert len(rxns) == 1
         reactants = list(tree.successors(rxns[0]))
         for adj in reactants:
