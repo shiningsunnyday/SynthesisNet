@@ -65,7 +65,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     ckpt_recognizer: Optional[str] = None
 
     # Model checkpoint dir, if given assume one ckpt per class
-    ckpt_dir: str = None
+    ckpt_dir: Optional[str] = None
 
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
