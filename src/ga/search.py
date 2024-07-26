@@ -199,16 +199,6 @@ class GeneticSearch:
 
         return Individual(fp=ind.fp.copy(), bt=bt)
 
-     # Choose the candidate that is least similar to population
-    def promote_explore(self, candidates, population: Population):
-        winner, minsim = None, 100.0
-        for ind in candidates:
-            sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
-            if sim < minsim:
-                winner, minsim = ind, sim
-        return winner
-
-    # Choose the candidate with highest EI
     def promote_exploit(self, candidates, gp: GaussianProcessRegressor, best):
         X = np.stack([ind.fp for ind in candidates], axis=0)
         y, std = gp.predict(X, return_std=True)
@@ -365,14 +355,11 @@ class GeneticSearch:
 
                 offsprings = list(zip(offsprings, child2s))
 
-                # Choose the candidate that maximizes internal diversity or EI
-                if epoch <= cfg.explore_warmup:
-                    promote = partial(self.promote_explore, population=population)
-                else:
-                    kernel = RBF(length_scale=1.0)
-                    gp = GaussianProcessRegressor(kernel=kernel)
-                    gp.fit(X=X_history, y=y_history)
-                    promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
+                # Choose the candidate that maximizes EI
+                kernel = RBF(length_scale=1.0)
+                gp = GaussianProcessRegressor(kernel=kernel)
+                gp.fit(X=X_history, y=y_history)
+                promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
                 offsprings = list(map(promote, offsprings))
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
