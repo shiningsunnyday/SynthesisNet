@@ -199,6 +199,7 @@ class GeneticSearch:
         return Individual(fp=ind.fp.copy(), bt=bt)
 
     def random_fp_flips(self, ind: Individual) -> Individual:
+        cfg = self.config
         mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
         fp = np.where(mask, 1 - ind.fp, ind.fp)
 
