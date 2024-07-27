@@ -266,7 +266,8 @@ class GeneticSearch:
 
     def apply_oracle(self, population: Population, pool) -> None:
         smiles = [ind.smiles for ind in population]
-        for i, score in enumerate(pool.map(self.apply_oracle_job, smiles)):
+        map_fn = map if (pool is None) else pool.map
+        for i, score in enumerate(map_fn(self.apply_oracle_job, smiles)):
             population[i].fitness = score
 
     def optimize(self, surrogate: Callable[[Population], None]) -> None:
@@ -286,11 +287,15 @@ class GeneticSearch:
         pl.seed_everything(cfg.seed)
 
         # Oracle Pool
-        pool = Pool(
-            processes=cfg.max_oracle_workers,
-            initializer=self.init_oracle,
-            initargs=[cfg.objective],
-        )
+        if cfg.max_oracle_workers > 0:
+            pool = Pool(
+                processes=cfg.max_oracle_workers,
+                initializer=self.init_oracle,
+                initargs=[cfg.objective],
+            )
+        else:
+            pool = None
+            self.init_oracle(cfg.objective)
 
         # Initialize WandB
         if cfg.wandb:
