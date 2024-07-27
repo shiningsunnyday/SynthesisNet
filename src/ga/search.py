@@ -179,11 +179,10 @@ class GeneticSearch:
 
         # Initialize bt
         bt = self.predict_bt(fp)
-        ind = Individual(fp=fp, bt=bt)
 
-        return ind
+        return Individual(fp=fp, bt=bt)
 
-    def analog_mutate(self, ind: Individual) -> Individual:
+    def random_bt_edits(self, ind: Individual) -> Individual:
         cfg = self.config
         if cfg.bt_ignore:
             return Individual(fp=ind.fp.copy(), bt=None)
@@ -199,16 +198,16 @@ class GeneticSearch:
 
         return Individual(fp=ind.fp.copy(), bt=bt)
 
-     # Choose the candidate that is least similar to population
-    def promote_explore(self, candidates, population: Population):
-        winner, minsim = None, 100.0
-        for ind in candidates:
-            sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
-            if sim < minsim:
-                winner, minsim = ind, sim
-        return winner
+    def random_fp_flips(self, ind: Individual) -> Individual:
+        cfg = self.config
+        mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
+        fp = np.where(mask, 1 - ind.fp, ind.fp)
 
-    # Choose the candidate with highest EI
+        # Initialize bt
+        bt = self.predict_bt(fp)
+
+        return Individual(fp=fp, bt=bt)
+
     def promote_exploit(self, candidates, gp: GaussianProcessRegressor, best):
         X = np.stack([ind.fp for ind in candidates], axis=0)
         y, std = gp.predict(X, return_std=True)
@@ -335,19 +334,10 @@ class GeneticSearch:
 
             # Crossover & mutation
             if epoch >= 0:
-                # # TODO: delete
-                # fn([child])
-                # if child.fitness > parents[0].fitness:
-                #     with open('/u/msun415/mutant/dump.txt', 'a+') as f:
-                #         smi1 = parents[0].smiles
-                #         smi2 = child.smiles
-                #         f.write(f"parent: {smi1} mutant: {smi2}\n")
-                #         sk1 = binary_tree_to_skeleton(parents[0].bt)
-                #         sk2 = binary_tree_to_skeleton(child.bt)
-                #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
-                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')
+                couples = self.choose_couples(population, epoch)
+
                 offsprings = []
-                for parents in self.choose_couples(population, epoch):
+                for parents in couples:
                     child = self.crossover_and_mutate(parents)
                     offsprings.append(child)
 
@@ -355,9 +345,13 @@ class GeneticSearch:
                 surrogate(offsprings, desc="Surrogate offsprings")  # flatten
 
                 child2s = []
-                for child in offsprings:
-                    if cfg.child2_strategy == "analog":
-                        child2 = self.analog_mutate(child)
+                for i, child in enumerate(offsprings):
+                    if cfg.child2_strategy == "cross":
+                        child2 = self.crossover_and_mutate(couples[i])
+                    elif cfg.child2_strategy == "edits":
+                        child2 = self.random_bt_edits(child)
+                    elif cfg.child2_strategy == "flips":
+                        child2 = self.random_fp_flips(child)
                     else:
                         raise NotImplementedError()
                     child2s.append(child2)
@@ -365,14 +359,11 @@ class GeneticSearch:
 
                 offsprings = list(zip(offsprings, child2s))
 
-                # Choose the candidate that maximizes internal diversity or EI
-                if epoch <= cfg.explore_warmup:
-                    promote = partial(self.promote_explore, population=population)
-                else:
-                    kernel = RBF(length_scale=1.0)
-                    gp = GaussianProcessRegressor(kernel=kernel)
-                    gp.fit(X=X_history, y=y_history)
-                    promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
+                # Choose the candidate that maximizes EI
+                kernel = RBF(length_scale=1.0)
+                gp = GaussianProcessRegressor(kernel=kernel)
+                gp.fit(X=X_history, y=y_history)
+                promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
                 offsprings = list(map(promote, offsprings))
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:

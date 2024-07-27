@@ -6,6 +6,7 @@ import pickle
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import List, Literal, Optional
 
+import jsonargparse
 import numpy as np
 import tqdm
 from rdkit import Chem
@@ -64,7 +65,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     ckpt_recognizer: Optional[str] = None
 
     # Model checkpoint dir, if given assume one ckpt per class
-    ckpt_dir: str = None
+    ckpt_dir: Optional[str] = None
 
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
@@ -91,43 +92,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
     strategy: Literal["conf", "topological"] = "conf"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
     max_topological_orders: int = 5
-
-
-def get_args():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--seed", type=int, default=10)
-    parser.add_argument("--background_set_file", type=str)
-    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")
-    parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
-    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")
-    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")
-    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'])
-    parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
-    parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
-    parser.add_argument("--objective", type=str, default="qed", help="Objective function to optimize")
-    parser.add_argument("--out_dir", type=str)
-    parser.add_argument("--wandb", action="store_true")
-    parser.add_argument("--wandb_project", type=str)
-    parser.add_argument("--method", type=str, choices=["ours", "synnet"])
-    parser.add_argument("--num_workers", type=int)
-    parser.add_argument("--generations", type=int, default=200)
-    parser.add_argument("--max_oracle_calls", type=int, default=10000000)
-    parser.add_argument("--fp_bits", type=int)
-    parser.add_argument("--bt_ignore", action="store_true")
-    parser.add_argument("--fp_mutate_prob", type=float, default=0.5)
-    parser.add_argument("--bt_mutate_edits", type=int)
-    parser.add_argument("--child2_strategy", type=str)
-    parser.add_argument("--early_stop", action="store_true")
-    parser.add_argument("--early_stop_delta", type=float)
-    parser.add_argument("--early_stop_warmup", type=str)
-    parser.add_argument("--early_stop_patience", type=int)
-    parser.add_argument("--initialize_path", type=str)
-    parser.add_argument("--checkpoint_path", type=str)
-    parser.add_argument("--resume_path", type=str)
-
-    return parser.parse_args()
 
 
 def get_smiles_ours(idx_and_ind):
@@ -204,7 +168,9 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
 
 
 def main():
-    config = OptimizeGAConfig(**vars(get_args()))
+    parser = jsonargparse.ArgumentParser()
+    parser.add_class_arguments(OptimizeGAConfig, as_positional=False)
+    config = OptimizeGAConfig(**parser.parse_args().as_dict())
 
     global args
     args = config  # Hack so reconstruct_utils.py works
