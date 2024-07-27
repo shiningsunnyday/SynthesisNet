@@ -179,11 +179,10 @@ class GeneticSearch:
 
         # Initialize bt
         bt = self.predict_bt(fp)
-        ind = Individual(fp=fp, bt=bt)
 
-        return ind
+        return Individual(fp=fp, bt=bt)
 
-    def analog_mutate(self, ind: Individual) -> Individual:
+    def random_bt_edits(self, ind: Individual) -> Individual:
         cfg = self.config
         if cfg.bt_ignore:
             return Individual(fp=ind.fp.copy(), bt=None)
@@ -198,6 +197,15 @@ class GeneticSearch:
                 utils.random_remove_leaf(bt)
 
         return Individual(fp=ind.fp.copy(), bt=bt)
+
+    def random_fp_flips(self, ind: Individual) -> Individual:
+        mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
+        fp = np.where(mask, 1 - ind.fp, ind.fp)
+
+        # Initialize bt
+        bt = self.predict_bt(fp)
+
+        return Individual(fp=fp, bt=bt)
 
     def promote_exploit(self, candidates, gp: GaussianProcessRegressor, best):
         X = np.stack([ind.fp for ind in candidates], axis=0)
@@ -325,19 +333,10 @@ class GeneticSearch:
 
             # Crossover & mutation
             if epoch >= 0:
-                # # TODO: delete
-                # fn([child])
-                # if child.fitness > parents[0].fitness:
-                #     with open('/u/msun415/mutant/dump.txt', 'a+') as f:
-                #         smi1 = parents[0].smiles
-                #         smi2 = child.smiles
-                #         f.write(f"parent: {smi1} mutant: {smi2}\n")
-                #         sk1 = binary_tree_to_skeleton(parents[0].bt)
-                #         sk2 = binary_tree_to_skeleton(child.bt)
-                #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
-                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')
+                couples = self.choose_couples(population, epoch)
+
                 offsprings = []
-                for parents in self.choose_couples(population, epoch):
+                for parents in couples:
                     child = self.crossover_and_mutate(parents)
                     offsprings.append(child)
 
@@ -345,9 +344,13 @@ class GeneticSearch:
                 surrogate(offsprings, desc="Surrogate offsprings")  # flatten
 
                 child2s = []
-                for child in offsprings:
-                    if cfg.child2_strategy == "analog":
-                        child2 = self.analog_mutate(child)
+                for i, child in enumerate(offsprings):
+                    if cfg.child2_strategy == "cross":
+                        child2 = self.crossover_and_mutate(couples[i])
+                    elif cfg.child2_strategy == "edits":
+                        child2 = self.random_bt_edits(child)
+                    elif cfg.child2_strategy == "flips":
+                        child2 = self.random_fp_flips(child)
                     else:
                         raise NotImplementedError()
                     child2s.append(child2)
