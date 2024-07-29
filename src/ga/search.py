@@ -425,5 +425,6 @@ class GeneticSearch:
         if cfg.wandb:
             wandb.finish()
 
-        pool.close()
-        pool.join()
+        if pool is not None:
+            pool.close()
+            pool.join()
