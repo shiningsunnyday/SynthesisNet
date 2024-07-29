@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import networkx as nx
 import numpy as np
@@ -33,7 +33,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     fp_mutate_frac: float = (24 / 4096)
     bt_mutate_edits: int = 3
 
-    child2_strategy: Literal["edits", "flips", "cross"] = "edits"
+    child2_strategy: List[Literal["edits", "flips", "cross"]] = ["edits"]
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1

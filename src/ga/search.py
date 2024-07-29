@@ -349,27 +349,28 @@ class GeneticSearch:
                 # (!!) surrogate() reassigns fps and bts of offsprings
                 surrogate(offsprings, desc="Surrogate offsprings")  # flatten
 
+                offsprings_groups = [[child] for child in offsprings]
                 child2s = []
                 for i, child in enumerate(offsprings):
-                    if cfg.child2_strategy == "cross":
-                        child2 = self.crossover_and_mutate(couples[i])
-                    elif cfg.child2_strategy == "edits":
-                        child2 = self.random_bt_edits(child)
-                    elif cfg.child2_strategy == "flips":
-                        child2 = self.random_fp_flips(child)
-                    else:
-                        raise NotImplementedError()
-                    child2s.append(child2)
+                    for strategy in cfg.child2_strategy:
+                        if strategy == "cross":
+                            child2 = self.crossover_and_mutate(couples[i])
+                        elif strategy == "edits":
+                            child2 = self.random_bt_edits(child)
+                        elif strategy == "flips":
+                            child2 = self.random_fp_flips(child)
+                        else:
+                            raise NotImplementedError()
+                        child2s.append(child2)
+                        offsprings_groups[i].append(child2)
                 surrogate(child2s, desc="Surrogate child2s")
-
-                offsprings = list(zip(offsprings, child2s))
 
                 # Choose the candidate that maximizes EI
                 kernel = RBF(length_scale=1.0)
                 gp = GaussianProcessRegressor(kernel=kernel)
                 gp.fit(X=X_history, y=y_history)
                 promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
-                offsprings = list(map(promote, offsprings))
+                offsprings = list(map(promote, offsprings_groups))
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
