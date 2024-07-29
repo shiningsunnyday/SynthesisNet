@@ -16,18 +16,18 @@
 #     done
 # done
 
-cpus=50
-for seed in {11,12};
+cpus=30
+for seed in {10,};
 do
-    for obj in {'7l11','drd3'};
+    for obj in {'jnk',};
     do  
-        for strategy in {'semantic','analog'};
+        for strategy in {'[edits, cross]','[edits, edits]','[cross, cross]'};
         do
-            jbsub -proj syntreenet \
-                -queue x86_24h \
-                -name ga-analog.obj=${obj}.strategy=${strategy} \
-                -mem 20g \
-                -cores ${cpus} sh ./sandbox/ga_ablate.sh ${obj} ${strategy} ${seed}
+        jbsub -proj syntreenet \
+            -queue x86_24h \
+            -name ga-analog.obj=${obj} \
+            -mem 20g \
+            -cores ${cpus} sh ./sandbox/ga_ablate.sh ${obj} ${strategy} ${seed}
         done
     done
 done

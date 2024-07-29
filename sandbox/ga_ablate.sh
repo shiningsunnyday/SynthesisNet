@@ -15,13 +15,13 @@ python sandbox/optimize.py \
     --top_k_rxn 3 \
     --strategy conf \
     --objective $1 \
-    --wandb \
-    --wandb_project=syntreenet_ga_rebuttal \
+    --wandb=true \
+    --wandb_project=syntreenet_ga_rebuttal_v2 \
     --method=ours \
-    --num_workers=40 \
+    --num_workers=30 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
-    --early_stop \
+    --early_stop=true \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
