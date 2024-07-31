@@ -62,13 +62,18 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def predict_bt(self, fp):
+    def predict_bt(self, fp, top_k=[1]):
         cfg = self.config
         if cfg.bt_ignore:
             return None
-        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-        sk = lookup_skeleton_by_index(sk_index)
-        return utils.skeleton_to_binary_tree(sk)
+        sk_indices = predict_skeleton(smiles=None, fp=fp, top_k=top_k, max_num_rxns=cfg.max_num_rxns)
+        if top_k == [1]:
+            sk_indices = [sk_indices]
+        bts = [
+            utils.skeleton_to_binary_tree(lookup_skeleton_by_index(sk_index))
+            for sk_index in sk_indices
+        ]
+        return bts[0] if (top_k == [1]) else bts
 
     def initialize(self, path: str) -> Population:
         cfg = self.config
@@ -162,7 +167,7 @@ class GeneticSearch:
             parents.append((population[i1], population[i2]))
         return parents
 
-    def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
+    def crossover_and_mutate_fp(self, parents: Tuple[Individual, Individual]) -> Individual:
         cfg = self.config
 
         # Crossover: random bit swap
@@ -177,18 +182,13 @@ class GeneticSearch:
             mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
             fp = np.where(mask, 1 - fp, fp)
 
-        # Initialize bt
-        bt = self.predict_bt(fp)
-
-        return Individual(fp=fp, bt=bt)
+        return fp
 
     def random_bt_edits(self, ind: Individual) -> Individual:
-        cfg = self.config
-        if cfg.bt_ignore:
-            return Individual(fp=ind.fp.copy(), bt=None)
         bt = ind.bt.copy()
 
         # bt: random add or delete nodes
+        cfg = self.config
         num_edits = torch.randint(1, cfg.bt_mutate_edits + 1, size=[1]).item()
         for _ in range(num_edits):
             if utils.random_boolean(0.5):
@@ -339,38 +339,35 @@ class GeneticSearch:
 
             # Crossover & mutation
             if epoch >= 0:
-                couples = self.choose_couples(population, epoch)
-
                 offsprings = []
+
+                couples = self.choose_couples(population, epoch)
                 for parents in couples:
-                    child = self.crossover_and_mutate(parents)
-                    offsprings.append(child)
+                    child_fp = self.crossover_and_mutate_fp(parents)
 
-                # (!!) surrogate() reassigns fps and bts of offsprings
-                surrogate(offsprings, desc="Surrogate offsprings")  # flatten
+                    child_ids = list(range(cfg.children_per_couple))
+                    if cfg.children_strategy == "topk":
+                        child_bts = self.predict_bt(fp=child_fp, top_k=child_ids)
+                        group = [Individual(fp=child_fp, bt=bt) for bt in child_bts]
+                    elif cfg.children_strategy == "edits":
+                        child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
+                        group = [self.random_bt_edits(child_base) for _ in child_ids]
+                    elif cfg.children_strategy == "flips":
+                        child_base = Individual(fp=child_fp, bt=None)
+                        group = [self.random_fp_flips(child_base) for _ in child_ids]
+                    else:
+                        raise NotImplementedError()
 
-                offsprings_groups = [[child] for child in offsprings]
-                child2s = []
-                for i, child in enumerate(offsprings):
-                    for strategy in cfg.child2_strategy:
-                        if strategy == "cross":
-                            child2 = self.crossover_and_mutate(couples[i])
-                        elif strategy == "edits":
-                            child2 = self.random_bt_edits(child)
-                        elif strategy == "flips":
-                            child2 = self.random_fp_flips(child)
-                        else:
-                            raise NotImplementedError()
-                        child2s.append(child2)
-                        offsprings_groups[i].append(child2)
-                surrogate(child2s, desc="Surrogate child2s")
+                    offpsrings.append(group)
+
+                surrogate(sum(offsprings, []), desc="Surrogate")
 
                 # Choose the candidate that maximizes EI
                 kernel = RBF(length_scale=1.0)
                 gp = GaussianProcessRegressor(kernel=kernel)
                 gp.fit(X=X_history, y=y_history)
                 promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
-                offsprings = list(map(promote, offsprings_groups))
+                offsprings = list(map(promote, offsprings))
 
                 if num_calls + len(offsprings) > cfg.max_oracle_calls:
                     leftover = cfg.max_oracle_calls - num_calls
@@ -400,7 +397,8 @@ class GeneticSearch:
                 table = [[epoch, ind.smiles, ind.fitness] for ind in population]
                 columns = ["generation", "smiles", "fitness"]
                 metrics["smiles"] = wandb.Table(columns=columns, data=table)
-                wandb.log({"generation": epoch, **metrics}, commit=True)
+                metrics = {"generation": epoch, "oracle_calls": num_calls, **metrics}
+                wandb.log(metrics, commit=True)
             if cfg.checkpoint_path is not None:
                 with open(cfg.checkpoint_path, "wb") as f:
                     pickle.dump(population, f)
