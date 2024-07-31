@@ -317,12 +317,13 @@ class GeneticSearch:
                         group = [Individual(fp=child_fp, bt=bt) for bt in child_bts]
                     elif cfg.children_strategy == "edits":
                         child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
-                        group = [self.random_bt_edits(child_base) for _ in child_ids]
+                        group = [child_base] + [self.random_bt_edits(child_base) for _ in child_ids[1:]]
                     elif cfg.children_strategy == "flips":
-                        child_base = Individual(fp=child_fp, bt=None)
-                        group = [self.random_fp_flips(child_base) for _ in child_ids]
+                        child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
+                        group = [child_base] + [self.random_fp_flips(child_base) for _ in child_ids[1:]]
                     else:
                         raise NotImplementedError()
+                    assert len(group) == cfg.children_per_couple
 
                     offsprings.append(group)
 
