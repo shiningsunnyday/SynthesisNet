@@ -1,9 +1,7 @@
-import argparse
 import functools
 import logging
 import pathlib
 import pickle
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import List, Literal, Optional
 
 import jsonargparse
@@ -18,7 +16,7 @@ from synnet.MolEmbedder import MolEmbedder
 from synnet.encoding.fingerprints import mol_fp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
+from synnet.models.legacy import find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
 from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
@@ -179,15 +177,16 @@ def main():
         handler = logging.FileHandler(config.log_file)
         logger.addHandler(handler)
 
-    set_models(config, logger)
-    load_data(config, logger)
-    with open(config.skeleton_set_file, "rb") as f:
-        skeletons = pickle.load(f)
-    skeleton_set = SkeletonSet().load_skeletons(skeletons)
-    test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
-
     if config.method == "ours":
         assert config.fp_bits == 2048
+
+        set_models(config, logger)
+        load_data(config, logger)
+        with open(config.skeleton_set_file, "rb") as f:
+            skeletons = pickle.load(f)
+        skeleton_set = SkeletonSet().load_skeletons(skeletons)
+        test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
+
         converter = get_smiles_ours
 
     elif config.method == "synnet":

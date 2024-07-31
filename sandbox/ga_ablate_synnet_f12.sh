@@ -1,7 +1,6 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 export LD_LIBRARY_PATH=/home/alston/miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
-export OMP_NUM_THREADS=1
 
 python sandbox/optimize.py \
     --seed=10 \
@@ -18,7 +17,7 @@ python sandbox/optimize.py \
     --wandb=true \
     --wandb_project=syntreenet_ga_rebuttal_v3 \
     --method=ours \
-    --num_workers=30 \
+    --num_workers=0 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
     --early_stop=true \
@@ -28,4 +27,4 @@ python sandbox/optimize.py \
     --fp_mutate_prob=0.5 \
     --children_strategy "flips" \
     --max_oracle_workers=0 \
-    --method=ours --fp_bits=4096
+    --method=synnet --fp_bits=4096 --bt_ignore=true
