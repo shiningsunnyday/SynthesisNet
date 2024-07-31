@@ -33,7 +33,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
     fp_mutate_frac: float = (24 / 4096)
     bt_mutate_edits: int = 3
 
-    child2_strategy: List[Literal["edits", "flips", "cross"]] = ["edits"]
+    children_per_couple: int = 2
+    children_strategy: Literal["edits", "flips", "topk"] = "edits"
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1

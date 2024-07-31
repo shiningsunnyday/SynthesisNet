@@ -16,7 +16,7 @@ python sandbox/optimize.py \
     --strategy conf \
     --objective $1 \
     --wandb=true \
-    --wandb_project=syntreenet_ga_rebuttal_v2 \
+    --wandb_project=syntreenet_ga_rebuttal_v3 \
     --method=ours \
     --num_workers=30 \
     --fp_bits=2048 \
@@ -26,5 +26,5 @@ python sandbox/optimize.py \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
     --fp_mutate_prob=0.5 \
-    --child2_strategy "[edits, cross]" \
+    --children_strategy "edits" \
     --max_oracle_workers=0
