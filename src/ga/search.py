@@ -300,6 +300,11 @@ class GeneticSearch:
         score_queue = collections.deque(maxlen=cfg.early_stop_patience)
         score_queue.append(-1000)
 
+        samples = wandb.Table(
+            columns= ["generation", "idx", "smiles", "fitness"],
+            data=[],
+        )
+
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
 
@@ -358,9 +363,9 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                table = [[epoch, ind.smiles, ind.fitness] for ind in population]
-                columns = ["generation", "smiles", "fitness"]
-                metrics["smiles"] = wandb.Table(columns=columns, data=table)
+                for idx, ind in enumerate(population):
+                    samples.add_data(epoch, idx, ind.smiles, ind.fitness)
+                metrics["smiles"] = samples
                 metrics = {"generation": epoch, "oracle_calls": num_calls, **metrics}
                 wandb.log(metrics, commit=True)
             if cfg.checkpoint_path is not None:
