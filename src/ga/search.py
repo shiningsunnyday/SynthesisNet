@@ -323,6 +323,7 @@ class GeneticSearch:
                         group = [child_base] + [self.random_fp_flips(child_base) for _ in child_ids[1:]]
                     else:
                         raise NotImplementedError()
+                    assert len(group) == cfg.children_per_couple
 
                     offsprings.append(group)
 
