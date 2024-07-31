@@ -1,9 +1,7 @@
-import argparse
 import functools
 import logging
 import pathlib
 import pickle
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import List, Literal, Optional
 
 import jsonargparse
@@ -18,7 +16,7 @@ from synnet.MolEmbedder import MolEmbedder
 from synnet.encoding.fingerprints import mol_fp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
+from synnet.models.legacy import find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
 from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
@@ -144,11 +142,11 @@ def get_smiles_synnet(
         print(e)
         action = -1
     if action != 3:
-        return idx, None
+        return idx, None, None
     else:
         scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
         max_score_idx = np.where(scores == np.max(scores))[0][0]
-        return idx, tree.chemicals[max_score_idx].smiles
+        return idx, tree.chemicals[max_score_idx].smiles, None
 
 
 def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
@@ -161,9 +159,11 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
     for idx, smi, bt in pbar:
         ind = batch[idx]
-        assert smi is not None
-        ind.smiles = Chem.CanonSmiles(smi)
-        ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+        if smi is None:
+            ind.smiles = None
+        else:
+            ind.smiles = Chem.CanonSmiles(smi)
+            ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
         ind.bt = bt
 
 
