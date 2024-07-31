@@ -46,9 +46,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     early_stop_patience: int = 10
 
     # IO
-    initialize_path: Optional[str] = None
     checkpoint_path: Optional[str] = None
-    resume_path: Optional[str] = None
     background_set_file: str
 
     # WandB

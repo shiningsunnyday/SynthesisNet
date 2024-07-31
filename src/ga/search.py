@@ -1,23 +1,18 @@
 import collections
 import itertools
-import json
-import multiprocessing as mp
 import pickle
 import random
 from functools import partial
 from multiprocessing import Pool
 from typing import Callable, Dict, List, Tuple
 
-import networkx as nx
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
-import scipy
 import torch
 import tqdm
 import wandb
 from networkx.algorithms.dag import dag_longest_path
-from rdkit import Chem
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
@@ -27,7 +22,6 @@ from ga import utils
 from ga.config import GeneticSearchConfig, Individual
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
-from synnet.utils.data_utils import binary_tree_to_skeleton
 from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
@@ -74,16 +68,6 @@ class GeneticSearch:
             for sk_index in sk_indices
         ]
         return bts[0] if (top_k == [1]) else bts
-
-    def initialize(self, path: str) -> Population:
-        cfg = self.config
-        population = []
-        df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
-        for smiles in df["smiles"].tolist():
-            fp = mol_fp(smiles, _nBits=cfg.fp_bits).astype(np.float32)
-            bt = self.predict_bt(fp)
-            population.append(Individual(fp=fp, bt=bt, smiles=smiles))
-        return population
 
     def initialize_random(self) -> Population:
         cfg = self.config
@@ -305,28 +289,8 @@ class GeneticSearch:
                 config=dict(cfg),
             )
 
-        if cfg.resume_path is not None:
-            print("Initializing from checkpoint", cfg.resume_path)
-            with open(cfg.resume_path, "rb") as f:
-                population = pickle.load(f)
-
-        elif cfg.initialize_path is None:
-            print("Initializing random")
-            population = self.initialize_random()
-
-        else:
-            print("Initializing from SMILES", cfg.initialize_path)
-            population = self.initialize(cfg.initialize_path)
-
-            # Let's also log the seed stats
-            self.apply_oracle(population, pool)
-            metrics = self.evaluate_scores(population, prefix="seeds")
-            wandb.log({"generation": -1, **metrics}, commit=True)
-
-            # Safety
-            for ind in population:
-                ind.smiles = None
-                ind.fitness = None
+        print("Initializing random")
+        population = self.initialize_random()
 
         # Track some stats
         num_calls = 0

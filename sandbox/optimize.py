@@ -144,11 +144,11 @@ def get_smiles_synnet(
         print(e)
         action = -1
     if action != 3:
-        return idx, None
+        return idx, None, None
     else:
         scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
         max_score_idx = np.where(scores == np.max(scores))[0][0]
-        return idx, tree.chemicals[max_score_idx].smiles
+        return idx, tree.chemicals[max_score_idx].smiles, None
 
 
 def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
@@ -179,16 +179,15 @@ def main():
         handler = logging.FileHandler(config.log_file)
         logger.addHandler(handler)
 
+    set_models(config, logger)
+    load_data(config, logger)
+    with open(config.skeleton_set_file, "rb") as f:
+        skeletons = pickle.load(f)
+    skeleton_set = SkeletonSet().load_skeletons(skeletons)
+    test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
+
     if config.method == "ours":
         assert config.fp_bits == 2048
-
-        set_models(config, logger)
-        load_data(config, logger)
-        with open(config.skeleton_set_file, "rb") as f:
-            skeletons = pickle.load(f)
-        skeleton_set = SkeletonSet().load_skeletons(skeletons)
-        test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
-
         converter = get_smiles_ours
 
     elif config.method == "synnet":
