@@ -1,7 +1,7 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 export OMP_NUM_THREADS=1
 MAX_NUM_RXNS=4
-MODEL_DIR=/dccstor/graph-design/surrogate
+MODEL_DIR=/ssd/msun415/surrogate/
 SKELETON_DIR=results/viz
 python sandbox/optimize.py \
     --seed=$3 \
@@ -15,7 +15,6 @@ python sandbox/optimize.py \
     --top_k_rxn 3 \
     --strategy conf \
     --objective $1 \
-    --wandb \
     --wandb_project=syntreenet_ga_rebuttal \
     --method=ours \
     --num_workers=30 \
