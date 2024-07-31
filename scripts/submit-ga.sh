@@ -21,11 +21,11 @@ for seed in {10,};
 do
     for obj in {'jnk',};
     do  
-        for strategy in {'["cross", "cross", "cross"]','["edits", "cross", "cross"]','["edits", "edits", "cross"]','["edits", "edits", "edits"]'};
+        for strategy in {'edits','flips','topk'};
         do
         jbsub -proj syntreenet \
             -queue x86_24h \
-            -name ga-analog.obj=${obj} \
+            -name ga-analog.obj=${obj}.strategy=${strategy} \
             -mem 20g \
             -cores ${cpus} sh ./sandbox/ga_ablate.sh "${obj}" "${strategy}" "${seed}"
         done
