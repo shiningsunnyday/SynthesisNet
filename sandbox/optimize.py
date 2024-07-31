@@ -171,7 +171,7 @@ def main():
     parser = jsonargparse.ArgumentParser()
     parser.add_class_arguments(OptimizeGAConfig, as_positional=False)
     config = OptimizeGAConfig(**parser.parse_args().as_dict())
-
+    print(config.child2_strategy)
     global args
     args = config  # Hack so reconstruct_utils.py works
 

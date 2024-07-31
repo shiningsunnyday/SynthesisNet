@@ -18,7 +18,7 @@ python sandbox/optimize.py \
     --wandb=true \
     --wandb_project=syntreenet_ga_rebuttal_v2 \
     --method=ours \
-    --num_workers=30 \
+    --num_workers=45 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
     --early_stop=true \
@@ -26,4 +26,4 @@ python sandbox/optimize.py \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
     --fp_mutate_prob=0.5 \
-    --child2_strategy=$2
+    --child2_strategy="$2"
