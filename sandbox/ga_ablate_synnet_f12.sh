@@ -1,6 +1,7 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 export LD_LIBRARY_PATH=/home/alston/miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
+export OMP_NUM_THREADS=1
 
 python sandbox/optimize.py \
     --seed=10 \
@@ -17,7 +18,7 @@ python sandbox/optimize.py \
     --wandb=true \
     --wandb_project=syntreenet_ga_rebuttal_v3 \
     --method=ours \
-    --num_workers=0 \
+    --num_workers=30 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
     --early_stop=true \

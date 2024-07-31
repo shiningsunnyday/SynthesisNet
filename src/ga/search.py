@@ -235,6 +235,8 @@ class GeneticSearch:
     def apply_oracle_job(self, smi):
         global oracle
 
+        if smi is None:
+            return 0.0
         try:
             score = oracle(smi)
             if not np.isfinite(score):

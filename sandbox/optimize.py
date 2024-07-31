@@ -159,9 +159,11 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
     for idx, smi, bt in pbar:
         ind = batch[idx]
-        assert smi is not None
-        ind.smiles = Chem.CanonSmiles(smi)
-        ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+        if smi is None:
+            ind.smiles = None
+        else:
+            ind.smiles = Chem.CanonSmiles(smi)
+            ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
         ind.bt = bt
 
 
