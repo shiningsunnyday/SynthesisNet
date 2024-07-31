@@ -22,8 +22,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
     objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
 
     generations: int = 200
-    population_size: int = 10
-    offspring_size: int = 10
+    population_size: int = 128
+    offspring_size: int = 512
 
     max_oracle_calls: int = int(1e7)
     max_oracle_workers: int = 5
@@ -34,7 +34,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     bt_mutate_edits: int = 3
 
     children_per_couple: int = 2
-    children_strategy: List[Literal["edits", "flips", "topk"]] = ["edits"]
+    children_strategy: Literal["edits", "flips", "topk"] = "edits"
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1

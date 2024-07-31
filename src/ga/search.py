@@ -358,7 +358,7 @@ class GeneticSearch:
                     else:
                         raise NotImplementedError()
 
-                    offpsrings.append(group)
+                    offsprings.append(group)
 
                 surrogate(sum(offsprings, []), desc="Surrogate")
 
