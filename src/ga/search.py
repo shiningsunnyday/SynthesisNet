@@ -335,7 +335,7 @@ class GeneticSearch:
         score_queue.append(-1000)
 
         # Main loop
-        for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
+        for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
 
             # Crossover & mutation
             if epoch >= 0:
@@ -382,7 +382,7 @@ class GeneticSearch:
                 pass
 
             else:
-                surrogate(population, desc="Evaluating initial")
+                surrogate(population, desc="Surrogate")
                 self.apply_oracle(population, pool)
                 num_calls += len(population)
                 X_history, y_history = self.record_history(population)
