@@ -342,9 +342,6 @@ class GeneticSearch:
 
                 population = self.cull(population + offsprings)
 
-            elif cfg.resume_path is not None:
-                pass
-
             else:
                 surrogate(population, desc="Surrogate")
                 self.apply_oracle(population, pool)
