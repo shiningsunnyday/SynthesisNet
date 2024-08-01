@@ -2,6 +2,51 @@
 
 This repo contains the code and analysis scripts for our Syntax-Guided approach for the Procedural Synthesis of Molecules. Similar to SynNet, our model serves both Synthesizable Analog Generation and Synthesizable Molecular Design applications. Upon acceptance for publication, we will include a link to the preprint with the full details of our method.
 
+### Environment
+
+```bash
+conda env create -f environment.yml
+```
+
+### Data
+
+Go to Enmaine's [catalog](https://enamine.net/building-blocks/building-blocks-catalog) to obtain the building blocks. We used the "Building Blocks, US Stock" data. You need to first register and then request access to download the dataset. The result is a .sdf file.
+
+The reaction templates (from Hartenfeller-Button) are in data/assets/hb.txt.
+
+1) Extract SMILES from the .sdf file from enamine.net.
+```bash
+python scripts/00-extract-smiles-from-sdf.py \
+    --input-file="data/assets/building-blocks/enamine-us.sdf" \
+    --output-file="data/assets/building-blocks/enamine-us-smiles.csv.gz"
+``````
+
+2) Filter building blocks. 
+```bash
+python scripts/01-filter-building-blocks.py \
+    --building-blocks-file "data/assets/building-blocks/enamine-us-smiles.csv.gz" \
+    --rxn-templates-file "data/assets/reaction-templates/hb.txt" \
+    --output-bblock-file "data/assets/building-blocks/enamine_us_matched.csv" \
+    --output-rxns-collection-file "data/assets/reaction-templates/reactions_hb.json.gz" --verbose
+```
+
+3) Embed building blocks.
+```bash
+python scripts/02-compute-embeddings.py \
+    --building-blocks-file "data/assets/building-blocks/enamine_us_matched.csv" \
+    --output-file "data/assets/building-blocks/enamine_us_emb_fp_256.npy" \
+    --featurization-fct "fp_256"
+```
+
+It's helpful to set the following environmental variables from now on.
+
+```bash
+export BUILDING_BLOCKS_FILE=data/assets/building-blocks/enamine_us_matched.csv
+export RXN_TEMPLATE_FILE=data/assets/reaction-templates/hb.txt
+export RXN_COLLECTION_FILE=data/assets/reaction-templates/reactions_hb.json.gz
+export EMBEDDINGS_KNN_FILE=data/assets/building-blocks/enamine_us_emb_fp_256.npy
+```
+
 ### Overview
 
 ![overview](./data/assets/figs/fig1.png "terminologies")
@@ -14,34 +59,87 @@ In computers, programs are first parsed into a tree-like representation called a
 
 Syntax arises from derivations of a *grammar*. A grammar  Our grammar contain basic chemical building blocks, reactions (uni-molecular and bi-molecular) and, more insightfuly, *syntactic templates* (*T*) to constrain the space of derivations.
 
-### Data
+*Syntactic templates* are the skeletons of a complete syntax tree. They are known as user-provided *sketches* and are used by program synthesis techniques to constrain the search space. Our framework allows users to provide these skeletons, but we can automatically extract them by first sampling a large number of synthetic trees, filter them, then extracting the skeletons present among them.
 
-To obtain the building blocks, go to Enmaine's [catalog](https://enamine.net/building-blocks/building-blocks-catalog). We used the "Building Blocks, US Stock" data. You need to first register and then request access to download the dataset.
+Sample 600000 synthetic trees.
+```bash
+python scripts/03-generate-syntrees.py --building-blocks-file $BUILDING_BLOCKS_FILE --rxn-templates-file $RXN_TEMPLATE_FILE --output-file "data/pre-process/syntrees/synthetic-trees.json.gz" --number-syntrees "600000"
+```
 
-### Environment
+Filter to only those that produce chemically valid molecules and are pass a QED threshold. You can customize with additional filters.
+```bash
+python scripts/04-filter-syntrees.py --input-file "data/pre-process/syntrees/synthetic-trees.json.gz" --output-file "data/pre-process/syntrees/synthetic-trees-filtered.json.gz" --verbose
+```
 
+Split into training, valid, test sets.
+```bash
+python scripts/05-split-syntrees.py --input-file "data/pre-process/syntrees/synthetic-trees-filtered.json.gz" --output-dir "data/pre-process/syntrees/" --verbose
+```
 
+Extract the skeletons and perform exploratory data analysis.
+```bash
+mkdir results/viz/
+python scripts/analyze-skeletons.py \
+    --skeleton-file results/viz/skeletons.pkl \
+    --input-file data/pre-process/syntrees/synthetic-trees-filtered.json.gz \
+    --visualize-dir results/viz/
+```
 
-### Model
+This creates a canonical numbering over skeleton classes. skeletons.pkl is a dictionary, mapping each present syntactic template to a list of synthetic trees isomorphic to that template. Each key is a reference synthetic tree, and the value is a list of synthetic trees conforming to the same class.
 
-![overview](./data/assets/figs/fig3.png "model scheme")
-
-The model consists of four modules, each containing a multi-layer perceptron (MLP):
-
-1. An *Action Type* selection function that classifies action types among the four possible actions (“Add”, “Expand”, “Merge”, and “End”) in building the synthetic tree. Each action increases the depth of the synthetic tree by one.
-
-2. A *First Reactant* selection function that selects the first reactant. A MLP predicts a molecular embedding and a first reactant is identified from the pool of building blocks through a k-nearest neighbors (k-NN) search.
-
-3. A *Reaction* selection function whose output is a probability distribution over available reaction templates. Inapplicable reactions are masked based on reactant 1. A suitable template is then sampled using a greedy search.
-
-4. A *Second Reactant* selection function that identifies the second reactant if the sampled template is bi-molecular. The model predicts an embedding for the second reactant, and a candidate is then sampled via a k-NN search from the masked set of building blocks.
-
-These four modules predict the probability distributions of actions to be taken within a single reaction step, and determine the nodes to be added to the synthetic tree under construction.
-All of these networks are conditioned on the target molecule embedding.
+Partition the skeletons.pkl dictionary into train, valid, test while keeping the canonical keys the same.
+```bash
+for split in {'train','valid','test'}; do
+    python scripts/analyze-skeletons.py \
+        --skeleton-file results/viz/skeletons-${split}.pkl \
+        --input-file data/pre-process/syntrees/synthetic-trees-filtered-${split}.json.gz \
+        --visualize-dir results/viz/ \
+        --skeleton-canonical-file results/viz/skeletons.pkl
+done
+```
 
 ### Synthesizable Analog Generation
 
 ![overview](./data/assets/figs/fig2.png "model scheme")
+
+Our surrogate ($F$) tackles the following search problem: given a *specification* in the form of a Morgan Fingerprint (over domain $X$), synthesize a program whose output molecule has that fingerprint. We introduce a bi-level solution, with an outer level proposing syntactic templates and the inner level inferencing a policy network to fill in the template.
+
+### Training a Surrogate Model
+![overview](./data/assets/figs/fig3.png "model scheme")
+
+In summary, our inner surrogate model takes as input a skeleton (in $T$) and fingerprint (in $X$), and fills in the holes to infer a complete syntax tree. This amortizes over solving the finite horizon MDP induced by the template, with the goal state being a complete syntax tree whose output molecule has the fingerprint.
+
+Our supervised policy network is a GNN that takes as input a partially filled in syntax tree, and predicts an operator/literal for the nodes on the frontier. To train it, we construct a dataset of partial syntax trees via imposing masks over the synthetic trees in our data.
+
+```bash
+max_depth=3
+criteria=rxn_target_down_interm
+dataset=gnn_featurized_${criteria}_postorder
+for split in {'train','valid','test'}; do
+    # Make the directories
+    mkdir -p data/${dataset}_max_depth=${max_depth}_${split}
+    mkdir -p data/${dataset}_max_depth=${max_depth}_split_${split}    
+
+    # Enumerate partial trees
+    python scripts/process-for-gnn.py \
+        --determine_criteria ${criteria} \
+        --output-dir data/${dataset}_max_depth=${max_depth}_${split} \
+        --anchor_type target \
+        --visualize-dir results/viz/ \
+        --skeleton-file results/viz/skeletons-${split}.pkl \
+        --max_depth ${max_depth} \
+        --ncpu 100 \
+        --num-trees-per-batch 5000
+
+    # Partition each batch into individual files, so data loading becomes I/O-bound
+    python scripts/split_data.py \
+        --in-dir data/${dataset}_max_depth=${max_depth}_${split}/ \
+        --out-dir data/${dataset}_max_depth=${max_depth}_split_${split}/ \
+        --partition_size 1        
+done;
+``````
+
+### Synthesizable Analog Generation
 
 ### Synthesis planning
 
