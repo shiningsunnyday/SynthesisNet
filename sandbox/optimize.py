@@ -154,7 +154,7 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     if config.num_workers <= 0:
         indexed_smiles = map(converter, indexed_batch)
     else:
-        indexed_smiles = pool.map(converter, indexed_batch)
+        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
     for idx, smi, bt in pbar:

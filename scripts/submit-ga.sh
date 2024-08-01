@@ -36,10 +36,10 @@ cpus=50
 for seed in {10,};
 do
     # ,'Celecoxib_Rediscovery','Troglitazone_Rediscovery','Thiothixene_Rediscovery','Aripiprazole_Similarity','Albuterol_Similarity','Mestranol_Similarity','Isomers'
-    for obj in {'Median_1','Median_2','Osimertinib_MPO','Fexofenadine_MPO','Ranolazine_MPO','Perindopril_MPO','Amlodipine_MPO','Sitagliptin_MPO','Zaleplon_MPO'};
-    # for obj in {'jnk',}
+    # for obj in {'Median_1','Median_2','Osimertinib_MPO','Fexofenadine_MPO','Ranolazine_MPO','Perindopril_MPO','Amlodipine_MPO','Sitagliptin_MPO','Zaleplon_MPO'};
+    for obj in {'jnk',}
     do  
-        for strategy in {'topk',};
+        for strategy in {'flips','edits'};
         do
         jbsub -proj syntreenet \
             -queue x86_24h \
