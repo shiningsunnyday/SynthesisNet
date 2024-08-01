@@ -83,7 +83,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     filter_only: List[Literal["rxn", "bb"]] = []
 
     num_workers: int = 0
-    chunksize: int = 1
+    chunksize: int = 30
 
     # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
     # Topological: Decode every topological order of the rxn+bb nodes.
@@ -154,7 +154,7 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     if config.num_workers <= 0:
         indexed_smiles = map(converter, indexed_batch)
     else:
-        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
+        indexed_smiles = pool.map(converter, indexed_batch)
 
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
     for idx, smi, bt in pbar:
@@ -171,7 +171,6 @@ def main():
     parser = jsonargparse.ArgumentParser()
     parser.add_class_arguments(OptimizeGAConfig, as_positional=False)
     config = OptimizeGAConfig(**parser.parse_args().as_dict())
-    print(config.child2_strategy)
     global args
     args = config  # Hack so reconstruct_utils.py works
 

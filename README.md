@@ -1,23 +1,30 @@
-# SynNet
+# SynTreeNet
 
-This repo contains the code and analysis scripts for our amortized approach to synthetic tree generation using neural networks.
-Our model can serve as both a synthesis planning tool and as a tool for synthesizable molecular design.
-
-The method is described in detail in the publication "Amortized tree generation for bottom-up synthesis planning and synthesizable molecular design" available on the [arXiv](https://arxiv.org/abs/2110.06389) and summarized below.
-
-## Summary
-
-We model synthetic pathways as tree structures called *synthetic trees*.
-A synthetic tree has a single root node and one or more child nodes.
-Every node is chemical molecule:
-
-- The root node is the final product molecule
-- The leaf nodes consist of purchasable building blocks.
-- All other inner nodes are constrained to be a product of allowed chemical reactions.
-
-At a high level, each synthetic tree is constructed one reaction step at a time in a bottom-up manner, that is starting from purchasable building blocks.
+This repo contains the code and analysis scripts for our Syntax-Guided approach for the Procedural Synthesis of Molecules. Similar to SynNet, our model serves both Synthesizable Analog Generation and Synthesizable Molecular Design applications. Upon acceptance for publication, we will include a link to the preprint with the full details of our method.
 
 ### Overview
+
+![overview](./data/assets/figs/fig1.png "terminologies")
+
+Our innovation is to model synthetic pathways as *programs*. This section overviews the basic concepts for understanding the core ideas of our work. Terminologies from program synthesis are italicized.
+In computers, programs are first parsed into a tree-like representation called a *syntax tree*. The syntax tree is closely related to synthetic trees (see [SynNet](https://github.com/wenhao-gao/SynNet)) where:
+- Each leaf node is a *literal*: chemical building block (*B*)
+- Each intermediate node is an *operator*: chemical reaction template (*R*)
+- Each root node stores the *output*: product
+
+Syntax arises from derivations of a *grammar*. A grammar  Our grammar contain basic chemical building blocks, reactions (uni-molecular and bi-molecular) and, more insightfuly, *syntactic templates* (*T*) to constrain the space of derivations.
+
+### Data
+
+To obtain the building blocks, go to Enmaine's [catalog](https://enamine.net/building-blocks/building-blocks-catalog). We used the "Building Blocks, US Stock" data. You need to first register and then request access to download the dataset.
+
+### Environment
+
+
+
+### Model
+
+![overview](./data/assets/figs/fig3.png "model scheme")
 
 The model consists of four modules, each containing a multi-layer perceptron (MLP):
 
@@ -29,10 +36,12 @@ The model consists of four modules, each containing a multi-layer perceptron (ML
 
 4. A *Second Reactant* selection function that identifies the second reactant if the sampled template is bi-molecular. The model predicts an embedding for the second reactant, and a candidate is then sampled via a k-NN search from the masked set of building blocks.
 
-![the model](./figures/network.png "model scheme")
-
 These four modules predict the probability distributions of actions to be taken within a single reaction step, and determine the nodes to be added to the synthetic tree under construction.
 All of these networks are conditioned on the target molecule embedding.
+
+### Synthesizable Analog Generation
+
+![overview](./data/assets/figs/fig2.png "model scheme")
 
 ### Synthesis planning
 

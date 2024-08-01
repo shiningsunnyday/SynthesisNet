@@ -19,7 +19,12 @@ class GeneticSearchConfig(pydantic.BaseModel):
     bt_ignore: bool = False
 
     # Search parameters
-    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
+    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "ASKCOS", "IBM_RXN",
+                        "Celecoxib_Rediscovery", "Troglitazone_Rediscovery", "Thiothixene_Rediscovery", 
+                        "Aripiprazole_Similarity", "Albuterol_Similarity", "Mestranol_Similarity", 
+                        "Median_1", "Median_2", "Isomers", 
+                        "Osimertinib_MPO", "Fexofenadine_MPO", "Ranolazine_MPO", "Perindopril_MPO", "Amlodipine_MPO", "Sitagliptin_MPO", "Zaleplon_MPO", 
+                        "liep", "2rgp", "7l11", "drd3", "3pbl"] = "qed"
 
     generations: int = 200
     population_size: int = 128
