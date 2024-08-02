@@ -298,7 +298,6 @@ class GeneticSearch:
         population = self.initialize_random()
 
         # Track some stats
-        num_calls = 0
         X_history, y_history = None, None
         score_queue = collections.deque(maxlen=cfg.early_stop_patience)
         score_queue.append(-1000)
@@ -342,7 +341,6 @@ class GeneticSearch:
                 offsprings = list(map(promote, offsprings))
 
                 self.apply_oracle(offsprings, pool, sample_log)
-                num_calls += len(offsprings)
                 X_history, y_history = self.record_history(population + offsprings)
 
                 population = self.cull(population + offsprings)
@@ -350,7 +348,6 @@ class GeneticSearch:
             else:
                 surrogate(population, desc="Surrogate")
                 self.apply_oracle(population, pool, sample_log)
-                num_calls += len(population)
                 X_history, y_history = self.record_history(population)
 
             self.validate(population)  # sanity check
@@ -360,16 +357,16 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                metrics = {"generation": epoch, "oracle_calls": num_calls, **metrics}
+                metrics = {"generation": epoch, "oracle_calls": len(sample_log), **metrics}
                 wandb.log(metrics, commit=True)
 
             # Early-stopping
-            if num_calls > cfg.max_oracle_calls:
+            if len(sample_log) > cfg.max_oracle_calls:
                 print("Oracle calls exceeded.")
                 break
             score_queue.append(metrics["scores/mean"])
             if (
-                cfg.early_stop
+                cfg.early_stopps
                 and (epoch > cfg.early_stop_warmup)
                 and (len(score_queue) == cfg.early_stop_patience)
                 and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
