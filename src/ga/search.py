@@ -297,6 +297,7 @@ class GeneticSearch:
         if cfg.wandb:
             wandb.init(
                 project=cfg.wandb_project,
+                entity=cfg.wandb_entity,
                 dir=cfg.wandb_dir,
                 config=dict(cfg),
             )
