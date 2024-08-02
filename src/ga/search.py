@@ -253,11 +253,18 @@ class GeneticSearch:
     def apply_oracle(self, population: Population, pool, log) -> None:
         smiles = [ind.smiles for ind in population]
         map_fn = map if (pool is None) else pool.map
+
+        applied = []
         for i, score in enumerate(map_fn(self.apply_oracle_job, smiles)):
             population[i].fitness = score
             smi = population[i].smiles
             if (smi not in log) and (smi is not None):
                 log[smi] = (smi, len(log))
+            if len(log) >= self.config.max_oracle_calls:
+                break
+            else:
+                applied.append(population[i])
+        return applied
 
     def optimize(self, surrogate: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -340,14 +347,14 @@ class GeneticSearch:
                 promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
                 offsprings = list(map(promote, offsprings))
 
-                self.apply_oracle(offsprings, pool, sample_log)
+                offsprings = self.apply_oracle(offsprings, pool, sample_log)
                 X_history, y_history = self.record_history(population + offsprings)
 
                 population = self.cull(population + offsprings)
 
             else:
                 surrogate(population, desc="Surrogate")
-                self.apply_oracle(population, pool, sample_log)
+                population = self.apply_oracle(population, pool, sample_log)
                 X_history, y_history = self.record_history(population)
 
             self.validate(population)  # sanity check
@@ -361,7 +368,7 @@ class GeneticSearch:
                 wandb.log(metrics, commit=True)
 
             # Early-stopping
-            if len(sample_log) > cfg.max_oracle_calls:
+            if len(sample_log) >= cfg.max_oracle_calls:
                 print("Oracle calls exceeded.")
                 break
             score_queue.append(metrics["scores/mean"])
