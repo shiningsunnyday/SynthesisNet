@@ -250,11 +250,14 @@ class GeneticSearch:
 
         return score
 
-    def apply_oracle(self, population: Population, pool) -> None:
+    def apply_oracle(self, population: Population, pool, log) -> None:
         smiles = [ind.smiles for ind in population]
         map_fn = map if (pool is None) else pool.map
         for i, score in enumerate(map_fn(self.apply_oracle_job, smiles)):
             population[i].fitness = score
+            smi = population[i].smiles
+            if (smi not in log) and (smi is not None):
+                log[smi] = (smi, len(log))
 
     def optimize(self, surrogate: Callable[[Population], None]) -> None:
         """Runs a genetic search.
@@ -300,10 +303,7 @@ class GeneticSearch:
         score_queue = collections.deque(maxlen=cfg.early_stop_patience)
         score_queue.append(-1000)
 
-        samples = wandb.Table(
-            columns= ["generation", "idx", "smiles", "fitness"],
-            data=[],
-        )
+        sample_log = dict()
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
@@ -341,10 +341,7 @@ class GeneticSearch:
                 promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
                 offsprings = list(map(promote, offsprings))
 
-                if num_calls + len(offsprings) > cfg.max_oracle_calls:
-                    leftover = cfg.max_oracle_calls - num_calls
-                    offsprings = random.sample(offsprings, k=leftover)
-                self.apply_oracle(offsprings, pool)
+                self.apply_oracle(offsprings, pool, sample_log)
                 num_calls += len(offsprings)
                 X_history, y_history = self.record_history(population + offsprings)
 
@@ -352,7 +349,7 @@ class GeneticSearch:
 
             else:
                 surrogate(population, desc="Surrogate")
-                self.apply_oracle(population, pool)
+                self.apply_oracle(population, pool, sample_log)
                 num_calls += len(population)
                 X_history, y_history = self.record_history(population)
 
@@ -363,16 +360,13 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                for idx, ind in enumerate(population):
-                    samples.add_data(epoch, idx, ind.smiles, ind.fitness)
-                metrics["smiles"] = samples
                 metrics = {"generation": epoch, "oracle_calls": num_calls, **metrics}
                 wandb.log(metrics, commit=True)
-            if cfg.checkpoint_path is not None:
-                with open(cfg.checkpoint_path, "wb") as f:
-                    pickle.dump(population, f)
 
             # Early-stopping
+            if num_calls > cfg.max_oracle_calls:
+                print("Oracle calls exceeded.")
+                break
             score_queue.append(metrics["scores/mean"])
             if (
                 cfg.early_stop
@@ -387,6 +381,12 @@ class GeneticSearch:
             if num_calls == cfg.max_oracle_calls:
                 print("Exhausted oracle calls")
                 break
+
+        samples = wandb.Table(
+            columns= ["smiles", "idx", "fitness"],
+            data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
+        )
+        wandb.log({"samples": samples}, commit=True)
 
         # Cleanup
         if cfg.wandb:
