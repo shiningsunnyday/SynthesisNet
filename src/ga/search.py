@@ -366,17 +366,12 @@ class GeneticSearch:
                 break
             score_queue.append(metrics["scores/mean"])
             if (
-                cfg.early_stopps
+                cfg.early_stop
                 and (epoch > cfg.early_stop_warmup)
                 and (len(score_queue) == cfg.early_stop_patience)
                 and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
             ):
                 print("Early stopping.")
-                break
-
-            # Exhausted oracle calls
-            if num_calls == cfg.max_oracle_calls:
-                print("Exhausted oracle calls")
                 break
 
         samples = wandb.Table(
