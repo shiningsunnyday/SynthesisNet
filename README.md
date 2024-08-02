@@ -101,7 +101,7 @@ done
 ```
 
 ### Training a Surrogate Model
-![overview](./data/assets/figs/fig3.png "model scheme")
+![model](./data/assets/figs/fig3.png "model scheme")
 
 In summary, our surrogate model takes as input a skeleton (in $T$) and fingerprint (in $X$), and fills in the holes to infer a complete syntax tree. This amortizes over solving the finite horizon MDP induced by the template, with the goal state being a complete syntax tree whose output molecule has the fingerprint.
 
@@ -174,9 +174,11 @@ mv ${ckpt_dir}/version_43/ ${ckpt_dir}/4-RXN
 
 ### Synthesizable Analog Generation
 
-![overview](./data/assets/figs/fig2.png "model scheme")
+The task of synthesizable analog generation is to find a synthetic pathway to produce a molecule that's as similar to a given target molecule as possible. We define similarity between molecules as Tanimoto similarity over their fingerprints.
 
-Our surrogate procedure ($F$) tackles the following search problem: given a *specification* in the form of a Morgan Fingerprint (over domain $X$), synthesize a program whose output molecule has that fingerprint. We introduce a bi-level solution, with an outer level proposing syntactic templates and the inner level inferencing our trained policy network to fill in the template.
+![analog](./data/assets/figs/fig2.png "model scheme")
+
+Our surrogate procedure ($F$) tackles the following problem: given a *specification* in the form of a Morgan Fingerprint (over domain $X$), synthesize a program whose output molecule has that fingerprint. We introduce a bi-level solution, with an outer level proposing syntactic templates and the inner level inferencing our trained policy network to fill in the template.
 
 
 See our bash script for the hyperparameters. Remember to specify the surrogate model checkpoint directory correctly.
@@ -192,3 +194,9 @@ This script assumes you have listener processes in the background to parallelize
 The listeners coordinate via sender-filename and receiver-filename in mcmc-analog.sh. You can remove those args if you don't want to launch listener processes.
 
 ### Synthesizable molecular design
+![ga](./data/assets/figs/ga.png "GA")
+
+The task is to optimize over synthetic pathways with respect to the property of its output molecule. We use the property oracles in [PMO](https://proceedings.neurips.cc/paper_files/paper/2022/hash/8644353f7d307baaf29bc1e56fe8e0ec-Abstract-Datasets_and_Benchmarks.html) and [GuacaMol](https://pubs.acs.org/doi/10.1021/acs.jcim.8b00839), as implemented by [TDC](https://tdc.readthedocs.io/en/main/). 
+
+We implement our discrete optimization procedure using a bilevel Genetic Search + Bayesian Optimization strategy. In the outer level, we follow a similar crossover and mutation strategy as [SynNet] over fingerprints *X*. In the inner level, we introduce operators over skeletons *T*. The inner procedure's goal is to explore the analog space of a given fingerprint, as defined by varying the skeleton but fixing the fingerprint. Since MCMC is prohibitively expensive, we offer various ways to amortize over it. By default, we use the top k proposals from our trained recognition model. There's also the option to edit the top 1 proposal. See our paper for more details.
+
