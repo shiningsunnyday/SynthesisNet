@@ -259,7 +259,7 @@ class GeneticSearch:
             population[i].fitness = score
             smi = population[i].smiles
             if (smi not in log) and (smi is not None):
-                log[smi] = (smi, len(log))
+                log[smi] = (score, len(log))
             if len(log) >= self.config.max_oracle_calls:
                 break
             else:
