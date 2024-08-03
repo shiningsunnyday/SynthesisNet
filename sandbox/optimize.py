@@ -83,7 +83,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     filter_only: List[Literal["rxn", "bb"]] = []
 
     num_workers: int = 0
-    chunksize: int = 30
+    chunksize: int = 1
 
     # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
     # Topological: Decode every topological order of the rxn+bb nodes.
