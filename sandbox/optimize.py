@@ -91,6 +91,9 @@ class OptimizeGAConfig(GeneticSearchConfig):
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
     max_topological_orders: int = 5
 
+    reassign_fps: bool = True
+    reassign_bts: bool = True
+
 
 def get_smiles_ours(idx_and_ind):
     idx, ind = idx_and_ind
@@ -163,8 +166,10 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
             ind.smiles = None
         else:
             ind.smiles = Chem.CanonSmiles(smi)
-            ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
-        ind.bt = bt
+            if config.reassign_fps:
+                ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+        if config.reassign_bts:
+            ind.bt = bt
 
 
 def main():

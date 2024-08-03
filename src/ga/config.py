@@ -6,6 +6,26 @@ import numpy as np
 import pydantic
 
 
+ORACLE_REGISTRY = {
+    "qed": "QED",
+    "logp": "LogP",
+    "jnk": "JNK3",
+    "gsk": "GSK3B",
+    "drd2": "DRD2",
+    "7l11": "7l11_docking",
+    "drd3": "drd3_docking",
+    "median1": "Median 1",
+    "median2": "Median 2",
+    "osimertinib": "Osimertinib_MPO",
+    "fexofenadine": "Fexofenadine_MPO",
+    "ranolazine": "Ranolazine_MPO",
+    "perindopril": "Perindopril_MPO",
+    "amlodipine": "Amlodipine_MPO",
+    "sitagliptin": "Sitagliptin_MPO",
+    "zaleplon": "Zaleplon_MPO",
+}
+
+
 class GeneticSearchConfig(pydantic.BaseModel):
     """Configuration object for a genetic search.
     """
@@ -19,12 +39,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     bt_ignore: bool = False
 
     # Search parameters
-    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "ASKCOS", "IBM_RXN",
-                        "Celecoxib_Rediscovery", "Troglitazone_Rediscovery", "Thiothixene_Rediscovery", 
-                        "Aripiprazole_Similarity", "Albuterol_Similarity", "Mestranol_Similarity", 
-                        "Median_1", "Median_2", "Isomers", 
-                        "Osimertinib_MPO", "Fexofenadine_MPO", "Ranolazine_MPO", "Perindopril_MPO", "Amlodipine_MPO", "Sitagliptin_MPO", "Zaleplon_MPO", 
-                        "liep", "2rgp", "7l11", "drd3", "3pbl"] = "qed"
+    objective: Literal[tuple(ORACLE_REGISTRY)] = "qed"
 
     generations: int = 200
     population_size: int = 128
@@ -56,7 +71,8 @@ class GeneticSearchConfig(pydantic.BaseModel):
 
     # WandB
     wandb: bool = False
-    wandb_project: str = "syntreenet_ga_final"
+    wandb_project: str = "syntreenet"
+    wandb_entity: str = "lpft"
     wandb_dir: Optional[str] = None
 
 
