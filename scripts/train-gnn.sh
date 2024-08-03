@@ -8,7 +8,7 @@ debug=$2;
 
 # HPARAMS
 ncpu=50;
-rewire='--rewire-edges';
+# rewire='--rewire-edges';
 # rewire='';
 pe='--pe sin';
 # pe='--pe child'
@@ -18,8 +18,8 @@ pe='--pe sin';
 datasets=''
 # dataset=gnn_featurized_rxn_target_down_bb_postorder_split
 # dataset=gnn_featurized_rxn_target_down_bb_postorder_max_depth=3_split
-dataset=gnn_featurized_rxn_target_down_interm_postorder_max_depth=3_split
-# dataset=gnn_featurized_leaves_up_postorder_max_depth=3_split
+# dataset=gnn_featurized_rxn_target_down_interm_postorder_max_depth=3_split
+dataset=gnn_featurized_leaves_up_postorder_max_depth=4_split
 
 # datasets='';
 if [[ $1 -eq 1 ]]; then
@@ -60,7 +60,7 @@ else
             ${pe} \
             --gnn-layer Transformer \
             --lazy_load \
-            --ncpu 0 \
+            --ncpu 5 \
             --prefetch_factor 2 \
             --feats-split \
             --cuda 0 \
