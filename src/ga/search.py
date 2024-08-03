@@ -45,6 +45,16 @@ class GeneticSearch:
         ]
         return bts[0] if (top_k == [1]) else bts
 
+    def initialize(self, path: str) -> Population:
+        cfg = self.config
+        population = []
+        df = pd.read_csv(path).sample(cfg.population_size, random_state=cfg.seed)
+        for smiles in df["smiles"].tolist():
+            fp = mol_fp(smiles, _nBits=cfg.fp_bits).astype(np.float32)
+            bt = self.predict_bt(fp)
+            population.append(Individual(fp=fp, bt=bt, smiles=smiles))
+        return population
+
     def initialize_random(self) -> Population:
         cfg = self.config
         population = []
@@ -281,8 +291,17 @@ class GeneticSearch:
                 config=dict(cfg),
             )
 
-        print("Initializing random")
-        population = self.initialize_random()
+        if cfg.initialize_path is None:
+            print("Initializing random")
+            population = self.initialize_random()
+
+        else:
+            print("Initializing from SMILES", cfg.initialize_path)
+            population = self.initialize(cfg.initialize_path)
+
+            # Safety
+            for ind in population:
+                ind.smiles = None
 
         # Track some stats
         X_history, y_history = None, None
