@@ -83,7 +83,7 @@ def compute_metrics(data_dir, baseline, seed, metric):
     
 
 def main(args):
-    data_dir = args.data_dir
+    data_dir = args.baselines_dir
     # use synnet to extract supported metrics
     metrics = []
     baselines = defaultdict(list)
@@ -95,6 +95,13 @@ def main(args):
         if match:
             baseline, seed = match.groups()
             baselines[baseline].append(seed)        
+    
+    # get our metrics
+    ours_dir = args.ours_dir
+    for metric in metrics:
+        path = os.path.join(ours_dir, f"{metric}.csv")
+        df = pd.read_csv(path)
+        breakpoint()
 
     # compute remaining metrics
     pargs = [(data_dir, baseline, seed, metric) for baseline in baselines \
@@ -148,9 +155,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default='data/pmo/')
+    parser.add_argument("--baselines-dir", default='data/pmo/')
+    parser.add_argument("--ours-dir", default='data/ours/')
     parser.add_argument("--ncpu", type=int, default=0)
     parser.add_argument("--metrics", nargs='+', choices=['SA'], help="Additional metrics to compute for each file", default=[])
     args = parser.parse_args()
     main(args)
-    
