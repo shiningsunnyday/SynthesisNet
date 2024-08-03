@@ -227,8 +227,7 @@ class GeneticSearch:
         return score
 
     def apply_oracle(self, population: Population, pool, log) -> None:
-        smiles = set(ind.smiles for ind in population) - set(log)
-        smiles.remove(None)
+        smiles = set(ind.smiles for ind in population) - set(log) - {None}
         smiles = list(smiles)
         map_fn = map if (pool is None) else pool.map
 
