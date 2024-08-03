@@ -227,19 +227,23 @@ class GeneticSearch:
         return score
 
     def apply_oracle(self, population: Population, pool, log) -> None:
-        smiles = [ind.smiles for ind in population]
+        smiles = set(ind.smiles for ind in population) - set(log)
+        smiles.remove(None)
+        smiles = list(smiles)
         map_fn = map if (pool is None) else pool.map
 
-        applied = []
-        for i, score in enumerate(map_fn(self.apply_oracle_job, smiles)):
-            population[i].fitness = score
-            smi = population[i].smiles
-            if (smi not in log) and (smi is not None):
-                log[smi] = (score, len(log))
+        for smi, score in zip(smiles, map_fn(self.apply_oracle_job, smiles)):
+            assert (smi not in log) and (smi is not None)
+            log[smi] = (score, len(log))
             if len(log) >= self.config.max_oracle_calls:
                 break
-            else:
-                applied.append(population[i])
+
+        applied = []
+        for ind in population:
+            smi = ind.smiles
+            if (smi is None) or (smi in log):
+                ind.fitness = log[smi][0] if (smi is not None) else 0.0
+                applied.append(ind)
         return applied
 
     def optimize(self, surrogate: Callable[[Population], None]) -> None:
