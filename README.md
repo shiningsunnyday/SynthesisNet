@@ -6,6 +6,8 @@ This repo contains the code and analysis scripts for our Syntax-Guided approach 
 
 ```bash
 conda env create -f environment.yml
+source activate syntreenet
+pip install -e .
 ```
 
 ### Data
@@ -98,21 +100,17 @@ for split in {'train','valid','test'}; do
 done
 ```
 
-### Synthesizable Analog Generation
-
-![overview](./data/assets/figs/fig2.png "model scheme")
-
-Our surrogate ($F$) tackles the following search problem: given a *specification* in the form of a Morgan Fingerprint (over domain $X$), synthesize a program whose output molecule has that fingerprint. We introduce a bi-level solution, with an outer level proposing syntactic templates and the inner level inferencing a policy network to fill in the template.
-
 ### Training a Surrogate Model
-![overview](./data/assets/figs/fig3.png "model scheme")
+![model](./data/assets/figs/fig3.png "model scheme")
 
-In summary, our inner surrogate model takes as input a skeleton (in $T$) and fingerprint (in $X$), and fills in the holes to infer a complete syntax tree. This amortizes over solving the finite horizon MDP induced by the template, with the goal state being a complete syntax tree whose output molecule has the fingerprint.
+In summary, our surrogate model takes as input a skeleton (in $T$) and fingerprint (in $X$), and fills in the holes to infer a complete syntax tree. This amortizes over solving the finite horizon MDP induced by the template, with the goal state being a complete syntax tree whose output molecule has the fingerprint.
 
-Our supervised policy network is a GNN that takes as input a partially filled in syntax tree, and predicts an operator/literal for the nodes on the frontier. To train it, we construct a dataset of partial syntax trees via imposing masks over the synthetic trees in our data.
+Our supervised policy network is a GNN that takes as input a partially filled in syntax tree, and predicts an operator or literal for the nodes on the frontier. To train it, we construct a dataset of partial syntax trees via imposing masks over the synthetic trees in our data then preprocessing the target y for each frontier node.
+
+There is a tradeoff between expressiveness and usefulness when selecting which skeleton classes to use. For our final results, we find limiting to only the skeletons with at most 4 reactions (max_depth=4) is a good compromise between model coverage and real-world cost considerations.
 
 ```bash
-max_depth=3
+max_depth=4
 criteria=rxn_target_down_interm
 dataset=gnn_featurized_${criteria}_postorder
 for split in {'train','valid','test'}; do
@@ -139,143 +137,66 @@ for split in {'train','valid','test'}; do
 done;
 ``````
 
+Now we can train a GNN surrogate. By default, all skeleton classes from the previous step are used, but you can train separate checkpoints for separate classes. For example, if you only want a model over partial trees belonging to skeleton classes 0 and 1, you can add --gnn-datasets 0 1. We train two models ($F_B$ and $F_R$), one for predicting only building blocks and one for predicting only reactions. 
+
+```bash
+ckpt_dir=/ssd/msun415/surrogate/ # replace with your directory
+num_cpu=50 # change as needed
+if [[ $1 -eq 1 ]]; # train F_B
+then
+        metric=nn_accuracy_loss;
+        loss=mse;
+else # train F_R
+        metric=accuracy_loss;
+        loss=cross_entropy;
+fi
+python src/synnet/models/gnn.py \
+        --gnn-input-feats data/${dataset}_max_depth=${max_depth}_split \
+        --results-log ${ckpt_dir} \
+        --mol-embedder-file $EMBEDDINGS_KNN_FILE \
+        --gnn-valid-loss ${metric} \
+        --gnn-loss ${loss} \
+        --gnn-layer Transformer \
+        --lazy_load \
+        --ncpu ${num_cpu} \
+        --prefetch_factor 0 \
+        --feats-split \
+        --cuda 0 \
+        --pe sin
+``````    
+
+The results and checkpoints will be stored in versioned folders. See gnn.py for the hyperparameters that affect performance. You can iterate as needed. For example, if your best checkpoints are in version_42 (for $F_B$) and version_43 (for $F_R$), you should rename the folders for the downstream applications:
+
+```bash
+mv ${ckpt_dir}/version_42/ ${ckpt_dir}/4-NN
+mv ${ckpt_dir}/version_43/ ${ckpt_dir}/4-RXN
+```
+
 ### Synthesizable Analog Generation
 
-### Synthesis planning
+The task of synthesizable analog generation is to find a synthetic pathway to produce a molecule that's as similar to a given target molecule as possible. We define similarity between molecules as Tanimoto similarity over their fingerprints.
 
-This task is to infer the synthetic pathway to a given target molecule.
-We formulate this problem as generating a synthetic tree such that the product molecule it produces (i.e., the molecule at the root node) matches the desired target molecule.
+![analog](./data/assets/figs/fig2.png "model scheme")
 
-For this task, we can take a molecular embedding for the desired product, and use it as input to our model to produce a synthetic tree.
-If the desired product is successfully recovered, then the final root molecule will match the desired molecule used to create the input embedding.
-If the desired product is not successully recovered, it is possible the final root molecule may still be *similar* to the desired molecule used to create the input embedding, and thus our tool can also be used for *synthesizable analog recommendation*.
+Our surrogate procedure ($F$) tackles the following problem: given a *specification* in the form of a Morgan Fingerprint (over domain $X$), synthesize a program whose output molecule has that fingerprint. We introduce a bi-level solution, with an outer level proposing syntactic templates and the inner level inferencing our trained policy network to fill in the template.
 
-![the generation process](./figures/generation_process.png "generation process")
+
+See our bash script for the hyperparameters. Remember to specify the surrogate model checkpoint directory correctly.
+```bash
+./scripts/mcmc-analog.sh
+``````
+
+This script assumes you have listener processes in the background to parallelize across the batch. Each listener process can be called by running. Make sure the hyperparameters you want to try are also specified in it.
+```bash
+./scripts/mcmc-analog-listener-ccc.sh ${NUM_PROCESSES}
+``````
+
+The listeners coordinate via sender-filename and receiver-filename in mcmc-analog.sh. You can remove those args if you don't want to launch listener processes.
 
 ### Synthesizable molecular design
+![ga](./data/assets/figs/ga.png "GA")
 
-This task is to optimize a molecular structure with respect to an oracle function (e.g. bioactivity), while ensuring the synthetic accessibility of the molecules.
-We formulate this problem as optimizing the structure of a synthetic tree with respect to the desired properties of the product molecule it produces.
+The task is to optimize over synthetic pathways with respect to the property of its output molecule. We use the property oracles in [PMO](https://proceedings.neurips.cc/paper_files/paper/2022/hash/8644353f7d307baaf29bc1e56fe8e0ec-Abstract-Datasets_and_Benchmarks.html) and [GuacaMol](https://pubs.acs.org/doi/10.1021/acs.jcim.8b00839), as implemented by [TDC](https://tdc.readthedocs.io/en/main/). 
 
-To do this, we optimize the molecular embedding of the molecule using a genetic algorithm and the desired oracle function.
-The optimized molecule embedding can then be used as input to our model to produce a synthetic tree, where the final root molecule corresponds to the optimized molecule.
+We implement our discrete optimization procedure using a bilevel Genetic Search + Bayesian Optimization strategy. In the outer level, we follow a similar crossover and mutation strategy as [SynNet] over fingerprints *X*. In the inner level, we introduce operators over skeletons *T*. The inner procedure's goal is to explore the analog space of a given fingerprint, as defined by varying the skeleton but fixing the fingerprint. Since MCMC is prohibitively expensive, we offer various ways to amortize over it. By default, we use the top k proposals from our trained recognition model. There's also the option to edit the top 1 proposal. See our paper for more details.
 
-## Setup instructions
-
-### Environment
-
-Conda is used to create the environment for running SynNet.
-
-```bash
-# Install environment from file
-conda env create -f environment.yml
-```
-
-Before running any SynNet code, activate the environment and install this package in development mode:
-
-```bash
-source activate synnet
-pip install -e .
-```
-
-The model implementations can be found in `src/syn_net/models/`.
-
-The pre-processing and analysis scripts are in `scripts/`.
-
-### Train the model from scratch
-
-Before training any models, you will first need to some data preprocessing.
-Please see [INSTRUCTIONS.md](INSTRUCTIONS.md) for a complete guide.
-
-### Data
-
-SynNet relies on two datasources:
-
-1. reaction templates and
-2. building blocks.
-
-The data used for the publication are 1) the *Hartenfeller-Button* reaction templates, which are available under  [data/assets/reaction-templates/hb.txt](data/assets/reaction-templates/hb.txt) and 2) *Enamine building blocks*.
-The building blocks are not freely available.
-
-To obtain the data, go to [https://enamine.net/building-blocks/building-blocks-catalog](https://enamine.net/building-blocks/building-blocks-catalog).
-We used the "Building Blocks, US Stock" data. You need to first register and then request access to download the dataset. The people from enamine.net manually approve you, so please be nice and patient.
-
-## Reproducing results
-
-Before running anything, set up the environment as decribed above.
-
-### Using pre-trained models
-
-We have made available a set of pre-trained models at the following [link](https://figshare.com/articles/software/Trained_model_parameters_for_SynNet/16799413).
-The pretrained models correspond to the Action, Reactant 1, Reaction, and Reactant 2 networks, trained on the *Hartenfeller-Button* dataset and *Enamine* building blocks using radius 2, length 4096 Morgan fingerprints for the molecular node embeddings, and length 256 fingerprints for the k-NN search.
-For further details, please see the publication.
-
-To download the pre-trained model to `./checkpoints`:
-
-```bash
-# Download
-wget -O hb_fp_2_4096_256.tar.gz https://figshare.com/ndownloader/files/31067692
-# Extract
-tar -vxf hb_fp_2_4096_256.tar.gz
-# Rename files to match new scripts (...)
-mv hb_fp_2_4096_256/ checkpoints/
-for model in "act" "rt1" "rxn" "rt2"
-do
-  mkdir checkpoints/$model
-  mv "checkpoints/$model.ckpt" "checkpoints/$model/ckpts.dummy-val_loss=0.00.ckpt"
-done
-rm -f hb_fp_2_4096_256.tar.gz
-```
-
-The following scripts are run from the command line.
-Use `python some_script.py --help` or check the source code to see the instructions of each argument.
-
-### Prerequisites
-
-In addition to the necessary data, we will need to pre-compute an embedding of the building blocks.
-To do so, please follow steps 0-2 from the [INSTRUCTIONS.md](INSTRUCTIONS.md).
-Then, replace the environment variables in the commands below.
-
-#### Synthesis Planning
-
-To perform synthesis planning described in the main text:
-
-```bash
-python scripts/20-predict-targets.py \
-    --building-blocks-file $BUILDING_BLOCKS_FILE \
-    --rxns-collection-file $RXN_COLLECTION_FILE \
-    --embeddings-knn-file $EMBEDDINGS_KNN_FILE \
-    --data "data/assets/molecules/sample-targets.txt" \
-    --ckpt-dir "checkpoints/" \
-    --output-dir "results/demo-inference/"
-```
-
-python scripts/20-predict-targets.py \
-    --building-blocks-file $BUILDING_BLOCKS_FILE \
-    --rxns-collection-file $RXN_COLLECTION_FILE \
-    --embeddings-knn-file $EMBEDDINGS_KNN_FILE \
-    --data "data/pre-process/syntrees/top_1000/synthetic-trees-filtered-test.json.gz" \
-    --ckpt-dir "results/logs/" \
-    --output-dir "results/top-1000-inference/"
-
-This script will feed a list of ten molecules to SynNet.
-
-#### Synthesizable Molecular Design
-
-To perform synthesizable molecular design, run:
-
-```bash
-python scripts/optimize_ga.py \
-    --ckpt-dir "checkpoints/" \
-      --building-blocks-file $BUILDING_BLOCKS_FILE \
-    --rxns-collection-file $RXN_COLLECTION_FILE \
-    --embeddings-knn-file $EMBEDDINGS_KNN_FILE \
-    --input-file path/to/zinc.csv \
-    --radius 2 --nbits 4096 \
-    --num_population 128 --num_offspring 512 --num_gen 200 --objective gsk \
-    --ncpu 32
-```
-
-This script uses a genetic algorithm to optimize molecular embeddings and returns the predicted synthetic trees for the optimized molecular embedding.
-
-Note: `input-file` contains the seed molecules in CSV format for an initial run, and as a pre-saved numpy array of the population for restarting the run. If omitted, a random fingerprint will be chosen.

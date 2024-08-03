@@ -68,11 +68,12 @@ def get_args():
     parser.add_argument("--top-k-rxn", default=1, type=int, help="Beam width for first rxn")
     parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological', 'bottom_up_topological'], help="""
         Strategy to decode:
             Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
             Topological: Decode every topological order of the rxn+bb nodes.
     """)
+    parser.add_argument("--max_topological_orders", type=int)
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # Visualization
