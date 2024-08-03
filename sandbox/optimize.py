@@ -215,7 +215,9 @@ def main():
 
         # Load the pre-trained modules
         path = pathlib.Path(__file__).parents[1] / "data" / "checkpoints"
-        ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
+        # ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
+        ckpt_files = [path / model / f'{model}.ckpt' for model in "act rt1 rxn rt2".split()]
+        print(ckpt_files)
         act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file).cpu() for file in ckpt_files]
 
         converter = functools.partial(
