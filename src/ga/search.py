@@ -219,14 +219,14 @@ class GeneticSearch:
                 print("Oracle NaN on", smi)
                 score = 0.0
         except:
-            print("Oracle erorr on", smi)
+            print("Oracle error on", smi)
             score = 0.0
         if self.config.objective in ["7l11", "drd3"]:
             score = -score
 
         return score
 
-    def apply_oracle(self, population: Population, pool, log) -> None:
+    def apply_oracle(self, population: Population, pool, log) -> None:        
         smiles = set(ind.smiles for ind in population) - set(log) - {None}
         smiles = list(smiles)
         map_fn = map if (pool is None) else pool.map
@@ -290,7 +290,7 @@ class GeneticSearch:
         score_queue.append(-1000)
 
         sample_log = dict()
-
+        
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
 

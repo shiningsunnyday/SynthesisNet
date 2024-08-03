@@ -1,5 +1,5 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
-export LD_LIBRARY_PATH=/home/alston/miniforge3/envs/synnet/lib
+export LD_LIBRARY_PATH=/home/msun415/miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
 export OMP_NUM_THREADS=1
 
@@ -26,5 +26,8 @@ python sandbox/optimize.py \
     --early_stop_patience=10 \
     --fp_mutate_prob=0.5 \
     --children_strategy $2 \
-    --max_oracle_workers=0 \
-    --method=synnet --fp_bits=4096 --bt_ignore=true
+    --method=synnet --fp_bits=4096 --bt_ignore=true \
+    --max_oracle_calls 5000 \
+    --max_oracle_workers 5 \
+    --reassign_fps=false \
+    --children_per_couple=1
