@@ -19,36 +19,12 @@ from sklearn.gaussian_process.kernels import RBF
 from tdc import Oracle
 
 from ga import utils
-from ga.config import GeneticSearchConfig, Individual
+from ga.config import GeneticSearchConfig, Individual, ORACLE_REGISTRY
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
 from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
-
-
-def fetch_oracle(objective):
-    if objective == "qed":
-        # define the oracle function from the TDC
-        return Oracle(name="QED")
-    elif objective == "logp":
-        # define the oracle function from the TDC
-        return Oracle(name="LogP")
-    elif objective == "jnk":
-        # return oracle function from the TDC
-        return Oracle(name="JNK3")
-    elif objective == "gsk":
-        # return oracle function from the TDC
-        return Oracle(name="GSK3B")
-    elif objective == "drd2":
-        # return oracle function from the TDC
-        return Oracle(name="DRD2")
-    elif objective == "7l11":
-        return Oracle(name="7l11_docking")
-    elif objective == "drd3":
-        return Oracle(name="drd3_docking")
-    else:
-        raise ValueError("Objective function not implemented")
 
 
 class GeneticSearch:
@@ -230,7 +206,7 @@ class GeneticSearch:
     @staticmethod
     def init_oracle(objective):
         global oracle
-        oracle = fetch_oracle(objective)
+        oracle = Oracle(name=ORACLE_REGISTRY[objective])
 
     def apply_oracle_job(self, smi):
         global oracle
