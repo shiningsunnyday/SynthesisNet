@@ -11,9 +11,10 @@ python sandbox/optimize.py \
     --ckpt_bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
     --ckpt_recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
     --max_num_rxns ${MAX_NUM_RXNS} \
-    --top_k 3 \
-    --top_k_rxn 3 \
-    --strategy conf \
+    --top_k 1 \
+    --top_k_rxn 1 \
+    --strategy topological \
+    --max_topological_orders 5 \
     --objective $1 \
     --wandb=true \
     --wandb_project=syntreenet_ga_rebuttal_v3 \
@@ -26,5 +27,5 @@ python sandbox/optimize.py \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
     --fp_mutate_prob=0.5 \
-    --children_strategy "edits" \
+    --children_strategy "topk" \
     --max_oracle_workers=0
