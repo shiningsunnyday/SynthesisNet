@@ -1,3 +1,4 @@
+
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler, ReactionTemplateFileHandler
 from synnet.visualize.drawers import MolDrawer, RxnDrawer
 from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
@@ -429,24 +430,22 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             sk = Skeleton(sks[index], index)
             if sk.rxns.sum() > args.max_num_rxns: # ignore, won't use to decode
                 continue
-            if args.strategy == 'topological':
-                edges = np.array(sk.tree.edges).T
-                graph = PtrDataset.get_graph(edges)
-                PtrDataset.rewire(graph, PtrDataset.get_root(graph))
-                edges = np.array(graph.edges).T
-                graph = PtrDataset.get_graph(edges)
-                top_sorts = list(nx.all_topological_sorts(graph))
-                # print(len(list(top_sorts)))
-                # top_sorts = nx.all_topological_sorts(sk.tree)
-                top_sort_set = set()
-                for top_sort in top_sorts:
-                    top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
-                    top_sort_set.add(tuple(top_sort))
-                assert len(top_sort_set) == len(top_sorts)                                                
-                tree_key = serialize_string(sk.tree, sk.tree_root)
-                globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
-    # globals()['mc_adj'] = build_mc(args.max_num_rxns)
-
+            edges = np.array(sk.tree.edges).T
+            graph = PtrDataset.get_graph(edges)
+            PtrDataset.rewire(graph, PtrDataset.get_root(graph))
+            edges = np.array(graph.edges).T
+            graph = PtrDataset.get_graph(edges)
+            top_sorts = list(nx.all_topological_sorts(graph))
+            # print(len(list(top_sorts)))
+            # top_sorts = nx.all_topological_sorts(sk.tree)
+            top_sort_set = set()
+            for top_sort in top_sorts:
+                top_sort = [n for n in top_sort if sk.rxns[n] or sk.leaves[n]]
+                top_sort_set.add(tuple(top_sort))
+            assert len(top_sort_set) == len(top_sorts)
+            tree_key = serialize_string(sk.tree, sk.tree_root)
+            globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
+    globals()['mc_adj'] = build_mc(args.max_num_rxns)
     return SKELETON_INDEX
 
 

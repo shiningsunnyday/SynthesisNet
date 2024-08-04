@@ -37,15 +37,16 @@ for seed in {10,};
 do
     # ,'Celecoxib_Rediscovery','Troglitazone_Rediscovery','Thiothixene_Rediscovery','Aripiprazole_Similarity','Albuterol_Similarity','Mestranol_Similarity','Isomers'
     # for obj in {'Median_1','Median_2','Osimertinib_MPO','Fexofenadine_MPO','Ranolazine_MPO','Perindopril_MPO','Amlodipine_MPO','Sitagliptin_MPO','Zaleplon_MPO'};
-    for obj in {'jnk',}
+    for obj in {'qed','logp','jnk','gsk','drd2'};
+    # for obj in {'jnk',}
     do  
-        for strategy in {'flips','edits'};
+        for strategy in {'flips',};
         do
         jbsub -proj syntreenet \
             -queue x86_24h \
-            -name ga-analog.obj=${obj}.strategy=${strategy} \
-            -mem 20g \
-            -cores ${cpus} sh ./sandbox/ga_ablate.sh "${obj}" "${strategy}" "${seed}"
+            -name synnet.obj=${obj}.strategy=${strategy} \
+            -mem 50g \
+            -cores ${cpus} sh ./sandbox/ga_ablate_synnet.sh "${obj}" "${strategy}" "${seed}"
         done
     done
 done
