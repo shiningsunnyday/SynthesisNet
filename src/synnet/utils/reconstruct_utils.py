@@ -66,7 +66,6 @@ def get_metrics(targets, all_sks):
         correct_summary = {}
     else:
         total_correct = {}
-    breakpoint()
     for (sk_true, smi), sks in zip(targets, all_sks):
         tree_id = str(np.array(sks[0].tree.edges))
         if tree_id not in total_incorrect:
@@ -118,7 +117,6 @@ def get_metrics(targets, all_sks):
 
 
 def decode(sk, smi):
-    breakpoint()
     sk.clear_tree(forcing=args.forcing_eval)
     sk.modify_tree(sk.tree_root, smiles=smi)
     if args.mermaid:
@@ -829,7 +827,6 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
         assert args.top_k == 1
         assert args.top_k_rxn == 1
     final_sks = []
-    breakpoint()
     while len(sks):
         sk = sks.pop(-1)
         if isinstance(sk, tuple):
@@ -846,10 +843,14 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             """
             # print(f"decode step {sk.mask}")
             # prediction problem
-            _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
-            for i in range(len(X)):
-                if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
-                    X[i] = 0            
+            if 'bottom_up' in args.strategy:
+                _, X, _ = sk.get_state(leaves_up=True)
+            else:
+                _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
+                for i in range(len(X)):
+                    if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
+                        X[i] = 0                   
+         
             edges = sk.tree_edges
             tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
             edge_input = torch.tensor(tree_edges, dtype=torch.int64)
@@ -896,6 +897,8 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                     for k in range(1, 1+top_k_bb):
                         sk_copy = deepcopy(sk_n)
                         fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k, bblock_inds=bblock_inds)
+                        if sk_copy.tree.nodes[n]['smiles_forcing'] == sk_copy.tree.nodes[n]['smiles_true']:
+                            breakpoint()
                         if next_node is None:
                             sks.append(sk_copy)
                         else:

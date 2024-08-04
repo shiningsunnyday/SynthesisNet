@@ -270,7 +270,7 @@ def main(args):
             path = os.path.join(args.out_dir, 'reconstruct.csv')
             df.to_csv(path)
             print(os.path.abspath(path))
-        else:            
+        else:
             target_batch = [(deepcopy(target), smi) for target, smi in target_batch]
             if args.ncpu == 1:
                 sks_batch = []
