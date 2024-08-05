@@ -146,7 +146,7 @@ def get_smiles_synnet(
         action = -1
     if action != 3:
         return idx, None, None
-    else:
+    else:        
         scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
         max_score_idx = np.where(scores == np.max(scores))[0][0]
         return idx, tree.chemicals[max_score_idx].smiles, None

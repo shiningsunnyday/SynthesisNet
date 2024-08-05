@@ -17,7 +17,7 @@ python sandbox/optimize.py \
     --objective $1 \
     --wandb=true \
     --wandb_project=syntreenet_ga_rebuttal_v3 \
-    --num_workers=45 \
+    --num_workers=80 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
     --early_stop=true \
@@ -28,6 +28,7 @@ python sandbox/optimize.py \
     --children_strategy $2 \
     --method=synnet --fp_bits=4096 --bt_ignore=true \
     --max_oracle_calls 5000 \
-    --max_oracle_workers 5 \
+    --max_oracle_workers 20 \
     --reassign_fps=false \
-    --children_per_couple=1
+    --children_per_couple=1 \
+    --initialize_path /home/msun415/SynTreeNet/data/assets/molecules/zinc.csv
