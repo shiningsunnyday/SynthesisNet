@@ -18,7 +18,7 @@ from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
 from synnet.models.legacy import find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
-from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
+from synnet.utils.predict_utils import synthetic_tree_decoder, synthetic_tree_decoder_greedy_search, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
     decode,
     load_data,
@@ -83,6 +83,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     filter_only: List[Literal["rxn", "bb"]] = []
 
     num_workers: int = 0
+    beam_width: int = 1
     chunksize: int = 1
 
     # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
@@ -119,37 +120,65 @@ def get_smiles_synnet(
     act_net, rt1_net, rxn_net, rt2_net,
     bb_emb,
     rxn_template,
-    nbits
+    nbits,
+    beam_width=1
 ):
+    def return_val(idx, emb, tree, action):
+        if action != 3:
+            return idx, None, None
+        else:
+            scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
+            max_score_idx = np.where(scores == np.max(scores))[0][0]
+            return idx, tree.chemicals[max_score_idx].smiles, None        
     idx, ind = idx_and_ind
 
     emb = ind.fp.reshape((1, -1))
     try:
-        tree, action = synthetic_tree_decoder(
-            z_target=emb,
-            sk_coords=None,
-            building_blocks=building_blocks,
-            bb_dict=bb_dict,
-            reaction_templates=rxns,
-            mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
-            action_net=act_net,
-            reactant1_net=rt1_net,
-            rxn_net=rxn_net,
-            reactant2_net=rt2_net,
-            bb_emb=bb_emb,
-            rxn_template=rxn_template,
-            n_bits=nbits,
-            max_step=15,
-        )
+        if beam_width == 1:
+            tree, action = synthetic_tree_decoder(
+                z_target=emb,
+                sk_coords=None,
+                building_blocks=building_blocks,
+                bb_dict=bb_dict,
+                reaction_templates=rxns,
+                mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
+                action_net=act_net,
+                reactant1_net=rt1_net,
+                rxn_net=rxn_net,
+                reactant2_net=rt2_net,
+                bb_emb=bb_emb,
+                rxn_template=rxn_template,
+                n_bits=nbits,
+                max_step=15,
+            )
+        else:
+            smiles, sims, trees, actions = synthetic_tree_decoder_greedy_search(
+                beam_width=2,
+                analogs=True,
+                z_target=emb,
+                sk_coords=None,
+                building_blocks=building_blocks,
+                bb_dict=bb_dict,
+                reaction_templates=rxns,
+                mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
+                action_net=act_net,
+                reactant1_net=rt1_net,
+                rxn_net=rxn_net,
+                reactant2_net=rt2_net,
+                bb_emb=bb_emb,
+                rxn_template=rxn_template,
+                n_bits=nbits,
+                max_step=15,                
+            )
     except Exception as e:
+        breakpoint()
         print(e)
-        action = -1
-    if action != 3:
-        return idx, None, None
-    else:        
-        scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
-        max_score_idx = np.where(scores == np.max(scores))[0][0]
-        return idx, tree.chemicals[max_score_idx].smiles, None
+        action = -1   
+    if beam_width == 1: 
+        return return_val(idx, emb, tree, action)
+    else:
+        res = [return_val(idx, emb, tree, action) for tree, action in zip(trees, actions)]
+        return [r[0] for r in res], [r[1] for r in res], [r[2] for r in res]
 
 
 def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
@@ -160,16 +189,34 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
         indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
-    for idx, smi, bt in pbar:
-        ind = batch[idx]
-        if smi is None:
-            ind.smiles = None
-        else:
-            ind.smiles = Chem.CanonSmiles(smi)
-            if config.reassign_fps:
-                ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
-        if config.reassign_bts:
-            ind.bt = bt
+    if config.beam_width == 1:
+        for idx, smi, bt in pbar:
+            ind = batch[idx]
+            if smi is None:
+                ind.smiles = None
+            else:
+                ind.smiles = Chem.CanonSmiles(smi)
+                if config.reassign_fps:
+                    ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+            if config.reassign_bts:
+                ind.bt = bt
+    else:
+        for idxes, smis, bts in pbar:
+            ind = batch[idxes[0]]
+            ind.smiles = [None for _ in range(config.beam_width)]
+            ind.fp = [ind.fp for _ in range(config.beam_width)]
+            ind.bt = [ind.bt for _ in range(config.beam_width)]
+            for i, (smi, bt) in zip(range(config.beam_width), zip(smis, bts)):
+                if smi is None:
+                    ind.smiles[i] = smi
+                else:
+                    canon_smi = Chem.CanonSmiles(smi)
+                    ind.smiles[i] = canon_smi
+                    if config.reassign_fps:
+                        fp = mol_fp(canon_smi, _nBits=config.fp_bits).astype(np.float32)
+                        ind.fp[i] = fp
+                if config.reassign_bts:
+                    ind.bt[i] = bt
 
 
 def main():
@@ -230,6 +277,7 @@ def main():
             bb_emb=bb_emb,
             rxn_template="hb",
             nbits=config.fp_bits,
+            beam_width=config.beam_width
         )
 
     else:
