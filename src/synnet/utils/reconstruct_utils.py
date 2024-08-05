@@ -140,6 +140,7 @@ def decode(sk, smi):
         bb_gnn = globals()['bb_gnn']
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
     # ans = serialize_string(sk.tree, sk.tree_root)
+    print("done")
     return sks
 
 
@@ -178,7 +179,6 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     ax.set_xlabel('Tree Skeleton x')
     ax.set_ylabel('Tree Skeleton y')
     fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file
-    breakpoint()
     return adj
 
 
@@ -896,8 +896,6 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                     for k in range(1, 1+top_k_bb):
                         sk_copy = deepcopy(sk_n)
                         fill_in(args, sk_copy, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=k, bblock_inds=bblock_inds)
-                        if sk_copy.tree.nodes[n]['smiles_forcing'] == sk_copy.tree.nodes[n]['smiles_true']:
-                            breakpoint()
                         if next_node is None:
                             sks.append(sk_copy)
                         else:

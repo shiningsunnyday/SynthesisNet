@@ -15,7 +15,7 @@ import pickle
 import hashlib
 from synnet.utils.reconstruct_utils import *
 import multiprocessing as mp
-from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import Pool
 import random
 random.seed(42)
 
@@ -278,7 +278,7 @@ def main(args):
                     sks = decode(*arg)
                     sks_batch.append(sks)                                      
             else:
-                with ThreadPool(args.ncpu) as p:
+                with Pool(args.ncpu) as p:
                     sks_batch = p.starmap(decode, tqdm(target_batch))        
             mask = [sks is not None for sks in sks_batch]
             target_batch = [t for (t, b) in zip(target_batch, mask) if b]

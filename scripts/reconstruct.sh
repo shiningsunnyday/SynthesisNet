@@ -41,8 +41,8 @@ MODEL_DIR=/ssd/msun415/surrogate
 #     --one-per-class
 
 python scripts/reconstruct-targets.py \
-    --skeleton-set-file results/viz/skeletons-train.pkl \
-    --ckpt-rxn ${MODEL_DIR}/ablation/version_3 \
+    --skeleton-set-file results/viz/skeletons-valid.pkl \
+    --ckpt-rxn ${MODEL_DIR}/ablation/version_5 \
     --ckpt-bb ${MODEL_DIR}/ablation/version_4 \
     --out-dir ${ROOT_DIR}/results/viz/ \
     --top-k ${TOP_K} \
@@ -56,5 +56,4 @@ python scripts/reconstruct-targets.py \
     --ckpt-recognizer ${MODEL_DIR}/${MAX_NUM_RXNS}-REC/ \
     --num-analogs 5 \
     --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.txt \
-    
+    --receiver-filename output_${use_case}.txt
