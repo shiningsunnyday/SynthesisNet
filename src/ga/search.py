@@ -331,6 +331,8 @@ class GeneticSearch:
                     elif cfg.children_strategy == "flips":
                         child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
                         group = [child_base] + [self.random_fp_flips(child_base) for _ in child_ids[1:]]
+                    elif cfg.children_strategy == "analog":
+                        ...
                     else:
                         raise NotImplementedError()
                     assert len(group) == cfg.children_per_couple
