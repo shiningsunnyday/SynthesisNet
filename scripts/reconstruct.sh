@@ -1,4 +1,4 @@
-MAX_NUM_RXNS=3
+MAX_NUM_RXNS=4
 TOP_K=3
 TOP_K_RXN=3
 STRATEGY=bottom_up_topological
