@@ -294,7 +294,7 @@ export OMP_NUM_THREADS=1
 
 MAX_NUM_RXNS=4
 
-python scripts/optimize_ga_new.py \
+python sandbox/optimize.py \
     --seed [SEED] \
     --background_set_file /results/viz/skeletons-train.pkl \
     --skeleton_set_file /results/viz/skeletons-valid.pkl \
