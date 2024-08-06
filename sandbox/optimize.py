@@ -7,8 +7,10 @@ from typing import List, Literal, Optional
 import jsonargparse
 import numpy as np
 import tqdm
+import wandb
 from rdkit import Chem
 from torch.multiprocessing import Pool
+from torch.utils.benchmark import Timer
 
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
@@ -36,6 +38,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     """Config for running the GA."""
 
     method: Literal["synnet", "ours"] = "synnet"
+    benchmark: bool = false
 
     log_file: Optional[str] = None
 
@@ -242,7 +245,30 @@ def main():
         pool = None
 
     surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
-    search.optimize(surrogate=surrogate)
+
+    if config.benchmark:
+
+        if config.wandb:
+            wandb.init(
+                project=config.wandb_project,
+                entity=config.wandb_entity,
+                dir=config.wandb_dir,
+                config=dict(config),
+            )
+
+        population = search.initialize_random()
+        timer = Timer(
+            stmt="surrogate(population, desc='')",
+            globals={"surrogate": surrogate, "population": population}
+        )
+        print(timer.timeit(1))
+
+        # Cleanup
+        if config.wandb:
+            wandb.finish()
+
+    else:
+        search.optimize(surrogate=surrogate)
 
     if pool is not None:
         pool.close()
