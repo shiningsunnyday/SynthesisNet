@@ -13,10 +13,10 @@ from torch.multiprocessing import Pool
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
 from synnet.MolEmbedder import MolEmbedder
-from synnet.encoding.fingerprints import mol_fp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
-from synnet.models.legacy import find_best_model_ckpt, load_mlp_from_ckpt
+from synnet.encoding.fingerprints import mol_fp
+from synnet.models.legacy import load_mlp_from_ckpt
 from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
 from synnet.utils.predict_utils import synthetic_tree_decoder, synthetic_tree_decoder_greedy_search, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
