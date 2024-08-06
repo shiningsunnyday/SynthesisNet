@@ -23,6 +23,7 @@ ORACLE_REGISTRY = {
     "amlodipine": "Amlodipine_MPO",
     "sitagliptin": "Sitagliptin_MPO",
     "zaleplon": "Zaleplon_MPO",
+    "celecoxib": "Celecoxib_Rediscovery",
 }
 
 
