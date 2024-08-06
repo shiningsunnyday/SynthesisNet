@@ -251,7 +251,7 @@ you want to try are also specified in it.
 The listeners coordinate via sender-filename and receiver-filename in mcmc-analog.sh.
 You can remove those args if you don't want to launch listener processes.
 
-### Synthesizable molecular design
+### Synthesizable Molecular Design
 
 ![ga](./data/assets/figs/ga.png "GA")
 
@@ -278,3 +278,43 @@ fingerprints $\hat{X}_1, \ldots, \hat{X}_k$). Then, we inference the Gaussian Pr
 regressor and apply a standard EI acquisition function to select the fingerprint to
 evaluate with the oracle. We refit the regressor after each generation with the history
 of oracle calls.
+
+### Running the Genetic Algorithms
+
+The environment used for the genetic search is given in `synnet_ga.yml`. Note that for
+the docking objectives (`7l11`, `drd3`), we
+use [`pyscreneer`](https://github.com/coleygroup/pyscreener) with vina-type software
+(installation instructions are given in the linked repository). An example command for
+running the genetic search is:
+
+```bash
+export PYTHONPATH="/path/to/SynTreeNet/src"         
+export LD_LIBRARY_PATH=~/miniforge3/envs/synnet/lib  # or your conda env
+export OMP_NUM_THREADS=1  
+
+MAX_NUM_RXNS=4
+
+python scripts/optimize_ga_new.py \
+    --seed [SEED] \
+    --background_set_file /results/viz/skeletons-train.pkl \
+    --skeleton_set_file /results/viz/skeletons-valid.pkl \
+    --ckpt_rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
+    --ckpt_bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
+    --ckpt_recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/  \
+    --max_num_rxns ${MAX_NUM_RXNS} \
+    --top_k 1 \
+    --top_k_rxn 1 \
+    --strategy topological \
+    --early_stop=true \
+    --wandb=true \
+    --method=ours \               # either ours or synnet
+    --fp_bits=2048 \              # set to 2048 for ours, 4096 for synnet
+    --bt_ignore=false \           # set to false for ours, true for synnet
+    --reassign_fps=true \         # whether to reassign fingerprints
+    --objective qed \             # oracle name
+    --children_strategy "topk" \  # inner operator over skeletons 
+    --num_workers=30 \            # parallelizes surrogate
+    --max_oracle_workers=0  \     # parallelizes oracle
+    --max_oracle_calls=10000000   # constrains oracle calls   
+```
+
