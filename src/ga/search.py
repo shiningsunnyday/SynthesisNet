@@ -1,7 +1,5 @@
 import collections
 import itertools
-import pickle
-import random
 from functools import partial
 from multiprocessing import Pool
 from typing import Callable, Dict, List, Tuple
@@ -236,7 +234,7 @@ class GeneticSearch:
 
         return score
 
-    def apply_oracle(self, population: Population, pool, log) -> None:        
+    def apply_oracle(self, population: Population, pool, log) -> None:
         smiles = set(ind.smiles for ind in population) - set(log) - {None}
         smiles = list(smiles)
         map_fn = map if (pool is None) else pool.map
@@ -309,7 +307,7 @@ class GeneticSearch:
         score_queue.append(-1000)
 
         sample_log = dict()
-        
+
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
 
@@ -398,7 +396,7 @@ class GeneticSearch:
                 break
 
         samples = wandb.Table(
-            columns= ["smiles", "idx", "fitness"],
+            columns=["smiles", "idx", "fitness"],
             data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
         )
         wandb.log({"samples": samples}, commit=True)
