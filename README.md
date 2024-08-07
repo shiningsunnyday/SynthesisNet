@@ -290,9 +290,11 @@ running the genetic search is:
 export PYTHONPATH="/path/to/SynTreeNet/src"         
 export LD_LIBRARY_PATH=~/miniforge3/envs/syntreenet/lib  # or your conda env
 export OMP_NUM_THREADS=1
+
 MAX_NUM_RXNS=4
 MODEL_DIR=/ssd/msun415/surrogate # your trained surrogate models
 SKELETON_DIR=results/viz # where you stored your skeletons
+
 python sandbox/optimize.py \
     --seed [SEED] \
     --background_set_file ${SKELETON_DIR}/skeletons-train.pkl \
@@ -312,11 +314,13 @@ python sandbox/optimize.py \
     --bt_ignore=false \           # set to false for ours, true for synnet
     --reassign_fps=true \         # whether to reassign fingerprints
     --objective qed \             # oracle name
-    --children_strategy "topk" \  # inner operator over skeletons 
+    --children_strategy "edits" \ # inner operator over skeletons 
     --num_workers=30 \            # parallelizes surrogate
     --max_oracle_workers=0  \     # parallelizes oracle
     --max_oracle_calls=10000000   # constrains oracle calls   
 ```
+
+Please use the `--help` command for the full range of arguments and options.
 
 ### Case Study: Docking against Human Dopamine Receptor (DRD3)
 
