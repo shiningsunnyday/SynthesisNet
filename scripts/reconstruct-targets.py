@@ -135,14 +135,18 @@ def main(args):
                 breakpoint()
         else:
             raise NotImplementedError           
-        random.shuffle(targets)     
+        random.shuffle(targets)
     else:
         syntree_set = []        
         print(f"SKELETON INDEX: {SKELETON_INDEX}")
         if args.one_per_class:
             rep = set()
         for syntree in syntree_set_all:        
-            index = skeleton_set.lookup[syntree.root.smiles][0].index    
+            sk = skeleton_set.lookup[syntree.root.smiles][0]
+            index = sk.index    
+            if index != 1:
+                continue
+            assert len(sk.tree) == 4
             if len(skeleton_set.lookup[syntree.root.smiles]) == 1: # one skeleton per smiles                
                 if index in SKELETON_INDEX:
                     if args.one_per_class:
@@ -151,7 +155,7 @@ def main(args):
                             syntree_set.append(syntree)
                     else:
                         syntree_set.append(syntree)       
-        # random.shuffle(syntree_set)
+        random.shuffle(syntree_set)     
         targets = [syntree.root.smiles for syntree in syntree_set]                    
     if args.num != -1:
         targets = targets[:args.num]

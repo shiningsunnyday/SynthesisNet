@@ -132,8 +132,8 @@ def main(proc_id, filename, output_filename):
             smiles = np.array(list(map(int, smiles)), dtype=bool)
         index = int(index)
         st = list(skeletons)[index]               
-        sk = Skeleton(st, index)
-        sks = decode(sk, smiles)
+        sk = Skeleton(st, index)        
+        sks = decode(sk, smiles)        
         ans = 0.
         best_smi = ''
         for sk in sks:

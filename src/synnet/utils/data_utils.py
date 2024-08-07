@@ -2387,6 +2387,8 @@ class Skeleton:
                 else:
                     print("bad node")
             else:
+                # always add target features
+                X[n][2048:2*2048] = fp_2048(self.tree.nodes[self.tree_root]['smiles'])                
                 if rxn_frontier:
                     if is_frontier_rxn:
                         self.fill_node(n, y)

@@ -119,7 +119,7 @@ def get_metrics(targets, all_sks):
 
 def decode(sk, smi):
     sk.clear_tree(forcing=args.forcing_eval)
-    sk.modify_tree(sk.tree_root, smiles=smi)
+    sk.modify_tree(sk.tree_root, smiles=smi)    
     if args.mermaid:
         skviz = lambda sk, *pargs: SkeletonVisualizer(sk, args.out_dir, *pargs).with_drawings(mol_drawer=MolDrawer, rxn_drawer=RxnDrawer)
     else:
@@ -793,7 +793,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             if top_sort not in top_sort_set:
                 top_sort_set.add(top_sort)
                 sks.append((deepcopy(sk), list(top_sort)))        
-        if hasattr(args, 'max_topological_orders') and len(sks) > args.max_topological_orders:
+        if hasattr(args, 'max_topological_orders') and args.max_topological_orders is not None and len(sks) > args.max_topological_orders:
             sks = random.sample(sks, k=args.max_topological_orders)
     elif args.strategy == "bottom_up_topological":
         sks = []
@@ -808,7 +808,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 top_sort_set.add(top_sort)   
         for top_sort in top_sort_set:
             sks.append((deepcopy(sk), list(top_sort)))        
-        if hasattr(args, 'max_topological_orders') and len(sks) > args.max_topological_orders:
+        if hasattr(args, 'max_topological_orders') and args.max_topological_orders is not None and len(sks) > args.max_topological_orders:
             sks = random.sample(sks, k=args.max_topological_orders)        
     elif args.strategy == 'conf':
         sks = [sk]

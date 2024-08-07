@@ -8,6 +8,7 @@ debug=$2;
 
 # HPARAMS
 ncpu=50;
+ncpu=0;
 # rewire='--rewire-edges';
 # rewire='';
 pe='--pe sin';
@@ -48,6 +49,7 @@ if [[ ${debug} -eq 0 ]]; then
             --gnn-dp-rate 0.0 \
             --heads 8
 else
+        datasets='--gnn-datasets 1'
         python src/synnet/models/gnn.py \
             --gnn-input-feats data/$dataset \
             --results-log results/logs/gnn/ \
