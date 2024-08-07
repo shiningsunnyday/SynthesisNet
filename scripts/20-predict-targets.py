@@ -288,7 +288,7 @@ if __name__ == "__main__":
             logger.info(f"Starting MP with ncpu={args.ncpu}")
             results = pool.starmap(wrapper_decoder, tqdm(targets))
     logger.info("Finished decoding.")
-    results = pickle.load(open(os.path.join(args.output_dir, 'decoded.pkl'), 'rb'))
+    # results = pickle.load(open(os.path.join(args.output_dir, 'decoded.pkl'), 'rb'))
 
     targets = [target[0] for target in targets]
     if args.analogs:

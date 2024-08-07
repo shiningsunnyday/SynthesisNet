@@ -41,7 +41,7 @@ class MolDrawer:
             fname = self.outfolder / f"{v}.svg"
             mol = Chem.MolFromSmiles(k)
             # Plot
-            drawer = Draw.rdMolDraw2D.MolDraw2DSVG(300, 150)
+            drawer = Draw.rdMolDraw2D.MolDraw2DSVG(600, 300)
             opts = drawer.drawOptions()
             drawer.DrawMolecule(mol)
             drawer.FinishDrawing()
@@ -87,7 +87,7 @@ class RxnDrawer:
             fname = self.outfolder / f"{v}.png"
             # Plot      
             rxn = AllChem.ReactionFromSmarts(k)
-            d2d = Draw.MolDraw2DCairo(800, 300)
+            d2d = Draw.MolDraw2DCairo(1600, 600)
             d2d.DrawReaction(rxn, highlightByReactant=True)
             p = d2d.GetDrawingText()                
 

@@ -56,12 +56,14 @@ class PostfixWriter:
 
 
 class SkeletonPrefixWriter:
-    def __init__(self, file: str = None):
-        self.prefix = self._default_prefix() if file is None else self._load(file)
+    def __init__(self, title: str = None, file: str = None):
+        self.prefix = self._default_prefix(title) if file is None else self._load(file)
 
-    def _default_prefix(self):
+    def _default_prefix(self, title: str = None):
+        if title is None:
+            title = 'Skeleton Visualisation'
         md = [
-            "# Skeleton Visualisation",
+            f"# {title}",
             "",
             "Legend",
             "- :grey_square: Building Block",
@@ -81,16 +83,18 @@ class SkeletonPrefixWriter:
             "        'clusterBorder': '#000000',",
             "        'edgeLabelBackground':'#dbe1e1',",
             "        'fontSize': '20px'",
+            "        'edgeStyle': 'stroke:#f00,stroke-width:2px,fill:none,stroke-linecap:round,stroke-dasharray:none'",
+            "        'arrowheadStyle': 'fill:#f00,stroke:#f00'",
             "        }",
             "    }",
             "}%%",
         ]
         diagram_id = ["graph BT"]
         style = [
-            "classDef buildingblock stroke:#080808,stroke-width:2px",
-            "classDef intermediate stroke:#ff6723,stroke-width:2px",
-            "classDef reaction stroke:#f8312f,stroke-width:2px",
-            "classDef final stroke:#0074ba,stroke-width:2px",
+            "classDef buildingblock stroke:#080808,stroke-width:2px,fill:#fff",
+            "classDef intermediate stroke:#ff6723,stroke-width:2px,fill:#fff",
+            "classDef reaction stroke:#f8312f,stroke-width:2px,fill:#fff",
+            "classDef final stroke:#0074ba,stroke-width:2px,fill:#fff",
         ]
         return md + start + theming + diagram_id + style
 

@@ -200,7 +200,7 @@ def main():
             batch_size = 1
         else:
             batch_size = args.num_trees_per_batch*len(pargs)//len(skeletons[st])        
-        num_batches = (len(pargs)+batch_size-1)//batch_size
+        num_batches = min((len(pargs)+batch_size-1)//batch_size, 1)
         print(f"{num_batches} batches")
         for k in tqdm(range(num_batches), desc="batches"): 
             if os.path.exists(os.path.join(args.output_dir, f"{index}_{k}_node_masks.npy")):

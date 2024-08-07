@@ -308,12 +308,15 @@ class SkeletonVisualizer:
                 reactant1, reactant2 = succ[0], None
             else:
                 raise
-            @subgraph(f'"{i:>2d} : {node}"')
+            if 'smirks' in self.skeleton.tree.nodes[node]:
+                label = self.skeleton.tree.nodes[node]['smirks']
+            else:
+                label = self.skeleton.tree.nodes[node]['smiles']
+            @subgraph(f'"{i:>2d} : {node} : {label}"')
             def __printer():
                 return self._write_reaction_connectivity(
                     [reactant1, reactant2], node
-                )
-
+                )            
             out = __printer()
             text.extend(out)
         return text

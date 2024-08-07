@@ -51,7 +51,6 @@ python scripts/reconstruct-targets.py \
     --top-k-rxn ${TOP_K_RXN} \
     --max_rxns ${MAX_RXNS} \
     --test-correct-method reconstruct \
-    --strategy ${STRATEGY} \
     --ncpu $ncpu \
     --batch-size $batch_size \
     --num-analogs 5 \
