@@ -1,3 +1,4 @@
+obj=analog
 MAX_NUM_RXNS=3
 TOP_K=3
 TOP_K_RXN=3

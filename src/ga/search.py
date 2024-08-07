@@ -1,5 +1,7 @@
 import collections
 import itertools
+import pickle
+import random
 from functools import partial
 from multiprocessing import Pool
 from typing import Callable, Dict, List, Tuple
@@ -227,7 +229,7 @@ class GeneticSearch:
                 print("Oracle NaN on", smi)
                 score = 0.0
         except:
-            print("Oracle error on", smi)
+            print("Oracle erorr on", smi)
             score = 0.0
         if self.config.objective in ["7l11", "drd3"]:
             score = -score
@@ -329,9 +331,6 @@ class GeneticSearch:
                     elif cfg.children_strategy == "flips":
                         child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
                         group = [child_base] + [self.random_fp_flips(child_base) for _ in child_ids[1:]]
-                    elif cfg.children_strategy == "analog":
-                        child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
-                        group = [child_base]
                     else:
                         raise NotImplementedError()
                     assert len(group) == cfg.children_per_couple
@@ -339,10 +338,6 @@ class GeneticSearch:
                     offsprings.append(group)
 
                 surrogate(sum(offsprings, []), desc="Surrogate")
-
-                if cfg.children_strategy == "analog":
-                    offsprings = sum(offsprings, [])
-                    offsprings = [[Individual(fp=fp, bt=bt, smiles=smi) for (fp, bt, smi) in zip(o.fp, o.bt, o.smiles)] for o in offsprings]
 
                 # Choose the candidate that maximizes EI
                 kernel = RBF(length_scale=1.0)
@@ -358,16 +353,6 @@ class GeneticSearch:
 
             else:
                 surrogate(population, desc="Surrogate")
-                if cfg.children_strategy == "analog":
-                    for indv in population:
-                        assert isinstance(indv.smiles, list)
-                        assert isinstance(indv.bt, list)
-                        assert isinstance(indv.fp, list)
-                        indv.smiles = indv.smiles[0]
-                        indv.bt = indv.bt[0]
-                        indv.fp = indv.fp[0]
-
-                # only 
                 population = self.apply_oracle(population, pool, sample_log)
                 X_history, y_history = self.record_history(population)
 
@@ -396,7 +381,7 @@ class GeneticSearch:
                 break
 
         samples = wandb.Table(
-            columns=["smiles", "idx", "fitness"],
+            columns= ["smiles", "idx", "fitness"],
             data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
         )
         wandb.log({"samples": samples}, commit=True)

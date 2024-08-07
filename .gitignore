@@ -1,5 +1,6 @@
 # === custom ===
 
+data/
 figures/syntrees/
 results/
 checkpoints/

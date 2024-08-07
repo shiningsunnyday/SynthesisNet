@@ -2173,26 +2173,21 @@ class Skeleton:
         """
         Clears the semantic information in the tree
         """
-        for n in self.tree:           
+        for n in self.tree:
             if n in save:
                 continue
             if 'smiles' in self.tree.nodes[n]:
-                # save it somewhere for debugging
-                self.tree.nodes[n]['smiles_true'] = self.tree.nodes[n]['smiles']                 
                 if forcing:
                     self.tree.nodes[n]['smiles_forcing'] = ''
                 else:
                     self.tree.nodes[n]['smiles'] = ''
             elif 'rxn_id' in self.tree.nodes[n]:
-                # save it somewhere for debugging
-                self.tree.nodes[n]['rxn_id_true'] = self.tree.nodes[n]['rxn_id']                 
                 if forcing:
                     self.tree.nodes[n]['rxn_id_forcing'] = -1
                 else:
                     self.tree.nodes[n]['rxn_id'] = -1
                 self.tree.nodes[n]['smirks'] = 'C>>' # for debug hashing
                 # self.tree.nodes[n]['rxn_id'] = -1
-                # save it somewhere for debugging
             else:
                 raise
         self.reset()
