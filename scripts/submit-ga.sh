@@ -16,18 +16,37 @@
 #     done
 # done
 
+# cpus=50
+# for seed in {10,};
+# do
+#     for obj in {'jnk',};
+#     do  
+#         for strategy in {'edits','flips','topk'};
+#         do
+#         jbsub -proj syntreenet \
+#             -queue x86_24h \
+#             -name ga-analog.obj=${obj}.strategy=${strategy}.new \
+#             -mem 20g \
+#             -cores ${cpus} sh ./sandbox/ga_ablate.sh "${obj}" "${strategy}" "${seed}"
+#         done
+#     done
+# done
+
 cpus=50
-for seed in {11,12};
+for seed in {10,};
 do
-    for obj in {'gsk','jnk'};
+    # ,'Celecoxib_Rediscovery','Troglitazone_Rediscovery','Thiothixene_Rediscovery','Aripiprazole_Similarity','Albuterol_Similarity','Mestranol_Similarity','Isomers'
+    # for obj in {'Median_1','Median_2','Osimertinib_MPO','Fexofenadine_MPO','Ranolazine_MPO','Perindopril_MPO','Amlodipine_MPO','Sitagliptin_MPO','Zaleplon_MPO'};
+    for obj in {'jnk',};
+    # for obj in {'jnk',}
     do  
-        for strategy in {'semantic','analog'};
+        for strategy in {'flips',};
         do
-            jbsub -proj syntreenet \
-                -queue x86_24h \
-                -name ga-analog.obj=${obj}.strategy=${strategy} \
-                -mem 20g \
-                -cores ${cpus} sh ./sandbox/ga_ablate.sh ${obj} ${strategy} ${seed}
+        jbsub -proj syntreenet \
+            -queue x86_24h \
+            -name synnet.obj=${obj}.strategy=${strategy} \
+            -mem 200g \
+            -cores ${cpus} sh ./sandbox/ga_ablate_synnet.sh "${obj}" "${strategy}" "${seed}"
         done
     done
 done

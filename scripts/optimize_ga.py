@@ -122,6 +122,73 @@ def dock_7l11(smi):
             return -_7l11(smi)
         except:
             return 0.0
+        
+
+
+def dock_liep(smi):
+    """
+    Returns the docking score for the liep target.
+
+    Args:
+        smi (str): SMILES for the molecule to predict the docking score of.
+
+    Returns:
+        float: Predicted docking score against the liep target.
+    """
+    # define the oracle function from the TDC
+    _liep = Oracle(name="liep_docking")
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_liep(smi)
+        except:
+            return 0.0
+        
+
+
+def dock_2rgp(smi):
+    """
+    Returns the docking score for the 2rgp target.
+
+    Args:
+        smi (str): SMILES for the molecule to predict the docking score of.
+
+    Returns:
+        float: Predicted docking score against the 2rgp target.
+    """
+    # define the oracle function from the TDC
+    _2rgp = Oracle(name="2rgp_docking")
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_2rgp(smi)
+        except:
+            return 0.0
+        
+
+
+def dock_3pbl(smi):
+    """
+    Returns the docking score for the 3pbl target.
+
+    Args:
+        smi (str): SMILES for the molecule to predict the docking score of.
+
+    Returns:
+        float: Predicted docking score against the 3pbl target.
+    """
+    # define the oracle function from the TDC
+    _3pbl = Oracle(name="3pbl_docking")
+    if smi is None:
+        return 0.0
+    else:
+        try:
+            return -_3pbl(smi)
+        except:
+            return 0.0
+
 
 
 def fitness(embs, _pool, obj):
@@ -169,10 +236,73 @@ def fitness(embs, _pool, obj):
         # define the oracle function from the TDC
         drd2 = Oracle(name="DRD2")
         scores = [drd2(smi) if smi is not None else 0.0 for smi in smiles]
+    elif obj == "ASKCOS":
+        askcos = Oracle(name="ASKCOS")
+        host_ip = 'http://xx.xx.xxx.xxx'
+        scores = [askcos(smi, host_ip, output='plausibility') for smi in smiles]
+    elif obj == "IBM_RXN":
+        oracle = Oracle(name='IBM_RXN')
+        key = 'apk-c9db......' # You can obtain a key from https://rxn.res.ibm.com
+        scores = [oracle(smi, key) for smi in smiles]
+    elif obj == "Celecoxib_Rediscovery":
+        oracle = Oracle(name='Celecoxib_Rediscovery')
+        scores = [oracle(smi) for smi in smiles]
+    elif obj == "Troglitazone_Rediscovery":
+        oracle = Oracle(name='Troglitazone_Rediscovery')
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Thiothixene_Rediscovery":
+        oracle = Oracle(name='Thiothixene_Rediscovery')
+        scores = [oracle(smi) for smi in smiles]                
+    elif obj == "Aripiprazole_Similarity":
+        oracle = Oracle(name='Aripiprazole_Similarity')
+        scores = [oracle(smi) for smi in smiles]
+    elif obj == "Albuterol_Similarity":
+        oracle = Oracle(name='Albuterol_Similarity')
+        scores = [oracle(smi) for smi in smiles]
+    elif obj == "Mestranol_Similarity":
+        oracle = Oracle(name='Mestranol_Similarity')
+        scores = [oracle(smi) for smi in smiles]                  
+    elif obj == "Median_1":
+        oracle = Oracle(name="Median 1")
+        scores = [oracle(smi) for smi in smiles]
+    elif obj == "Median_2":
+        oracle = Oracle(name="Median 2")
+        scores = [oracle(smi) for smi in smiles]
+    elif obj == "Isomers":
+        oracle = Oracle(name="Isomers")
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Osimertinib_MPO":
+        oracle = Oracle(name="Osimertinib_MPO")
+        scores = [oracle(smi) for smi in smiles]
+    elif obj == "Fexofenadine_MPO":
+        oracle = Oracle(name="Fexofenadine_MPO")
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Ranolazine_MPO":
+        oracle = Oracle(name="Ranolazine_MPO")
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Perindopril_MPO":
+        oracle = Oracle(name="Perindopril_MPO")
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Amlodipine_MPO":
+        oracle = Oracle(name="Amlodipine_MPO")
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Sitagliptin_MPO":
+        oracle = Oracle(name="Sitagliptin_MPO")
+        scores = [oracle(smi) for smi in smiles]        
+    elif obj == "Zaleplon_MPO":
+        oracle = Oracle(name="Zaleplon_MPO")
+        scores = [oracle(smi) for smi in smiles]                
+    # docking
+    elif obj == "liep":
+        scores = [dock_liep(smi) for smi in smiles]
+    elif obj == "2rgp":
+        scores = [dock_2rgp(smi) for smi in smiles]        
     elif obj == "7l11":
         scores = [dock_7l11(smi) for smi in smiles]
     elif obj == "drd3":
         scores = [dock_drd3(smi) for smi in smiles]
+    elif obj == "3pbl":
+        scores = [dock_3pbl(smi) for smi in smiles]
     else:
         raise ValueError("Objective function not implemneted")
     return scores, smiles, trees
