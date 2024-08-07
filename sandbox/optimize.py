@@ -38,7 +38,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     """Config for running the GA."""
 
     method: Literal["synnet", "ours"] = "synnet"
-    benchmark: bool = false
+    benchmark: bool = False
 
     log_file: Optional[str] = None
 
