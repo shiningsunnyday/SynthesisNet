@@ -2,8 +2,7 @@
 
 This repo contains the code and analysis scripts for our Syntax-Guided approach for the
 Procedural Synthesis of Molecules. Similar to SynNet, our model serves both
-Synthesizable Analog Generation and Synthesizable Molecular Design applications. Upon
-acceptance for publication, we will include a link to the preprint with the full details
+Synthesizable Analog Generation and Synthesizable Molecular Design applications. We will soon include a link to the preprint with the full details
 of our method.
 
 ### Environment
@@ -289,22 +288,23 @@ running the genetic search is:
 
 ```bash
 export PYTHONPATH="/path/to/SynTreeNet/src"         
-export LD_LIBRARY_PATH=~/miniforge3/envs/synnet/lib  # or your conda env
-export OMP_NUM_THREADS=1  
-
+export LD_LIBRARY_PATH=~/miniforge3/envs/syntreenet/lib  # or your conda env
+export OMP_NUM_THREADS=1
 MAX_NUM_RXNS=4
-
+MODEL_DIR=/ssd/msun415/surrogate # your trained surrogate models
+SKELETON_DIR=results/viz # where you stored your skeletons
 python sandbox/optimize.py \
     --seed [SEED] \
-    --background_set_file /results/viz/skeletons-train.pkl \
-    --skeleton_set_file /results/viz/skeletons-valid.pkl \
-    --ckpt_rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
-    --ckpt_bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
-    --ckpt_recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/  \
+    --background_set_file ${SKELETON_DIR}/skeletons-train.pkl \
+    --skeleton_set_file ${SKELETON_DIR}/skeletons-valid.pkl \
+    --ckpt_rxn ${MODEL_DIR}/${MAX_NUM_RXNS}-RXN/ \
+    --ckpt_bb ${MODEL_DIR}/${MAX_NUM_RXNS}-NN/ \
+    --ckpt_recognizer ${MODEL_DIR}/${MAX_NUM_RXNS}-REC/  \
     --max_num_rxns ${MAX_NUM_RXNS} \
     --top_k 1 \
     --top_k_rxn 1 \
     --strategy topological \
+    --max_topological_orders 5 \  # number of decoding orders to sample
     --early_stop=true \
     --wandb=true \
     --method=ours \               # either ours or synnet
@@ -318,3 +318,30 @@ python sandbox/optimize.py \
     --max_oracle_calls=10000000   # constrains oracle calls   
 ```
 
+### Case Study: Docking against Human Dopamine Receptor (DRD3)
+
+We obtained near SOTA results on the DRD3 [TDC leaderboard](https://tdcommons.ai/benchmark/docking_group/drd3/), appearing as the only synthesis-based method entry. Baseline molecules can be found on the leaderboard.
+
+To reproduce the result, run the command above with --seed 10 --objective drd3 --max_oracle_calls 5000. We show the top binders and include some expert written analysis.
+
+![drd3](./data/assets/figs/drd3.png "drd3")
+
+"For the predicted molecular binder of DRD3, the chlorine 
+substituent and polycyclic aromatic structure suggest good potential for 
+binding through π-π interactions and halogen bonding. The bromine and 
+carboxyl groups can enhance binding affinity through halogen bonding and 
+hydrogen bonding, respectively. The polycyclic structure further supports π-π 
+stacking interactions. In general, they have a comparable binding capability 
+than the baseline molecules, but with simpler structures, the ease of 
+synthesis for the predicted molecules are higher than the baseline 
+molecules."
+
+### Case Study: Docking against Main Protease of SARS-CoV-2 (MPro)
+
+We discover appealing alternatives to existing inhibitors in literature [[1](https://pubmed.ncbi.nlm.nih.gov/33786375/), [2](https://pubmed.ncbi.nlm.nih.gov/32869018/)].
+
+To reproduce the result, run the same command with --objective 7l11.
+
+"For Mpro predicted molecules, overall, the three predicted molecules contain multiple aromatic rings in conjugation with halide groups. The conformation structures of the multiple aligned aromatic rings play a significant role in docking and achieve ideal molecular pose and binding affinity to Mpro, compared with the baseline molecules. The predicted structures also indicate stronger pi-pi interaction and halogen bonding compared with the baselines. In terms of ease of synthesis, Bromination reactions are typically straightforward, but multiple fused aromatic rings can take several steps to achieve. In general, the second and third can be easier to synthesize than Brc1cc(-c2cc(-c3cccc4ccccc34)nc3ccccc23)c2ccccc2n1 due to less aromatic rings performed. However, the literature molecules appeared to be even harder to synthesize due to their high complexicity structures. So the predicted molecules obtained a general higher ease of synthesis than the baseline molecules. Compared with the other baseline molecules, eg. Manidipine, Lercanidipine, Efonidipine (Dihydropyridines) are known for their calcium channel blocking activity, but not specifically protease inhibitors, Azelastine, Cinnoxicam, Idarubicin vary widely in their primary activities, not specifically designed for protease inhibition. Talampicillin and Lapatinib are also primarily designed for other mechanisms of action. Boceprevir, Nelfinavir, Indinavir, on the other hand, are known protease inhibitors with structures optimized for binding to protease active sites, so can serve as strong benchmarks. Overall, the binding effectiveness of the predicted molecules are quite comparable to the baseline molecules."
+
+We limit to 5000 calls for benchmarking purposes, but have seen longer runs can produce better results.
