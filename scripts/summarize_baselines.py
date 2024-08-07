@@ -39,6 +39,8 @@ category = {
     'Ours': 'synthesis'
 }
 
+metrics_order = ['qed','gsk3b','jnk3','drd2','median1','median2','celecoxib_rediscovery','osimertinib_mpo','fexofenadine_mpo','ranolazine_mpo','perindopril_mpo','amlodipine_mpo','sitagliptin_mpo','zaleplon_mpo','drd3','7l11']
+
 def top_k_auc(arr, k, max_oracle_calls=10000):
     min_heap = []
     result = []
@@ -76,6 +78,21 @@ def process_res(res, limit):
     return scores    
 
 
+
+def load_data(f):
+    if f[-4:] == 'yaml':
+        return yaml.safe_load(open(f))    
+    else:
+        df = pd.read_csv(f)
+        vals = sorted(df.values, key=lambda x: x[-1], reverse=True)
+        dic = {}
+        for val in vals:
+            smiles, index, score = tuple(val)
+            dic[smiles] = [score, index+1]
+        return dic
+
+
+
 def compute_scores(f, limit=10000):
     """
     We compute the following metrics from PMO [1]:
@@ -96,7 +113,7 @@ def compute_scores(f, limit=10000):
     Our implementation is more straight-forward, but there may be slight deviation in results.
     https://github.com/wenhao-gao/mol_opt/blob/2da631be85af8d10a2bb43f2de76a03171166190/main/optimizer.py#L30
     """
-    res = yaml.safe_load(open(f))
+    res = load_data(f)
     scores = process_res(res, limit)
     print("done")
     return scores
@@ -105,7 +122,7 @@ def compute_scores(f, limit=10000):
 def compute_metrics(data_dir, baseline, seed, metric):    
     path = os.path.join(data_dir, f'results_{baseline}_qed_{seed}.yaml')
     out_path = os.path.join(data_dir, f'results_{baseline}_{metric}_{seed}.yaml')
-    data = yaml.safe_load(open(path))
+    data = load_data(path)
     result = {}
     if metric == 'SA':
         oracle = Oracle(metric)
@@ -118,25 +135,41 @@ def compute_metrics(data_dir, baseline, seed, metric):
 
 def compute_ours(path):
     df = pd.read_csv(path)
+    df = df.loc[df["smiles"]==df["smiles"]]
+    df.idx = np.arange(df.shape[0])
     vals = sorted(list(df.values), key=lambda x: x[-1], reverse=True)
     res = {smi: [score, ind+1] for smi, ind, score in vals}
     scores = process_res(res, limit=10000)
     return scores
 
 
+def sort_metrics(cols):
+    inds = np.arange(len(cols))
+    sorted_inds = sorted(inds, key=lambda ind: (metrics_order.index(cols[ind].split()[0]), ind))
+    return [cols[i] for i in sorted_inds]
+
+
+
 def main(args):
-    data_dir = args.baselines_dir
-    # use synnet to extract supported metrics
+    data_dir = args.baselines_dir    
     metrics = []
     baselines = defaultdict(list)
     for f in os.listdir(data_dir): 
-        match = re.match('results_synnet_(\w+)_0.yaml', f)
+        # use synnet to extract supported metrics
+        match = re.match('results_synnet_(\w+)_0.(?:yaml|csv)', f)
         if match:
-            metrics.append(match.groups()[0])
-        match = re.match(f'results_(\w+)_qed_(\d).yaml', f)
-        if match:
-            baseline, seed = match.groups()
-            baselines[baseline].append(seed)            
+            metric = match.groups()[0]
+            if args.include_metrics and metric not in args.include_metrics:
+                continue
+            metrics.append(metric)  
+
+    for f in os.listdir(data_dir):
+        for metric in metrics:
+            match = re.match(f'results_(\w+)_{metric}_(\d).(?:yaml|csv)', f)
+            if match:                
+                baseline, seed = match.groups()
+                if int(seed) not in baselines[baseline]:
+                    baselines[baseline].append(int(seed))
 
     # compute remaining metrics
     pargs = [(data_dir, baseline, seed, metric) for baseline in baselines \
@@ -158,9 +191,9 @@ def main(args):
     pargs = []    
     for f in tqdm(os.listdir(data_dir)):
         for i, metric in enumerate(metrics):
-            match = re.match(f'results_(\w+)_{metric}_(\d).yaml', f)
+            match = re.match(f'results_(\w+)_{metric}_(\d).(?:yaml|csv)', f)
             if match:
-                baseline, seed = match.groups()
+                baseline, seed = match.groups()            
                 # if not (metric in ['drd2'] and 'smiles' in baseline): 
                 #     continue # for debugging
                 arg = os.path.join(data_dir, f)
@@ -192,7 +225,7 @@ def main(args):
 
     for (path, i), scores in zip(pargs, all_scores):
         res['Ours'][i].append(scores)                                    
-
+    
     df = pd.DataFrame(index=list(res))
     for baseline in res:
         for i in range(len(metrics)):
@@ -202,24 +235,26 @@ def main(args):
             res[baseline][i] = dict(df_i.mean(axis=0)) # aggregate over seeds    
         for i, metric in enumerate(metrics):
             for col in res[baseline][i]:            
-                df.loc[baseline, f"{metric} {col}"] = res[baseline][i][col]
+                df.loc[baseline, f"{metric} {col}"] = round(res[baseline][i][col], 3)
     for col in df:
         if col[-2:] == ' K':
             continue
         col_vals = df[col]
         col_vals = col_vals[col_vals == col_vals]
-        argsort = col_vals.rank(method='min', ascending='_sa' in col)
+        argsort = col_vals.rank(method='min', ascending='SA' in col)
         dic = dict(zip(range(len(col_vals)), map(int, argsort)))
         # group by category
         df_col = pd.DataFrame(col_vals)
         df_col['category'] = [category[method] for method in df_col.index]
-        ranks = df_col.groupby('category').rank(method='min', ascending=False)
+        ranks = df_col.groupby('category').rank(method='min', ascending='SA' in col)
         dicc = dict(zip(range(len(col_vals)), map(int, ranks[col])))
         rank = [dic[i] for i in range(len(col_vals))]
         rank_category = [dicc[i] for i in range(len(col_vals))]
-        df.loc[df.index[df[col] == df[col]], col] = [f"{score} ({r}) [{rc}]" for score, r, rc in zip(col_vals, rank, rank_category)]    
+        df.loc[df.index[df[col] == df[col]], col] = [f"{score} ({r}|{rc})" for score, r, rc in zip(col_vals, rank, rank_category)]    
     df['category'] = [category[method] for method in df.index]
-    cols = ['category'] + df.columns.tolist()[:-1]
+    cand_metrics = df.columns.tolist()[:-1]
+    cols = ['category'] + sort_metrics([m for m in cand_metrics if m.split()[0] in metrics_order])
+    cols = [col for col in cols if 'seed' not in col]
     df = df[cols]
     # include ours                
     path = os.path.join(data_dir, "results.csv")
@@ -232,6 +267,7 @@ if __name__ == "__main__":
     parser.add_argument("--baselines-dir", default='data/pmo/')
     parser.add_argument("--ours-dir", default='data/ours/')
     parser.add_argument("--ncpu", type=int, default=0)
+    parser.add_argument("--include-metrics", nargs='+', help="If given, only consider these metrics")
     parser.add_argument("--metrics", nargs='+', choices=['SA'], help="Additional metrics to compute for each file", default=[])
     args = parser.parse_args()
     main(args)
