@@ -15,7 +15,7 @@ import pickle
 import hashlib
 from synnet.utils.reconstruct_utils import *
 import multiprocessing as mp
-from multiprocessing.pool import Pool
+from multiprocessing.pool import ThreadPool
 import random
 random.seed(42)
 
@@ -82,12 +82,11 @@ def get_args():
     parser.add_argument("--top-k-rxn", default=1, type=int, help="Beam width for first rxn")
     parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological', 'bottom_up_topological'], help="""
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
         Strategy to decode:
             Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
             Topological: Decode every topological order of the rxn+bb nodes.
     """)
-    parser.add_argument("--max_topological_orders", type=int)
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # Visualization
@@ -151,7 +150,7 @@ def main(args):
                             syntree_set.append(syntree)
                     else:
                         syntree_set.append(syntree)       
-        # random.shuffle(syntree_set)
+        random.shuffle(syntree_set)
         targets = [syntree.root.smiles for syntree in syntree_set]                    
     if args.num != -1:
         targets = targets[:args.num]
@@ -270,15 +269,15 @@ def main(args):
             path = os.path.join(args.out_dir, 'reconstruct.csv')
             df.to_csv(path)
             print(os.path.abspath(path))
-        else:
-            target_batch = [(deepcopy(target), smi) for target, smi in target_batch]
+        else:            
+            target_batch = [(deepcopy(lookup[smi][j]), smi) for smi in target_batch for j in range(len(lookup[smi]))]
             if args.ncpu == 1:
                 sks_batch = []
                 for arg in tqdm(target_batch):                        
                     sks = decode(*arg)
                     sks_batch.append(sks)                                      
             else:
-                with Pool(args.ncpu) as p:
+                with ThreadPool(args.ncpu) as p:
                     sks_batch = p.starmap(decode, tqdm(target_batch))        
             mask = [sks is not None for sks in sks_batch]
             target_batch = [t for (t, b) in zip(target_batch, mask) if b]
@@ -315,6 +314,6 @@ def main(args):
 if __name__ == "__main__":
 
     # Parse input args
-    args = get_args()    
+    args = get_args()
     breakpoint()
     main(args)

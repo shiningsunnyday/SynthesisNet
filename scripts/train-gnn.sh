@@ -8,7 +8,7 @@ debug=$2;
 
 # HPARAMS
 ncpu=50;
-# rewire='--rewire-edges';
+rewire='--rewire-edges';
 # rewire='';
 pe='--pe sin';
 # pe='--pe child'
@@ -18,8 +18,8 @@ pe='--pe sin';
 datasets=''
 # dataset=gnn_featurized_rxn_target_down_bb_postorder_split
 # dataset=gnn_featurized_rxn_target_down_bb_postorder_max_depth=3_split
-# dataset=gnn_featurized_rxn_target_down_interm_postorder_max_depth=3_split
-dataset=gnn_featurized_leaves_up_postorder_max_depth=4_split
+dataset=gnn_featurized_rxn_target_down_interm_postorder_max_depth=3_split
+# dataset=gnn_featurized_leaves_up_postorder_max_depth=3_split
 
 # datasets='';
 if [[ $1 -eq 1 ]]; then
@@ -48,6 +48,7 @@ if [[ ${debug} -eq 0 ]]; then
             --gnn-dp-rate 0.0 \
             --heads 8
 else
+        datasets='--gnn-datasets 0'
         python src/synnet/models/gnn.py \
             --gnn-input-feats data/$dataset \
             --results-log results/logs/gnn/ \
@@ -59,7 +60,7 @@ else
             ${pe} \
             --gnn-layer Transformer \
             --lazy_load \
-            --ncpu 5 \
+            --ncpu 0 \
             --prefetch_factor 2 \
             --feats-split \
             --cuda 0 \

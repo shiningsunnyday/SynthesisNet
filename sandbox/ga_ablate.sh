@@ -1,7 +1,7 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
 export OMP_NUM_THREADS=1
 MAX_NUM_RXNS=4
-MODEL_DIR=/ssd/msun415/surrogate
+MODEL_DIR=/dccstor/graph-design/surrogate
 SKELETON_DIR=results/viz
 python sandbox/optimize.py \
     --seed=$3 \
@@ -15,16 +15,15 @@ python sandbox/optimize.py \
     --top_k_rxn 3 \
     --strategy conf \
     --objective $1 \
-    --wandb=true \
-    --wandb_project=syntreenet_ga_rebuttal_v3 \
+    --wandb \
+    --wandb_project=syntreenet_ga_rebuttal \
     --method=ours \
-    --num_workers=100 \
+    --num_workers=30 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
-    --early_stop=true \
+    --early_stop \
     --early_stop_delta=0.01 \
     --early_stop_warmup=30 \
     --early_stop_patience=10 \
     --fp_mutate_prob=0.5 \
-    --children_strategy "$2" \
-    --max_oracle_workers=0
+    --child2_strategy=$2

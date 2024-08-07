@@ -1,14 +1,14 @@
-MAX_NUM_RXNS=4
+MAX_NUM_RXNS=3
 TOP_K=3
 TOP_K_RXN=3
-STRATEGY=bottom_up_topological
+STRATEGY=topological
 MAX_RXNS=-1
 use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
 ncpu=1;
-batch_size=1000;
-ROOT_DIR=${HOME}/SynTreeNet/
-# MODEL_DIR=${HOME}/SynTreeNet/surrogate/
-MODEL_DIR=/ssd/msun415/surrogate
+batch_size=100000;
+ROOT_DIR=/u/msun415/SynTreeNet/
+MODEL_DIR=/u/msun415/SynTreeNet/surrogate/
+# MODEL_DIR=/ssd/msun415/surrogate
 
 # python scripts/reconstruct-targets.py \
 #     --skeleton-set-file results/viz/top_1000/skeletons-top-1000-valid.pkl \
@@ -38,12 +38,15 @@ MODEL_DIR=/ssd/msun415/surrogate
 #     --ncpu $ncpu \
 #     --batch-size $batch_size \
 #     --mermaid \
-#     --one-per-class
+#     --one-per-class \
+#     --attn_weights
+    # --sender-filename input_reconstruct.txt \
+    # --receiver-filename output_reconstruct.txt
 
 python scripts/reconstruct-targets.py \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
-    --ckpt-rxn ${MODEL_DIR}/ablation/version_5 \
-    --ckpt-bb ${MODEL_DIR}/ablation/version_4 \
+    --ckpt-rxn ${MODEL_DIR}/${MAX_NUM_RXNS}-RXN/ \
+    --ckpt-bb ${MODEL_DIR}/${MAX_NUM_RXNS}-NN/ \
     --out-dir ${ROOT_DIR}/results/viz/ \
     --top-k ${TOP_K} \
     --max_num_rxns ${MAX_NUM_RXNS} \
@@ -54,6 +57,7 @@ python scripts/reconstruct-targets.py \
     --ncpu $ncpu \
     --batch-size $batch_size \
     --ckpt-recognizer ${MODEL_DIR}/${MAX_NUM_RXNS}-REC/ \
-    --num-analogs 5 \
+    --num-analogs 30 \
     --sender-filename input_${use_case}.txt \
-    --receiver-filename output_${use_case}.txt
+    --receiver-filename output_${use_case}.txt \
+    # --num 1000
