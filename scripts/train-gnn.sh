@@ -47,8 +47,9 @@ if [[ ${debug} -eq 0 ]]; then
             --feats-split \
             --cuda 0 \
             --gnn-dp-rate 0.0 \
-            --heads 8
-else
+            --heads 8 \
+            --shuffle
+else # debug
         datasets='--gnn-datasets 1'
         python src/synnet/models/gnn.py \
             --gnn-input-feats data/$dataset \
@@ -61,10 +62,10 @@ else
             ${pe} \
             --gnn-layer Transformer \
             --lazy_load \
-            --ncpu 5 \
-            --prefetch_factor 2 \
+            --ncpu 0 \
             --feats-split \
             --cuda 0 \
             --gnn-dp-rate 0.0 \
-            --heads 8
+            --heads 8 \
+            --shuffle
 fi

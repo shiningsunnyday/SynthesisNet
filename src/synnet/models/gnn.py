@@ -150,7 +150,7 @@ class PtrDataset(Dataset):
     def __getitem__(self, idx):
         base, e, index = self.ptrs[idx]
         node_mask = sparse.load_npz(base+'_node_masks.npz').toarray()[index]
-        # smi = sparse.load_npz(base+'_smiles.npz').toarray()[index]
+        # smi = np.load(base+'_smiles.npy')[index]
         # if smi == 'CCNCC1=NNC(Cc2ccccc2CS(=O)(=O)N2CCCC2COC(C)(C)C)=N1':
         #     breakpoint()
         num_nodes = self.num_nodes[e]
@@ -190,7 +190,6 @@ class PtrDataset(Dataset):
             torch.tensor(y, dtype=torch.float32),
             torch.tensor(self.sks[e].leaves)
         )
-        breakpoint()
         return Data(edge_index=data[0], key=data[1], x=data[2], y=data[3], bb_mask=data[4])
     
     
@@ -261,7 +260,7 @@ def load_lazy_dataloaders(args):
     dataset_valid = PtrDataset(val_dataset_ptrs, args.rewire_edges, args.pe)
     dataset_test = PtrDataset(test_dataset_ptrs, args.rewire_edges, args.pe)
     prefetch_factor = args.prefetch_factor
-    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=False, prefetch_factor=prefetch_factor, persistent_workers=True)
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=args.shuffle, prefetch_factor=prefetch_factor, persistent_workers=True)
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=True)
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
@@ -301,11 +300,10 @@ def load_split_dataloaders(args):
     dataset_test = PtrDataset(test_dataset_ptrs, args.rewire_edges, args.pe)
 
     prefetch_factor = args.prefetch_factor
-    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=False, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
+    train_dataloader = DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.ncpu, shuffle=args.shuffle, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
     valid_dataloader = DataLoader(dataset_valid, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
     test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size, num_workers=args.ncpu, prefetch_factor=prefetch_factor, persistent_workers=bool(args.ncpu))
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is['train'])
-
 
 def load_dataloaders(args):
     input_dir = args.gnn_input_feats
@@ -386,8 +384,8 @@ def load_dataloaders(args):
         i += 1
     dataset_train = torch.utils.data.ConcatDataset(datasets_train)
     dataset_valid = torch.utils.data.ConcatDataset(datasets_valid)
-    dataset_test = torch.utils.data.ConcatDataset(datasets_test)
-    train_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_train], batch_size=args.batch_size, num_workers=args.ncpu, shuffle=False)
+    dataset_test = torch.utils.data.ConcatDataset(datasets_test)    
+    train_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_train], batch_size=args.batch_size, num_workers=args.ncpu, shuffle=args.shuffle)
     valid_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_valid], batch_size=args.batch_size, num_workers=args.ncpu)
     test_dataloader = DataLoader([Data(edge_index=data[0], x=data[2], y=data[3]) for data in dataset_test], batch_size=args.batch_size, num_workers=args.ncpu)
     return train_dataloader, valid_dataloader, test_dataloader, ','.join(used_is)
@@ -474,5 +472,4 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args()
-    breakpoint()
     main(args)

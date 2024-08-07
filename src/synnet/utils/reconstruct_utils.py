@@ -848,8 +848,9 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
                 for i in range(len(X)):
                     if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
-                        X[i] = 0                   
-         
+                        X[i, :2048] = 0
+
+
             edges = sk.tree_edges
             tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
             edge_input = torch.tensor(tree_edges, dtype=torch.int64)
