@@ -16,7 +16,7 @@ python sandbox/optimize.py \
     --strategy conf \
     --objective $1 \
     --wandb=true \
-    --wandb_project=syntreenet_ga_rebuttal_v3 \
+    --wandb_project=syntreenet_ga_rebuttal \
     --method=ours \
     --num_workers=100 \
     --fp_bits=2048 \
