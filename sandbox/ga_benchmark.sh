@@ -18,10 +18,9 @@ python sandbox/optimize.py \
     --max_topological_orders 1 \
     --wandb=true \
     --wandb_project=alston_syntreenet_ga_benchmark \
-    --num_workers=0 \
-    --max_oracle_workers=0 \
+    --num_workers=-1 \
+    --max_oracle_workers=-1 \
     --generations=-1 \
-    --population=1000 \
     --reassign_fp=false --reassign_bt=false \
     --method=ours --fp_bits=2048 \
     # --method=synnet --fp_bits=4096 --bt_ignore=true \
