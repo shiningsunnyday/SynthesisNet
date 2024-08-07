@@ -1,17 +1,9 @@
-MAX_NUM_RXNS=4
+MAX_NUM_RXNS=3
 TOP_K=3
 TOP_K_RXN=3
-STRATEGY=topological
 MAX_RXNS=-1
-use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
-ncpu=1
-ROOT_DIR=${HOME}/SynTreeNet/
-# MODEL_DIR=${HOME}/SynTreeNet/surrogate/
-MODEL_DIR=/ssd/msun415/surrogate
-export OMP_NUM_THREADS=1
-
-# MODEL_DIR=/ssd/msun415/surrogate
-
+STRATEGY=conf
+use_case="mcmc_${obj}_top_k=${TOP_K}_top_k_rxn=${TOP_K_RXN}_max_rxns=${MAX_RXNS}_max_num_rxns=${MAX_NUM_RXNS}_strategy=${STRATEGY}"
 for ((i =1; i <= $1; i++));
 do
 # python -u scripts/reconstruct_listener.py \
@@ -43,19 +35,23 @@ do
     #     --test-correct-method reconstruct \
     #     --strategy topological &
 
-    python -u scripts/reconstruct_listener.py \
+    python -u scripts/mcmc_listener.py \
         --proc_id $i \
-        --skeleton-set-file results/viz/skeletons-train.pkl \
-        --ckpt-rxn ${MODEL_DIR}/${MAX_NUM_RXNS}-RXN \
-        --ckpt-bb ${MODEL_DIR}/${MAX_NUM_RXNS}-NN \
-        --ckpt-recognizer ${MODEL_DIR}/${MAX_NUM_RXNS}-REC/ \
-        --out-dir ${ROOT_DIR}/results/viz/ \
+        --skeleton-set-file results/viz/skeletons-valid.pkl \
+        --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
+        --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
+        --out-dir /home/msun415/SynTreeNet/results/chembl/ \
+        --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
         --top-k ${TOP_K} \
-        --max_num_rxns ${MAX_NUM_RXNS} \
         --top-k-rxn ${TOP_K_RXN} \
+        --max_num_rxns ${MAX_NUM_RXNS} \
         --max_rxns ${MAX_RXNS} \
         --test-correct-method reconstruct \
         --strategy ${STRATEGY} \
-        --filename input_${use_case}.txt \
-        --output_filename output_${use_case}.txt &
+        --beta 10. 100. \
+        --mcmc_timesteps 1000 \
+        --obj ${obj} \
+        --sender-filename input_${use_case}.txt \
+        --receiver-filename output_${use_case}.txt &
 done
+

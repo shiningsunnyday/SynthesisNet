@@ -219,11 +219,18 @@ def main(args):
                     if editable:
                         status = []
                         lines = fr.readlines()
-                        if len(lines) == num_samples:
+                        if len(lines) >= num_samples:
+                            status = [None for _ in range(num_samples)]
                             for idx, line in enumerate(lines):
                                 splitted_line = line.strip().split()
-                                status.append((splitted_line[j] for j in range(len(splitted_line))))
-                            break
+                                key = int(splitted_line[0]) 
+                                status[key] = (splitted_line[j] for j in range(len(splitted_line)))
+                            if np.all([x is not None for x in status]):
+                                break
+                        # write to another file for viewing progress
+                        progress_file = args.receiver_filename.replace(".txt", "_progress.txt")
+                        with open(progress_file, 'w+') as f:
+                            f.writelines(lines)                        
                     fcntl.flock(fr, fcntl.LOCK_UN)
                 time.sleep(1)
             assert len(target_batch) == len(status)

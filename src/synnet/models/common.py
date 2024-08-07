@@ -33,8 +33,9 @@ def get_args():
     parser.add_argument("--nbits", type=int, default=4096, help="Number of Bits for Morgan fingerprint.")
     parser.add_argument("--out_dim", type=int, default=256, help="Output dimension.")
     parser.add_argument("--ncpu", type=int, default=16, help="Number of cpus")
-    parser.add_argument("--prefetch_factor", type=int, default=0, help="Number of batches to prefetch")
+    parser.add_argument("--prefetch_factor", type=int, help="Number of batches to prefetch")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+    parser.add_argument("--shuffle", action='store_true')
     parser.add_argument("--epoch", type=int, default=2000, help="Maximum number of epoches.")
     parser.add_argument(
         "--ckpt-file",

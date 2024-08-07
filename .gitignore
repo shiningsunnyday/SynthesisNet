@@ -1,6 +1,5 @@
 # === custom ===
 
-data/
 figures/syntrees/
 results/
 checkpoints/
@@ -13,6 +12,7 @@ tmp/
 .aliases
 
 population*.npy
+wandb
 
 # === template ===
 

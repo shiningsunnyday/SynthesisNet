@@ -68,11 +68,12 @@ def get_args():
     parser.add_argument("--top-k-rxn", default=1, type=int, help="Beam width for first rxn")
     parser.add_argument("--batch-size", default=10, type=int, help='how often to report metrics')
     parser.add_argument("--filter-only", type=str, nargs='+', choices=['rxn', 'bb'], default=[])
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'], help="""
+    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological', 'bottom_up_topological'], help="""
         Strategy to decode:
             Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
             Topological: Decode every topological order of the rxn+bb nodes.
     """)
+    parser.add_argument("--max_topological_orders", type=int)
     parser.add_argument("--forcing-eval", action='store_true')
     parser.add_argument("--test-correct-method", default='preorder', choices=['preorder', 'postorder', 'reconstruct'])
     # Visualization
@@ -101,7 +102,7 @@ def main(proc_id, filename, output_filename):
     print(f"SKELETON INDEX: {SKELETON_INDEX}")    
     while(True):        
         selected_mol = None
-        with open(filename, 'r') as f:
+        with open(filename, 'r+') as f:
             editable = lock(f)
             if editable:
                 lines = f.readlines()
@@ -115,9 +116,9 @@ def main(proc_id, filename, output_filename):
                     else:
                         new_line = "{}\n".format(" ".join(splitted_line))
                     new_lines.append(new_line)
-                with open(filename, 'w') as fw:
-                    for _new_line in new_lines:
-                        fw.write(_new_line)
+                f.seek(0)
+                f.writelines(new_lines)
+                f.truncate()
                 fcntl.flock(f, fcntl.LOCK_UN)
         if selected_mol is None:            
             continue
@@ -131,8 +132,8 @@ def main(proc_id, filename, output_filename):
             smiles = np.array(list(map(int, smiles)), dtype=bool)
         index = int(index)
         st = list(skeletons)[index]               
-        sk = Skeleton(st, index)
-        sks = decode(sk, smiles)
+        sk = Skeleton(st, index)        
+        sks = decode(sk, smiles)        
         ans = 0.
         best_smi = ''
         for sk in sks:

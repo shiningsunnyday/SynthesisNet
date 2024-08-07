@@ -2,29 +2,27 @@ import functools
 import logging
 import pathlib
 import pickle
-from concurrent.futures import ProcessPoolExecutor
 from typing import List, Literal, Optional
 
+import jsonargparse
 import numpy as np
-import pydantic_cli
-import torch
 import tqdm
-from tdc import Oracle
+from rdkit import Chem
+from torch.multiprocessing import Pool
 
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
 from synnet.MolEmbedder import MolEmbedder
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
-from synnet.utils.data_utils import ReactionSet, Skeleton, SkeletonSet, binary_tree_to_skeleton
-from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
+from synnet.encoding.fingerprints import mol_fp
+from synnet.models.legacy import load_mlp_from_ckpt
+from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
+from synnet.utils.predict_utils import synthetic_tree_decoder, synthetic_tree_decoder_greedy_search, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
     decode,
     load_data,
-    lookup_skeleton_key,
     reconstruct,
-    serialize_string,
     set_models,
     test_skeletons,
 )
@@ -50,9 +48,10 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Input file for the pre-computed embeddings (*.npy)
     embeddings_knn_file: str = "data/assets/building-blocks/enamine_us_emb_fp_256.npy"
+    embeddings_knn_file_large: str = "data/assets/building-blocks/enamine_us_emb_fp_2048.npy"
 
     # If given, consider only these bbs
-    top_bbs_file: Optional[str] = "/ssd/msun415/bblocks-top-1000.txt"
+    top_bbs_file: Optional[str] = None
 
     # Model checkpoint to use
     ckpt_bb: Optional[str] = None
@@ -64,157 +63,166 @@ class OptimizeGAConfig(GeneticSearchConfig):
     ckpt_recognizer: Optional[str] = None
 
     # Model checkpoint dir, if given assume one ckpt per class
-    ckpt_dir: str = "checkpoints"
-    ckpt_versions: Optional[List[int]] = None
+    ckpt_dir: Optional[str] = None
 
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
 
-    hash_dir: str
-
-    # Input file for the skeletons of syntree-file
-    skeleton_file: str = "results/viz/top_1000/skeletons-top-1000.pkl"
-
     forcing_eval: bool = False
     mermaid: bool = False
-    out_dir: str
+    one_per_class: bool = False
+
+    out_dir: Optional[str] = None
+
+    # Beam width for first bb
     top_k: int = 3
+
+    # Beam width for first rxn
+    top_k_rxn: int = 3
+
     filter_only: List[Literal["rxn", "bb"]] = []
 
-    # Objective function to optimize
-    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
+    num_workers: int = 0
+    beam_width: int = 1
+    chunksize: int = 1
 
-    num_workers: int = 1
-    chunksize: int = 32
-
-    strategy: Literal["conf", "topological"] = "topological"
+    # Conf: Decode all reactions before bbs. Choose highest-confidence reaction. Choose closest neighbor bb.
+    # Topological: Decode every topological order of the rxn+bb nodes.
+    strategy: Literal["conf", "topological"] = "conf"
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
+    max_topological_orders: int = 5
+
+    reassign_fps: bool = True
+    reassign_bts: bool = True
 
 
-def dock_drd3(smi):
-    # define the oracle function from the TDC
-    _drd3 = Oracle(name="drd3_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_drd3(smi)
-        except:
-            return 0.0
-
-
-def dock_7l11(smi):
-    # define the oracle function from the TDC
-    _7l11 = Oracle(name="7l11_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_7l11(smi)
-        except:
-            return 0.0
-
-
-def fetch_oracle(objective):
-    if objective == "qed":
-        # define the oracle function from the TDC
-        return Oracle(name="QED")
-    elif objective == "logp":
-        # define the oracle function from the TDC
-        return Oracle(name="LogP")
-    elif objective == "jnk":
-        # return oracle function from the TDC
-        return Oracle(name="JNK3")
-    elif objective == "gsk":
-        # return oracle function from the TDC
-        return Oracle(name="GSK3B")
-    elif objective == "drd2":
-        # return oracle function from the TDC
-        return Oracle(name="DRD2")
-    elif objective == "7l11":
-        return dock_7l11
-    elif objective == "drd3":
-        return dock_drd3
-    else:
-        raise ValueError("Objective function not implemented")
-
-
-def get_smiles_ours(ind):
-    sk = binary_tree_to_skeleton(ind.bt)
-    tree_key = serialize_string(sk.tree, sk.tree_root)
-    index = lookup_skeleton_key(sk.zss_tree, tree_key)
-
-    st0 = globals()["skeleton_list"][index]
-    sk0 = Skeleton(st0, index)
+def get_smiles_ours(idx_and_ind):
+    idx, ind = idx_and_ind
+    sk0 = binary_tree_to_skeleton(ind.bt)
 
     ans = 0.0
     best_smi = ""
+    best_bt = None
     for sk in decode(sk0, ind.fp):
-        score, smi = reconstruct(sk, ind.fp, return_smi=True)
+        score, smi, bt = reconstruct(sk, ind.fp, return_bt=True) # do stuff with bt
         if score > ans:
             ans = score
             best_smi = smi
-    return best_smi
+            best_bt = bt
+    return idx, best_smi, best_bt
 
 
 def get_smiles_synnet(
-    ind,
-    bblocks, bb_dict,
+    idx_and_ind,
+    building_blocks, bb_dict,
     rxns,
     bblocks_molembedder,
     act_net, rt1_net, rxn_net, rt2_net,
     bb_emb,
     rxn_template,
-    nbits
+    nbits,
+    beam_width=1
 ):
+    def return_val(idx, emb, tree, action):
+        if action != 3:
+            return idx, None, None
+        else:
+            scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
+            max_score_idx = np.where(scores == np.max(scores))[0][0]
+            return idx, tree.chemicals[max_score_idx].smiles, None        
+    idx, ind = idx_and_ind
+
     emb = ind.fp.reshape((1, -1))
     try:
-        tree, action = synthetic_tree_decoder(
-            z_target=emb,
-            sk_coords=None,
-            building_blocks=bblocks,
-            bb_dict=bb_dict,
-            reaction_templates=rxns,
-            mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
-            action_net=act_net,
-            reactant1_net=rt1_net,
-            rxn_net=rxn_net,
-            reactant2_net=rt2_net,
-            bb_emb=bb_emb,
-            rxn_template=rxn_template,
-            n_bits=nbits,
-            max_step=15,
-        )
+        if beam_width == 1:
+            tree, action = synthetic_tree_decoder(
+                z_target=emb,
+                sk_coords=None,
+                building_blocks=building_blocks,
+                bb_dict=bb_dict,
+                reaction_templates=rxns,
+                mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
+                action_net=act_net,
+                reactant1_net=rt1_net,
+                rxn_net=rxn_net,
+                reactant2_net=rt2_net,
+                bb_emb=bb_emb,
+                rxn_template=rxn_template,
+                n_bits=nbits,
+                max_step=15,
+            )
+        else:
+            smiles, sims, trees, actions = synthetic_tree_decoder_greedy_search(
+                beam_width=2,
+                analogs=True,
+                z_target=emb,
+                sk_coords=None,
+                building_blocks=building_blocks,
+                bb_dict=bb_dict,
+                reaction_templates=rxns,
+                mol_embedder=bblocks_molembedder.kdtree,  # TODO: fix this, currently misused,
+                action_net=act_net,
+                reactant1_net=rt1_net,
+                rxn_net=rxn_net,
+                reactant2_net=rt2_net,
+                bb_emb=bb_emb,
+                rxn_template=rxn_template,
+                n_bits=nbits,
+                max_step=15,                
+            )
     except Exception as e:
+        breakpoint()
         print(e)
-        action = -1
-    if action != 3:
-        return None, None
+        action = -1   
+    if beam_width == 1: 
+        return return_val(idx, emb, tree, action)
     else:
-        scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
-        max_score_idx = np.where(scores == np.max(scores))[0][0]
-        return tree.chemicals[max_score_idx].smiles, tree
+        res = [return_val(idx, emb, tree, action) for tree, action in zip(trees, actions)]
+        return [r[0] for r in res], [r[1] for r in res], [r[2] for r in res]
 
 
-def test_surrogate(batch, converter, config: OptimizeGAConfig):
-    oracle = fetch_oracle(config.objective)
+def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
+    indexed_batch = list(enumerate(batch))
+    if config.num_workers <= 0:
+        indexed_smiles = map(converter, indexed_batch)
+    else:
+        indexed_smiles = pool.imap_unordered(converter, indexed_batch, chunksize=config.chunksize)
 
-    # Needed to avoid deadlock
-    # Reference:
-    #   https://github.com/pytorch/pytorch/issues/17199
-    torch.set_num_threads(1)
+    pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
+    if config.beam_width == 1:
+        for idx, smi, bt in pbar:
+            ind = batch[idx]
+            if smi is None:
+                ind.smiles = None
+            else:
+                ind.smiles = Chem.CanonSmiles(smi)
+                if config.reassign_fps:
+                    ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+            if config.reassign_bts:
+                ind.bt = bt
+    else:
+        for idxes, smis, bts in pbar:
+            ind = batch[idxes[0]]
+            ind.smiles = [None for _ in range(config.beam_width)]
+            ind.fp = [ind.fp for _ in range(config.beam_width)]
+            ind.bt = [ind.bt for _ in range(config.beam_width)]
+            for i, (smi, bt) in zip(range(config.beam_width), zip(smis, bts)):
+                if smi is None:
+                    ind.smiles[i] = smi
+                else:
+                    canon_smi = Chem.CanonSmiles(smi)
+                    ind.smiles[i] = canon_smi
+                    if config.reassign_fps:
+                        fp = mol_fp(canon_smi, _nBits=config.fp_bits).astype(np.float32)
+                        ind.fp[i] = fp
+                if config.reassign_bts:
+                    ind.bt[i] = bt
 
-    with ProcessPoolExecutor(max_workers=config.num_workers) as exe:
-        smiles = exe.map(converter, batch, chunksize=config.chunksize)
-        pbar = tqdm.tqdm(zip(smiles, batch), total=len(batch), desc="Evaluating", leave=False)
-        for smi, ind in pbar:
-            ind.smiles = smi
-            ind.fitness = oracle(smi)
 
-
-def main(config: OptimizeGAConfig):
+def main():
+    parser = jsonargparse.ArgumentParser()
+    parser.add_class_arguments(OptimizeGAConfig, as_positional=False)
+    config = OptimizeGAConfig(**parser.parse_args().as_dict())
     global args
     args = config  # Hack so reconstruct_utils.py works
 
@@ -223,88 +231,74 @@ def main(config: OptimizeGAConfig):
         logger.addHandler(handler)
 
     if config.method == "ours":
+        assert config.fp_bits == 2048
+
         set_models(config, logger)
         load_data(config, logger)
         with open(config.skeleton_set_file, "rb") as f:
             skeletons = pickle.load(f)
-            globals()["skeleton_list"] = list(skeletons)  # FIXME: (AL) why does this work?
         skeleton_set = SkeletonSet().load_skeletons(skeletons)
-        SKELETON_INDEX = test_skeletons(config, skeleton_set)
-        print(f"SKELETON INDEX: {SKELETON_INDEX}")
-        logger.info(f"SKELETON INDEX: {SKELETON_INDEX}")
+        test_skeletons(config, skeleton_set, max_rxns=config.max_num_rxns)
 
         converter = get_smiles_ours
 
     elif config.method == "synnet":
-        # define some constants (here, for the Hartenfeller-Button test set)
-        nbits = 4096
-        rxn_template = "hb"
+        assert config.fp_bits == 4096
 
-        # load the purchasable building block SMILES to a dictionary
-        bblocks = BuildingBlockFileHandler().load(args.building_blocks_file)
-        if args.top_bbs_file:
-            bblock_inds = [bblocks.index(l.rstrip('\n')) for l in open(args.top_bbs_file).readlines()]
-            bblock_inds = sorted(bblock_inds)
-            bblocks = [bblocks[ind] for ind in bblock_inds]
-            bb_dict = {block: i for i, block in enumerate(bblocks)}
-            emb_path = args.top_bbs_file.replace('.txt', '.npy')
-            # if not os.path.exists(emb_path):
-            data = np.load(args.embeddings_knn_file)
-            top_emb = data[bblock_inds]
-            np.save(emb_path, top_emb)
-            bblocks_molembedder = (
-                MolEmbedder().load_precomputed(emb_path).init_balltree(cosine_distance)
-            )
-            bb_emb = bblocks_molembedder.get_embeddings()
-        else:
-            bblock_inds = None
-            # A dict is used as lookup table for 2nd reactant during inference:
-            bb_dict = {block: i for i, block in enumerate(bblocks)}
-            # ... building block embedding
-            bblocks_molembedder = (
-                MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-            )
-            bb_emb = bblocks_molembedder.get_embeddings()
+        # Load the purchasable building block embeddings
+        bblocks_molembedder = (
+            MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
+        )
+        bb_emb = bblocks_molembedder.get_embeddings()
 
-        # load the reaction templates as a ReactionSet object
+        # Load the purchasable building block SMILES to a dictionary
+        building_blocks = BuildingBlockFileHandler().load(args.building_blocks_file)
+
+        # A dict is used as lookup table for 2nd reactant during inference:
+        bb_dict = {block: i for i, block in enumerate(building_blocks)}
+
+        # Load the reaction templates as a ReactionSet object
         rxns = ReactionSet().load(args.rxns_collection_file).rxns
-        for rxn in rxns:
-            for i in range(len(rxn.available_reactants)):
-                rxn.available_reactants[i] = [reactant for reactant in rxn.available_reactants[i] if
-                                              reactant in bblocks]
 
-        # load the pre-trained modules
-        path = pathlib.Path(args.ckpt_dir)
-        if args.ckpt_versions:
-            versions = args.ckpt_versions
-        else:
-            versions = [None, None, None, None]
-        ckpt_files = []
-        for model, version in zip("act rt1 rxn rt2".split(), versions):
-            ckpt_file = find_best_model_ckpt(path / model, version)
-            ckpt_files.append(ckpt_file)
-        act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file) for file in ckpt_files]
+        # Load the pre-trained modules
+        path = pathlib.Path(__file__).parents[1] / "data" / "checkpoints"
+        # ckpt_files = [find_best_model_ckpt(path / model) for model in "act rt1 rxn rt2".split()]
+        ckpt_files = [path / model / f'{model}.ckpt' for model in "act rt1 rxn rt2".split()]
+        print(ckpt_files)
+        act_net, rt1_net, rxn_net, rt2_net = [load_mlp_from_ckpt(file).cpu() for file in ckpt_files]
 
         converter = functools.partial(
             get_smiles_synnet,
-            bblocks=bblocks, bb_dict=bb_dict,
+            building_blocks=building_blocks,
+            bb_dict=bb_dict,
             rxns=rxns,
             bblocks_molembedder=bblocks_molembedder,
             act_net=act_net, rt1_net=rt1_net, rxn_net=rxn_net, rt2_net=rt2_net,
             bb_emb=bb_emb,
-            rxn_template=rxn_template,
-            nbits=nbits,
+            rxn_template="hb",
+            nbits=config.fp_bits,
+            beam_width=config.beam_width
         )
 
     else:
         raise NotImplementedError()
 
-    fn = functools.partial(test_surrogate, converter, config=config)
     search = GeneticSearch(config)
-    search.optimize(fn)
+
+    if config.num_workers > 0:
+        pool = Pool(processes=config.num_workers)
+    else:
+        pool = None
+
+    surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
+    search.optimize(surrogate=surrogate)
+
+    if pool is not None:
+        pool.close()
+        pool.join()
 
     return 0
 
 
 if __name__ == "__main__":
-    pydantic_cli.run_and_exit(OptimizeGAConfig, main)
+    main()

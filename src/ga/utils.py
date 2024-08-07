@@ -1,9 +1,12 @@
 import random
 import uuid
 from typing import Dict
+from collections import defaultdict
 
 import networkx as nx
 import numpy as np
+
+from synnet.utils.data_utils import skeleton2graph
 
 
 def random_boolean(p: float) -> bool:
@@ -63,9 +66,18 @@ def random_binary_tree(n: int) -> nx.DiGraph:
     return tree
 
 
-def random_add_leaf(tree: nx.DiGraph) -> None:
-    nonfull = [v for v, d in tree.out_degree() if (d < 2)]
-    parent = random.choice(nonfull)
+def num_internal(tree: nx.digraph):
+    return sum(1 for v, d in tree.out_degree() if (d > 0))
+
+
+def random_add_leaf(tree: nx.DiGraph, max_internal: int) -> None:
+    if num_internal(tree) == max_internal:
+        choices = [v for v, d in tree.out_degree() if (d == 1)]  # don't create new internal
+    else:
+        choices = [v for v, d in tree.out_degree() if (d < 2)]
+    if not choices:
+        return
+    parent = random.choice(choices)
     if tree.out_degree(parent) == 0:
         left = random_boolean(0.5)
     else:
@@ -77,7 +89,7 @@ def random_add_leaf(tree: nx.DiGraph) -> None:
 
 
 def random_remove_leaf(tree: nx.DiGraph) -> None:
-    if tree.number_of_nodes() == 1:  # safety, don't remove root
+    if tree.number_of_nodes() <= 1:
         return
     leaves = [v for v, d in tree.out_degree() if (d == 0)]
     victim = random.choice(leaves)
@@ -123,3 +135,20 @@ def random_graft(
 
     return merged
 
+
+def skeleton_to_binary_tree(skeleton):
+    tree = skeleton.tree
+
+    bt = nx.DiGraph()
+    for node, ndata in list(tree.nodes(data=True)):
+        if "smiles" not in ndata:  # rxn node
+            continue
+        rxns = list(tree.successors(node))
+        if not rxns:
+            continue
+        assert len(rxns) == 1
+        reactants = list(tree.successors(rxns[0]))
+        for adj in reactants:
+             bt.add_edge(node, adj, left=(tree.nodes[adj]["child"] == "left"))
+    nx.relabel_nodes(bt, {k: random_name() for k in bt}, copy=False)
+    return bt
