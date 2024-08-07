@@ -2,6 +2,7 @@ import functools
 import logging
 import pathlib
 import pickle
+import time
 from typing import List, Literal, Optional
 
 import jsonargparse
@@ -10,7 +11,6 @@ import tqdm
 import wandb
 from rdkit import Chem
 from torch.multiprocessing import Pool
-from torch.utils.benchmark import Timer
 
 from ga.config import GeneticSearchConfig
 from ga.search import GeneticSearch
@@ -257,11 +257,11 @@ def main():
             )
 
         population = search.initialize_random()
-        timer = Timer(
-            stmt="surrogate(population, desc='')",
-            globals={"surrogate": surrogate, "population": population}
-        )
-        print(timer.timeit(1))
+
+        start = time.time()
+        surrogate(population, desc="Surrogate")
+        time_per_ind = (time.time() - start) / config.population_size
+        wandb.log({"time_per_ind": time_per_ind})
 
         # Cleanup
         if config.wandb:
