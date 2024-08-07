@@ -55,7 +55,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
     bt_mutate_edits: int = 3
 
     children_per_couple: int = 2
-    children_strategy: Literal["edits", "flips", "topk"] = "edits"
+    children_strategy: Literal["edits", "flips", "topk", "analog"] = "edits"
 
     # Restrict skeleton prediction to max number of reactions
     max_num_rxns: int = -1

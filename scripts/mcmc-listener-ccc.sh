@@ -1,5 +1,3 @@
-obj=drd2
-export OMP_NUM_THREADS=16
 MAX_NUM_RXNS=3
 TOP_K=3
 TOP_K_RXN=3

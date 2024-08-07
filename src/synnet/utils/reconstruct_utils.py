@@ -1,3 +1,4 @@
+
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler, ReactionTemplateFileHandler
 from synnet.visualize.drawers import MolDrawer, RxnDrawer
 from synnet.visualize.writers import SynTreeWriter, SkeletonPrefixWriter
@@ -66,7 +67,6 @@ def get_metrics(targets, all_sks):
         correct_summary = {}
     else:
         total_correct = {}
-
     for (sk_true, smi), sks in zip(targets, all_sks):
         tree_id = str(np.array(sks[0].tree.edges))
         if tree_id not in total_incorrect:
@@ -138,10 +138,9 @@ def decode(sk, smi):
         bb_gnn = bb_models[sk.index]
     else:
         bb_gnn = globals()['bb_gnn']
-
     sks = wrapper_decoder(args, sk, rxn_gnn, bb_gnn, bb_emb, rxn_templates, bblocks, skviz=skviz, bblock_inds=bblock_inds)
-
     # ans = serialize_string(sk.tree, sk.tree_root)
+    print("done")
     return sks
 
 
@@ -180,7 +179,6 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     ax.set_xlabel('Tree Skeleton x')
     ax.set_ylabel('Tree Skeleton y')
     fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file
-    breakpoint()
     return adj
 
 
@@ -426,7 +424,7 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             globals()['skeleton_index_lookup_by_num_rxns'][num_rxns] = {}
         globals()['skeleton_index_lookup_by_num_rxns'][num_rxns][tree_key] = (index, sk.zss_tree, sk)
 
-    if hasattr(args, 'strategy') and args.strategy == 'topological':
+    if hasattr(args, 'strategy') and 'topological' in args.strategy:
         globals()['all_topological_sorts'] = {}
         for index in SKELETON_INDEX:
             sk = Skeleton(sks[index], index)
@@ -447,8 +445,7 @@ def test_skeletons(args, skeleton_set, max_rxns=0):
             assert len(top_sort_set) == len(top_sorts)
             tree_key = serialize_string(sk.tree, sk.tree_root)
             globals()['all_topological_sorts'][tree_key] = list(top_sort_set)
-    # globals()['mc_adj'] = build_mc(args.max_num_rxns)
-
+    globals()['mc_adj'] = build_mc(args.max_num_rxns)
     return SKELETON_INDEX
 
 
@@ -628,82 +625,120 @@ def fill_in(args, sk, n, logits_n, bb_emb, rxn_templates, bbs, top_bb=1, top_rxn
     """
     rxn_graph, node_map, _ = sk.rxn_graph()
     if sk.rxns[n]:
-        cur = node_map[n]
-        mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
-        # assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
-        logits_n[-NUM_POSS:][mask_imposs] = float("-inf")
-        rxn_id = logits_n[-NUM_POSS:].argsort(axis=-1)[-top_rxn].item()
-        # Sanity check for forcing eval
-        sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
-        sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
-        rxn_graph.nodes[cur]['rxn_id'] = rxn_id
-        # mask the intermediates so they're not considered on frontier
-        for succ in sk.tree.successors(n):
-            if not sk.leaves[succ]:
-                sk.mask = [succ]
-        if 'rxn' in args.filter_only:
-            if len(paths):
-                sk.tree.nodes[n]['path'] = paths[rxn_id]
-        # print("path", os.path.join(args.hash_dir, p.get_path()))
-    else:
-        assert sk.leaves[n]
-        emb_bb = logits_n[:-NUM_POSS]
-        pred = list(sk.tree.predecessors(n))[0]
-        if 'bb' in args.filter_only:
-            if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
-                exist = False
-            else:
-                if 'path' in sk.tree.nodes[pred]:
-                    path = sk.tree.nodes[pred]['path']
-                    exist = os.path.exists(path)
+        if 'bottom_up' in args.strategy:
+            mask_imposs = [False for _ in range(NUM_POSS)]
+            succs = list(sk.tree.successors(n))
+            smi_1 = sk.tree.nodes[succs[0]]['smiles']
+            if len(succs) > 1:
+                smi_2 = sk.tree.nodes[succs[1]]['smiles']
+            for i in range(NUM_POSS):
+                if rxns[i].num_reactant != len(list(sk.tree.successors(n))):
+                    mask_imposs[i] = True
                 else:
-                    exist = False
+                    if not rxns[i].is_reactant_first(smi_1):
+                        mask_imposs[i] = True
+                    if len(succs) > 1 and not rxns[i].is_reactant_second(smi_2):
+                        mask_imposs[i] = True
+            logits_n[-NUM_POSS:][mask_imposs] = float("-inf")            
+            rxn_id = logits_n[-NUM_POSS:].argsort(axis=-1)[-top_rxn].item()
+            parent = list(sk.tree.predecessors(n))[0]
+            if logits_n[-NUM_POSS+rxn_id].item() == float("-inf"):
+                rxn_id = -1
+                sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
+                sk.tree.nodes[n]['smirks'] = ''
+                sk.modify_tree(parent, smiles='', suffix='_forcing' if args.forcing_eval else '')
+            else:
+                sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
+                sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
+                # also fill in smiles of intermediate                
+                if sum(mask_imposs) < 91:
+                    sk.tree.nodes[parent]['smiles'] = rxns[rxn_id].run_reaction((smi_1, smi_2) if len(succs) == 2 else (smi_1,))
+                else:
+                    sk.modify_tree(parent, smiles='', suffix='_forcing' if args.forcing_eval else '')
         else:
-            exist = False
-        failed = False
-        if exist:
-            e = str(node_map[pred])
-            if rxn_graph.nodes[int(e)]['depth'] == 2:
-                e = '1'
-            else:
-                assert rxn_graph.nodes[int(e)]['depth'] == 1
-                e = '0'
-            data = json.load(open(path))
-            succs = list(sk.tree.successors(pred))
-            second = sk.tree.nodes[n]['child'] == 'right'
-            if e in data['bbs']:
-                bbs_child = data['bbs'][e][int(second)]
-            else:
-                bbs_child = data['bbs'][f"{e}{DELIM}{int(second)}"]
-                assert len(bbs_child) == 1
-                bbs_child = bbs_child[0]
-            if args.forcing_eval:
-                if sk.tree.nodes[n]['smiles'] not in bbs_child:
-                    bad = False
-                    for m in sk.tree:
-                        if 'rxn_id' in sk.tree.nodes[m]:
-                            if sk.tree.nodes[m]['rxn_id_forcing'] != sk.tree.nodes[m]['rxn_id']:
-                                bad = True
-                    # if not bad:
-                    #     breakpoint()
-            indices = [bbs.index(smi) for smi in bbs_child]
-            if len(indices) >= top_bb:
-                bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
-                smiles = bbs[indices[bb_ind]]
-            else:
-                failed = True
-        if not exist or failed:
-            if bblock_inds is not None:
-                indices = bblock_inds
-            else:
-                indices = list(range(bb_emb.shape[0]))
-            pred_rxn_id = sk.tree.nodes[pred]['rxn_id']
-            if hasattr(rxns[pred_rxn_id], 'bblock_mask'):
-                second = sk.tree.nodes[n]['child'] == 'right'
-                indices = rxns[pred_rxn_id].bblock_mask[second]
+            cur = node_map[n]
+            mask_imposs, paths = filter_imposs(args, rxn_graph, sk, cur, n)
+            # assert sum(mask_imposs) < NUM_POSS # TODO: handle failure
+            logits_n[-NUM_POSS:][mask_imposs] = float("-inf")
+            rxn_id = logits_n[-NUM_POSS:].argsort(axis=-1)[-top_rxn].item()
+            # Sanity check for forcing eval
+            sk.modify_tree(n, rxn_id=rxn_id, suffix='_forcing' if args.forcing_eval else '')
+            sk.tree.nodes[n]['smirks'] = rxn_templates[rxn_id]
+            rxn_graph.nodes[cur]['rxn_id'] = rxn_id
+            # mask the intermediates so they're not considered on frontier
+            for succ in sk.tree.successors(n):
+                if not sk.leaves[succ]:
+                    sk.mask = [succ]
+            if 'rxn' in args.filter_only:
+                if len(paths):
+                    sk.tree.nodes[n]['path'] = paths[rxn_id]
+            # print("path", os.path.join(args.hash_dir, p.get_path()))
+    else:
+        if 'bottom_up' in args.strategy:
+            emb_bb = logits_n[:-NUM_POSS]
+            indices = list(range(bb_emb.shape[0]))
             bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=min(top_bb, len(indices))).item()
             smiles = bbs[indices[bb_ind]]
-        sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')
+            sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')            
+        else:
+            assert sk.leaves[n]
+            emb_bb = logits_n[:-NUM_POSS]
+            pred = list(sk.tree.predecessors(n))[0]
+            if 'bb' in args.filter_only:
+                if rxn_graph.nodes[node_map[pred]]['depth'] > MAX_DEPTH:
+                    exist = False
+                else:
+                    if 'path' in sk.tree.nodes[pred]:
+                        path = sk.tree.nodes[pred]['path']
+                        exist = os.path.exists(path)
+                    else:
+                        exist = False
+            else:
+                exist = False
+            failed = False
+            if exist:
+                e = str(node_map[pred])
+                if rxn_graph.nodes[int(e)]['depth'] == 2:
+                    e = '1'
+                else:
+                    assert rxn_graph.nodes[int(e)]['depth'] == 1
+                    e = '0'
+                data = json.load(open(path))
+                succs = list(sk.tree.successors(pred))
+                second = sk.tree.nodes[n]['child'] == 'right'
+                if e in data['bbs']:
+                    bbs_child = data['bbs'][e][int(second)]
+                else:
+                    bbs_child = data['bbs'][f"{e}{DELIM}{int(second)}"]
+                    assert len(bbs_child) == 1
+                    bbs_child = bbs_child[0]
+                if args.forcing_eval:
+                    if sk.tree.nodes[n]['smiles'] not in bbs_child:
+                        bad = False
+                        for m in sk.tree:
+                            if 'rxn_id' in sk.tree.nodes[m]:
+                                if sk.tree.nodes[m]['rxn_id_forcing'] != sk.tree.nodes[m]['rxn_id']:
+                                    bad = True
+                        # if not bad:
+                        #     breakpoint()
+                indices = [bbs.index(smi) for smi in bbs_child]
+                if len(indices) >= top_bb:
+                    bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=top_bb).item()
+                    smiles = bbs[indices[bb_ind]]
+                else:
+                    failed = True
+            if not exist or failed:
+                if bblock_inds is not None:
+                    indices = bblock_inds
+                else:
+                    indices = list(range(bb_emb.shape[0]))
+                pred_rxn_id = sk.tree.nodes[pred]['rxn_id']
+                if hasattr(rxns[pred_rxn_id], 'bblock_mask'):
+                    second = sk.tree.nodes[n]['child'] == 'right'
+                    indices = rxns[pred_rxn_id].bblock_mask[second]
+                bb_ind = nn_search_list(emb_bb, bb_emb[indices], top_k=min(top_bb, len(indices))).item()
+                smiles = bbs[indices[bb_ind]]
+            sk.modify_tree(n, smiles=smiles, suffix='_forcing' if args.forcing_eval else '')
 
 
 
@@ -757,9 +792,24 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             top_sort = tuple(n for n in top_sort if sk.rxns[n] or sk.leaves[n])
             if top_sort not in top_sort_set:
                 top_sort_set.add(top_sort)
-                sks.append((deepcopy(sk), list(top_sort)))
-        if len(sks) > args.max_topological_orders:
+                sks.append((deepcopy(sk), list(top_sort)))        
+        if hasattr(args, 'max_topological_orders') and len(sks) > args.max_topological_orders:
             sks = random.sample(sks, k=args.max_topological_orders)
+    elif args.strategy == "bottom_up_topological":
+        sks = []
+        tree = deepcopy(sk.tree)
+        for a, b in list(tree.edges):
+            tree.remove_edge(a, b)
+            tree.add_edge(b, a)
+        top_sort_set = set()
+        for top_sort in nx.all_topological_sorts(tree):
+            top_sort = tuple(n for n in top_sort if sk.rxns[n] or sk.leaves[n])
+            if top_sort not in top_sort_set:
+                top_sort_set.add(top_sort)   
+        for top_sort in top_sort_set:
+            sks.append((deepcopy(sk), list(top_sort)))        
+        if hasattr(args, 'max_topological_orders') and len(sks) > args.max_topological_orders:
+            sks = random.sample(sks, k=args.max_topological_orders)        
     elif args.strategy == 'conf':
         sks = [sk]
     else:
@@ -781,7 +831,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
         if isinstance(sk, tuple):
             sk, next_node = sk
         else:
-            next_node = None
+            next_node = None        
         if ((~sk.mask) & (sk.rxns | sk.leaves)).any():
             """
             while there's reaction nodes or leaf building blocks to fill in
@@ -792,11 +842,14 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
             """
             # print(f"decode step {sk.mask}")
             # prediction problem
-            _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
-            for i in range(len(X)):
-                if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
-                    X[i] = 0
-
+            if 'bottom_up' in args.strategy:
+                _, X, _ = sk.get_state(leaves_up=True)
+            else:
+                _, X, _ = sk.get_state(rxn_target_down_bb=True, rxn_target_down=True)
+                for i in range(len(X)):
+                    if i != sk.tree_root and not sk.rxns[i] and not sk.leaves[i]:
+                        X[i] = 0                   
+         
             edges = sk.tree_edges
             tree_edges = np.concatenate((edges, edges[::-1]), axis=-1)
             edge_input = torch.tensor(tree_edges, dtype=torch.int64)
@@ -820,7 +873,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 logits_rxn = model_rxn(data_rxn)
                 logits_bb = model_bb(data_bb)
             logits = {}
-            if args.strategy == 'topological':
+            if 'topological' in args.strategy:
                 frontier_nodes = [next_node[0]]
             else:
                 frontier_nodes = [n for n in set(sk.frontier_nodes) if not sk.mask[n]]
@@ -830,7 +883,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 else:
                     assert sk.leaves[n]
                     logits[n] = logits_bb[n]
-            if args.strategy =='topological':
+            if 'topological' in args.strategy:
                 poss_n = [next_node.pop(0)]
             else:
                 poss_n = pick_node(sk, logits, bb_emb)
@@ -855,8 +908,14 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                             sks.append(sk_copy)
                         else:
                             sks.append((sk_copy, deepcopy(next_node)))
-                else:
-                    fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1, bblock_inds=bblock_inds)
+                else:                    
+                    if 'bottom_up' in args.strategy and sk.rxns[n]:                        
+                        # check if children are there
+                        succs = list(sk.tree.successors(n))
+                        if np.any([sk.tree.nodes[succ]['smiles'] == '' for succ in succs]):
+                            final_sks.append(sk)
+                            break
+                    fill_in(args, sk_n, n, logits_n, bb_emb, rxn_templates, bblocks, top_bb=1, bblock_inds=bblock_inds)                    
                     if next_node is None:
                         sks.append(sk_n)
                     else:
@@ -888,7 +947,7 @@ def wrapper_decoder(args, sk, model_rxn, model_bb, bb_emb, rxn_templates, bblock
                 outfile = skviz_n.path / f"skeleton_{sk_copy.uuid}_{sk_copy.index}_done_{good}.md"
                 SynTreeWriter(prefixer=SkeletonPrefixWriter()).write(mermaid_txt).to_file(outfile)
             final_sks.append(sk)
-    # print(len(final_sks), "beams")
+    # print(len(final_sks), "beams")    
     return final_sks
 
 
@@ -967,14 +1026,16 @@ def load_data(args, logger=None):
     # # ... building block embedding
     # bblocks_molembedder = (
     #     MolEmbedder().load_precomputed(args.embeddings_knn_file).init_balltree(cosine_distance)
-    # )
+    # )chembl
     # bb_emb = bblocks_molembedder.get_embeddings()
     # bb_emb = torch.as_tensor(bb_emb, dtype=torch.float32)
     bb_emb = torch.FloatTensor(np.load(args.embeddings_knn_file))
-    bb_emb_large = torch.FloatTensor(np.load(args.embeddings_knn_file_large))
+    if hasattr(args, 'embeddings_knn_file_large'):
+        bb_emb_large = torch.FloatTensor(np.load(args.embeddings_knn_file_large))
     if logger is not None:
         logger.info(f"Successfully read {args.embeddings_knn_file}.")
-        logger.info(f"Successfully read {args.embeddings_knn_file_large}.")
+        if hasattr(args, 'embeddings_knn_file_large'):
+            logger.info(f"Successfully read {args.embeddings_knn_file_large}.")
         logger.info("...loading data completed.")
     # remember indices of bblocks
     bb_index_lookup = dict(zip(bblocks, range(len(bblocks))))
@@ -991,7 +1052,8 @@ def load_data(args, logger=None):
     globals()['rxn_templates'] = rxn_templates
     globals()['bblocks'] = bblocks
     globals()['bb_emb'] = bb_emb
-    globals()['bb_emb_large'] = bb_emb_large
+    if hasattr(args, 'embeddings_knn_file_large'):
+        globals()['bb_emb_large'] = bb_emb_large
     globals()['args'] = args
 
 
@@ -1022,7 +1084,7 @@ def predict_skeleton(smiles, max_num_rxns=-1, top_k=[1], fp=None):
         fp = fp[None, :]
     probs = model(torch.from_numpy(fp.astype(np.float32)))
     if max_num_rxns == -1:
-        ind = argmax(probs, k=top_k)
+        ind = argmax(probs, top_k)
         if top_k == [1]:
             return globals()['skeleton_classes'][ind]
         else:
