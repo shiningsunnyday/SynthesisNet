@@ -1,9 +1,33 @@
 # SynTreeNet
 
 This repo contains the code and analysis scripts for our Syntax-Guided approach for the
-Procedural Synthesis of Molecules. Similar to SynNet, our model serves both
+Procedural Synthesis of Molecules. Our model serves both
 Synthesizable Analog Generation and Synthesizable Molecular Design applications. We will soon include a link to the preprint with the full details
 of our method.
+
+### Overview
+
+![overview](./data/assets/figs/fig1.png "terminologies")
+
+Our innovation is to model synthetic pathways as *programs*. This section overviews the
+basic concepts for understanding the core ideas of our work. Terminologies from program
+synthesis are italicized. In computers, programs are first parsed into a tree-like
+representation called a *syntax tree*. The syntax tree is closely related to synthetic
+trees (see [SynNet](https://github.com/wenhao-gao/SynNet)) where:
+
+- Each leaf node is a *literal*: chemical building block (*B*)
+- Each intermediate node is an *operator*: chemical reaction template (*R*)
+- Each root node stores the *output*: product
+
+Syntax arises from derivations of a *grammar*. A grammar Our grammar contain basic
+chemical building blocks, reactions (uni-molecular and bi-molecular) and, more
+insightfuly, *syntactic templates* (*T*) to constrain the space of derivations.
+
+*Syntactic templates* are the skeletons of a complete syntax tree. They are known as
+user-provided *sketches* and are used by program synthesis techniques to constrain the
+search space. Our framework allows users to provide these skeletons, but we can
+automatically extract them by first sampling a large number of synthetic trees, filter
+them, then extracting the skeletons present among them.
 
 ### Environment
 
@@ -58,32 +82,7 @@ export RXN_COLLECTION_FILE=data/assets/reaction-templates/reactions_hb.json.gz
 export EMBEDDINGS_KNN_FILE=data/assets/building-blocks/enamine_us_emb_fp_256.npy
 ```
 
-### Overview
-
-![overview](./data/assets/figs/fig1.png "terminologies")
-
-Our innovation is to model synthetic pathways as *programs*. This section overviews the
-basic concepts for understanding the core ideas of our work. Terminologies from program
-synthesis are italicized. In computers, programs are first parsed into a tree-like
-representation called a *syntax tree*. The syntax tree is closely related to synthetic
-trees (see [SynNet](https://github.com/wenhao-gao/SynNet)) where:
-
-- Each leaf node is a *literal*: chemical building block (*B*)
-- Each intermediate node is an *operator*: chemical reaction template (*R*)
-- Each root node stores the *output*: product
-
-Syntax arises from derivations of a *grammar*. A grammar Our grammar contain basic
-chemical building blocks, reactions (uni-molecular and bi-molecular) and, more
-insightfuly, *syntactic templates* (*T*) to constrain the space of derivations.
-
-*Syntactic templates* are the skeletons of a complete syntax tree. They are known as
-user-provided *sketches* and are used by program synthesis techniques to constrain the
-search space. Our framework allows users to provide these skeletons, but we can
-automatically extract them by first sampling a large number of synthetic trees, filter
-them, then extracting the skeletons present among them.
-
 Sample 600000 synthetic trees.
-
 ```bash
 python scripts/03-generate-syntrees.py --building-blocks-file $BUILDING_BLOCKS_FILE --rxn-templates-file $RXN_TEMPLATE_FILE --output-file "data/pre-process/syntrees/synthetic-trees.json.gz" --number-syntrees "600000"
 ```
@@ -348,4 +347,11 @@ To reproduce the result, run the same command with --objective 7l11.
 
 "For Mpro predicted molecules, overall, the three predicted molecules contain multiple aromatic rings in conjugation with halide groups. The conformation structures of the multiple aligned aromatic rings play a significant role in docking and achieve ideal molecular pose and binding affinity to Mpro, compared with the baseline molecules. The predicted structures also indicate stronger pi-pi interaction and halogen bonding compared with the baselines. In terms of ease of synthesis, Bromination reactions are typically straightforward, but multiple fused aromatic rings can take several steps to achieve. In general, the second and third can be easier to synthesize than Brc1cc(-c2cc(-c3cccc4ccccc34)nc3ccccc23)c2ccccc2n1 due to less aromatic rings performed. However, the literature molecules appeared to be even harder to synthesize due to their high complexicity structures. So the predicted molecules obtained a general higher ease of synthesis than the baseline molecules. Compared with the other baseline molecules, eg. Manidipine, Lercanidipine, Efonidipine (Dihydropyridines) are known for their calcium channel blocking activity, but not specifically protease inhibitors, Azelastine, Cinnoxicam, Idarubicin vary widely in their primary activities, not specifically designed for protease inhibition. Talampicillin and Lapatinib are also primarily designed for other mechanisms of action. Boceprevir, Nelfinavir, Indinavir, on the other hand, are known protease inhibitors with structures optimized for binding to protease active sites, so can serve as strong benchmarks. Overall, the binding effectiveness of the predicted molecules are quite comparable to the baseline molecules."
 
-We limit to 5000 calls for benchmarking purposes, but have seen longer runs can produce better results.
+We limit to 5000 calls for benchmarking purposes. The full results for MPro Vina Docking score (-kcal/mol) are as follows:
+
+| Method (#Oracle calls) | 1st  | 2nd  | 3rd  |
+|------------------------|------|------|------|
+| SynNet (5000)          | 8.3  | 8.3  | 8.2  |
+| SynNet (Source: Paper) | 10.5 | 9.3  | 9.3  |
+| Ours (5000)            | 9.9  | 9.7  | 9.7  |
+| Ours (10000)           | **10.8** | **10.7** | **10.6** |
