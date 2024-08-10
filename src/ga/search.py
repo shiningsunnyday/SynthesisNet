@@ -363,7 +363,17 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                metrics = {"generation": epoch, "oracle_calls": len(sample_log), **metrics}
+                samples = wandb.Table(
+                    columns= ["smiles", "idx", "fitness"],
+                    data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
+                )
+                
+                metrics = {
+                    "generation": epoch, 
+                    "oracle_calls": len(sample_log), 
+                    **metrics,
+                    "samples": samples,
+                }
                 wandb.log(metrics, commit=True)
 
             # Early-stopping
@@ -379,12 +389,6 @@ class GeneticSearch:
             ):
                 print("Early stopping.")
                 break
-
-        samples = wandb.Table(
-            columns= ["smiles", "idx", "fitness"],
-            data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
-        )
-        wandb.log({"samples": samples}, commit=True)
 
         # Cleanup
         if cfg.wandb:
