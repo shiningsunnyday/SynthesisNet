@@ -362,11 +362,28 @@ class GeneticSearch:
             # Scoring
             metrics = self.evaluate(population)
 
+            # Early-stopping
+            end_ga = False
+            if len(sample_log) >= cfg.max_oracle_calls:
+                print("Oracle calls exceeded.")
+                end_ga = True
+            score_queue.append(metrics["scores/mean"])
+            if (
+                cfg.early_stop
+                and (epoch > cfg.early_stop_warmup)
+                and (len(score_queue) == cfg.early_stop_patience)
+                and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
+            ):
+                print("Early stopping.")
+                end_ga = True
+            if epoch == (cfg.generations - 1):
+                end_ga = True
+
             # Logging
             if cfg.wandb:
                 metrics = {"generation": epoch, "oracle_calls": len(sample_log), **metrics}
 
-                if len(sample_log) >= sample_snapshot_size + 1000:
+                if end_ga or (len(sample_log) >= sample_snapshot_size + 1000):
                     sample_snapshot_size = len(sample_log)
                     samples = wandb.Table(
                         columns=["smiles", "idx", "fitness"],
@@ -376,25 +393,8 @@ class GeneticSearch:
                 
                 wandb.log(metrics, commit=True)
 
-            # Early-stopping
-            if len(sample_log) >= cfg.max_oracle_calls:
-                print("Oracle calls exceeded.")
+            if end_ga:
                 break
-            score_queue.append(metrics["scores/mean"])
-            if (
-                cfg.early_stop
-                and (epoch > cfg.early_stop_warmup)
-                and (len(score_queue) == cfg.early_stop_patience)
-                and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
-            ):
-                print("Early stopping.")
-                break
-
-        samples = wandb.Table(
-            columns=["smiles", "idx", "fitness"],
-            data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
-        )
-        wandb.log({"samples": samples}, commit=True)
 
         # Cleanup
         if cfg.wandb:
