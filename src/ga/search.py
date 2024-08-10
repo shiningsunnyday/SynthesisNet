@@ -309,6 +309,7 @@ class GeneticSearch:
         score_queue.append(-1000)
 
         sample_log = dict()
+        sample_snapshot_size = 0
 
         # Main loop
         for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
@@ -363,17 +364,16 @@ class GeneticSearch:
 
             # Logging
             if cfg.wandb:
-                samples = wandb.Table(
-                    columns= ["smiles", "idx", "fitness"],
-                    data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
-                )
+                metrics = {"generation": epoch, "oracle_calls": len(sample_log), **metrics}
+
+                if len(sample_log) >= sample_snapshot_size + 1000:
+                    sample_snapshot_size = len(sample_log)
+                    samples = wandb.Table(
+                        columns=["smiles", "idx", "fitness"],
+                        data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
+                    )
+                    metrics["samples"] = samples
                 
-                metrics = {
-                    "generation": epoch, 
-                    "oracle_calls": len(sample_log), 
-                    **metrics,
-                    "samples": samples,
-                }
                 wandb.log(metrics, commit=True)
 
             # Early-stopping
@@ -389,6 +389,12 @@ class GeneticSearch:
             ):
                 print("Early stopping.")
                 break
+
+        samples = wandb.Table(
+            columns=["smiles", "idx", "fitness"],
+            data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
+        )
+        wandb.log({"samples": samples}, commit=True)
 
         # Cleanup
         if cfg.wandb:
