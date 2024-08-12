@@ -1,15 +1,55 @@
 # SynTreeNet
 
 This repo contains the code and analysis scripts for our Syntax-Guided approach for the
-Procedural Synthesis of Molecules. Our model serves both
-Synthesizable Analog Generation and Synthesizable Molecular Design applications. We will soon include a link to the preprint with the full details
+Procedural Synthesis of Molecules. We will soon include a link to the preprint with the full details
 of our method.
+
+### Introduction
+Our model serves both
+Synthesizable Analog Generation and Synthesizable Molecular Design applications. Our method is benchmarked against baselines from [PMO](https://proceedings.neurips.cc/paper_files/paper/2022/hash/8644353f7d307baaf29bc1e56fe8e0ec-Abstract-Datasets_and_Benchmarks.html) and evaluated against a wide range of objectives relevant to drug discovery:
+- VINA Docking Simulations on MPro, DRD3 (more in Case Study section) \[[Results](./data/assets/results/Docking.csv)\]
+- Bioactivity Oracles (GSK3B, JNK3, DRD2) \[[Results](./data/assets/results/Results%20(pt%201).csv)\]
+- Structure-based Oracles (Median1, Median2, Celecoxib Rediscovery) \[[Results](./data/assets/results/Results%20(pt%202).csv)\]
+- Multi-property Optimization for Real Drugs (Osimertinib, Fexofenadine, Ranolazine, Perindopril, Amlodipine, Sitagliptin, Zaleplon) \[[Results](./data/assets/results/Results%20(pt%203).csv)\]
+
+
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="./data/assets/figs/rankings/Top_1.png" alt="Ranking of Results: Top 1">
+      <p><b>(a) Top 1 Score (10000 Oracle calls)</b></p>
+    </td>
+    <td align="center">
+      <img src="./data/assets/figs/rankings/Top_1_SA.png" alt="Ranking of Results: SA Score of Top 1">
+      <p><b>(b) SA Score of Top 1 (10000 Oracle calls)</b></p>
+    </td>
+    <td align="center">
+      <img src="./data/assets/figs/rankings/Top_1_AUC.png" alt="Ranking of Results: Top 1 AUC">
+      <p><b>(c) AUC of Top 1 vs #Oracle Call</b></p>
+    </td>
+  </tr>
+</table>
+<p align="center"><b>Figure 1: Ranking Comparison with Baselines</b></p>
+
+
+
+Our method ranks near the top across all Oracles ([Figure 1a](./data/assets/figs/rankings/Top_1.png)). The superior synthetic accessibility scores ([Figure 1b](./data/assets/figs/rankings/Top_1_SA.png)) and sample-efficiency ([Figure 1c](./data/assets/figs/rankings/Top_1_AUC.png)) of our method shows promise for accelerating real-world synthetic drug discovery.
+
 
 ### Overview
 
-![overview](./data/assets/figs/fig1.png "terminologies")
 
-Our innovation is to model synthetic pathways as *programs*. This section overviews the
+<p align="center">
+  <img src="./data/assets/figs/fig1.png" alt="Ranking of Results">
+</p>
+
+<p align="center"><b>Figure 2: Overview of Basic Terminologies</b></p>
+
+<br>
+
+
+Our innovation is to model synthetic pathways as *programs*, as illustrated in [Figure 2](#figure2). This section overviews the
 basic concepts for understanding the core ideas of our work. Terminologies from program
 synthesis are italicized. In computers, programs are first parsed into a tree-like
 representation called a *syntax tree*. The syntax tree is closely related to synthetic
