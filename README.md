@@ -13,43 +13,17 @@ Synthesizable Analog Generation and Synthesizable Molecular Design applications.
 - Multi-property Optimization for Real Drugs (Osimertinib, Fexofenadine, Ranolazine, Perindopril, Amlodipine, Sitagliptin, Zaleplon) \[[Results](./data/assets/results/Results%20(pt%203).csv)\]
 
 
-
-<table>
-  <tr>
-    <td align="center">
-      <img src="./data/assets/figs/rankings/Top_1.png" alt="Ranking of Results: Top 1">
-      <p><b>(a) Top 1 Score (10000 Oracle calls)</b></p>
-    </td>
-    <td align="center">
-      <img src="./data/assets/figs/rankings/Top_1_SA.png" alt="Ranking of Results: SA Score of Top 1">
-      <p><b>(b) SA Score of Top 1 (10000 Oracle calls)</b></p>
-    </td>
-    <td align="center">
-      <img src="./data/assets/figs/rankings/Top_1_AUC.png" alt="Ranking of Results: Top 1 AUC">
-      <p><b>(c) AUC of Top 1 vs #Oracle Call</b></p>
-    </td>
-  </tr>
-</table>
-<p align="center"><b>Figure 1: Ranking Comparison with Baselines</b></p>
-
-
-
-Our method ranks near the top across all Oracles ([Figure 1a](./data/assets/figs/rankings/Top_1.png)). The superior synthetic accessibility scores ([Figure 1b](./data/assets/figs/rankings/Top_1_SA.png)) and sample-efficiency ([Figure 1c](./data/assets/figs/rankings/Top_1_AUC.png)) of our method shows promise for accelerating real-world synthetic drug discovery.
+Our method ranks near the top across all Oracles ([Visualization](./data/assets/figs/rankings/Top_1.png)). The superior synthetic accessibility scores ([Visualization](./data/assets/figs/rankings/Top_1_SA.png)) and sample-efficiency ([Visualization](./data/assets/figs/rankings/Top_1_AUC.png)) of our method shows promise for accelerating real-world synthetic drug discovery. 
+(Note: If the asset doesn't show up in the links above, try refreshing the page.)
 
 
 ### Overview
 
 
-<p align="center">
-  <img src="./data/assets/figs/fig1.png" alt="Ranking of Results">
-</p>
-
-<p align="center"><b>Figure 2: Overview of Basic Terminologies</b></p>
-
-<br>
+![Overview of Basic Terminologies](./data/assets/figs/fig1.png)
 
 
-Our innovation is to model synthetic pathways as *programs*, as illustrated in [Figure 2](#figure2). This section overviews the
+Our innovation is to model synthetic pathways as *programs*. This section overviews the
 basic concepts for understanding the core ideas of our work. Terminologies from program
 synthesis are italicized. In computers, programs are first parsed into a tree-like
 representation called a *syntax tree*. The syntax tree is closely related to synthetic
@@ -59,7 +33,7 @@ trees (see [SynNet](https://github.com/wenhao-gao/SynNet)) where:
 - Each intermediate node is an *operator*: chemical reaction template (*R*)
 - Each root node stores the *output*: product
 
-Syntax arises from derivations of a *grammar*. A grammar Our grammar contain basic
+Syntax arises from derivations of a *grammar*. Our grammar contain basic
 chemical building blocks, reactions (uni-molecular and bi-molecular) and, more
 insightfuly, *syntactic templates* (*T*) to constrain the space of derivations.
 
@@ -170,7 +144,7 @@ done
 
 ### Training a Surrogate Model
 
-![model](./data/assets/figs/fig3.png "model scheme")
+![Model Scheme](./data/assets/figs/fig3.png)
 
 In summary, our surrogate model takes as input a skeleton (in $T$) and fingerprint (in
 $X$), and fills in the holes to infer a complete syntax tree. This amortizes over
@@ -263,7 +237,7 @@ The task of synthesizable analog generation is to find a synthetic pathway to pr
 molecule that's as similar to a given target molecule as possible. We define similarity
 between molecules as Tanimoto similarity over their fingerprints.
 
-![analog](./data/assets/figs/fig2.png "model scheme")
+![Analog Generation Algorithm](./data/assets/figs/fig2.png)
 
 Our surrogate procedure ($F$) tackles the following problem: given a *specification* in
 the form of a Morgan Fingerprint (over domain $X$), synthesize a program whose output
@@ -291,7 +265,7 @@ You can remove those args if you don't want to launch listener processes.
 
 ### Synthesizable Molecular Design
 
-![ga](./data/assets/figs/ga.png "GA")
+![Molecular Design Algorithm](./data/assets/figs/ga.png)
 
 The task is to optimize over synthetic pathways with respect to the property of its
 output molecule. We use the property oracles
@@ -367,7 +341,7 @@ We obtained near SOTA results on the DRD3 [TDC leaderboard](https://tdcommons.ai
 
 To reproduce the result, run the command above with --seed 10 --objective drd3 --max_oracle_calls 5000. We show the top binders and include some expert written analysis.
 
-![drd3](./data/assets/figs/drd3.png "drd3")
+![Top Binders](./data/assets/figs/drd3.png)
 
 "For the predicted molecular binder of DRD3, the chlorine 
 substituent and polycyclic aromatic structure suggest good potential for 
