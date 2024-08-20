@@ -1,15 +1,15 @@
-import argparse
 import functools
 import logging
 import pathlib
 import pickle
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+import time
 from typing import List, Literal, Optional
 
+import jsonargparse
 import numpy as np
 import tqdm
+import wandb
 from rdkit import Chem
-from tdc import Oracle
 from torch.multiprocessing import Pool
 
 from ga.config import GeneticSearchConfig
@@ -18,7 +18,7 @@ from synnet.MolEmbedder import MolEmbedder
 from synnet.encoding.fingerprints import mol_fp
 from synnet.data_generation.preprocessing import BuildingBlockFileHandler
 from synnet.encoding.distances import cosine_distance
-from synnet.models.common import find_best_model_ckpt, load_mlp_from_ckpt
+from synnet.models.legacy import find_best_model_ckpt, load_mlp_from_ckpt
 from synnet.utils.data_utils import ReactionSet, SkeletonSet, binary_tree_to_skeleton
 from synnet.utils.predict_utils import synthetic_tree_decoder, tanimoto_similarity
 from synnet.utils.reconstruct_utils import (
@@ -38,6 +38,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     """Config for running the GA."""
 
     method: Literal["synnet", "ours"] = "synnet"
+    benchmark: bool = False
 
     log_file: Optional[str] = None
 
@@ -50,6 +51,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     # Input file for the pre-computed embeddings (*.npy)
     embeddings_knn_file: str = "data/assets/building-blocks/enamine_us_emb_fp_256.npy"
+    embeddings_knn_file_large: str = "data/assets/building-blocks/enamine_us_emb_fp_2048.npy"
 
     # If given, consider only these bbs
     top_bbs_file: Optional[str] = None
@@ -64,7 +66,7 @@ class OptimizeGAConfig(GeneticSearchConfig):
     ckpt_recognizer: Optional[str] = None
 
     # Model checkpoint dir, if given assume one ckpt per class
-    ckpt_dir: str = None
+    ckpt_dir: Optional[str] = None
 
     # Input file for the ground-truth skeletons to lookup target smiles in
     skeleton_set_file: str
@@ -83,9 +85,6 @@ class OptimizeGAConfig(GeneticSearchConfig):
 
     filter_only: List[Literal["rxn", "bb"]] = []
 
-    # Objective function to optimize
-    objective: Literal["qed", "logp", "jnk", "gsk", "drd2", "7l11", "drd3"] = "qed"
-
     num_workers: int = 0
     chunksize: int = 1
 
@@ -95,92 +94,8 @@ class OptimizeGAConfig(GeneticSearchConfig):
     test_correct_method: Literal["preorder", "postorder", "reconstruct"] = "reconstruct"
     max_topological_orders: int = 5
 
-
-def get_args():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--seed", type=int, default=10)
-    parser.add_argument("--background_set_file", type=str)
-    parser.add_argument("--skeleton_set_file", type=str, help="Input file for the ground-truth skeletons to lookup target smiles in")
-    parser.add_argument("--ckpt_bb", type=str, help="Model checkpoint to use")
-    parser.add_argument("--ckpt_rxn", type=str, help="Model checkpoint to use")
-    parser.add_argument("--ckpt_recognizer", type=str, help="Recognizer checkpoint to use")
-    parser.add_argument("--max_num_rxns", type=int, help="Restrict skeleton prediction to max number of reactions", default=-1)
-    parser.add_argument("--strategy", default='conf', choices=['conf', 'topological'])
-    parser.add_argument("--top_k", default=1, type=int, help="Beam width for first bb")
-    parser.add_argument("--top_k_rxn", default=1, type=int, help="Beam width for first rxn")
-    parser.add_argument("--objective", type=str, default="qed", help="Objective function to optimize")
-    parser.add_argument("--out_dir", type=str)
-    parser.add_argument("--wandb", action="store_true")
-    parser.add_argument("--wandb_project", type=str)
-    parser.add_argument("--method", type=str, choices=["ours", "synnet"])
-    parser.add_argument("--num_workers", type=int)
-    parser.add_argument("--generations", type=int, default=200)
-    parser.add_argument("--max_oracle_calls", type=int, default=10000000)
-    parser.add_argument("--fp_bits", type=int)
-    parser.add_argument("--bt_ignore", action="store_true")
-    parser.add_argument("--fp_mutate_prob", type=float, default=0.5)
-    parser.add_argument("--bt_mutate_edits", type=int)
-    parser.add_argument("--child2_strategy", type=str)
-    parser.add_argument("--early_stop", action="store_true")
-    parser.add_argument("--early_stop_delta", type=float)
-    parser.add_argument("--early_stop_warmup", type=str)
-    parser.add_argument("--early_stop_patience", type=int)
-    parser.add_argument("--initialize_path", type=str)
-    parser.add_argument("--checkpoint_path", type=str)
-    parser.add_argument("--resume_path", type=str)
-
-    return parser.parse_args()
-
-
-def dock_drd3(smi):
-    # define the oracle function from the TDC
-    _drd3 = Oracle(name="drd3_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_drd3(smi)
-        except:
-            return 0.0
-
-
-def dock_7l11(smi):
-    # define the oracle function from the TDC
-    _7l11 = Oracle(name="7l11_docking")
-
-    if smi is None:
-        return 0.0
-    else:
-        try:
-            return -_7l11(smi)
-        except:
-            return 0.0
-
-
-def fetch_oracle(objective):
-    if objective == "qed":
-        # define the oracle function from the TDC
-        return Oracle(name="QED")
-    elif objective == "logp":
-        # define the oracle function from the TDC
-        return Oracle(name="LogP")
-    elif objective == "jnk":
-        # return oracle function from the TDC
-        return Oracle(name="JNK3")
-    elif objective == "gsk":
-        # return oracle function from the TDC
-        return Oracle(name="GSK3B")
-    elif objective == "drd2":
-        # return oracle function from the TDC
-        return Oracle(name="DRD2")
-    elif objective == "7l11":
-        return dock_7l11
-    elif objective == "drd3":
-        return dock_drd3
-    else:
-        raise ValueError("Objective function not implemented")
+    reassign_fps: bool = True
+    reassign_bts: bool = True
 
 
 def get_smiles_ours(idx_and_ind):
@@ -233,11 +148,11 @@ def get_smiles_synnet(
         print(e)
         action = -1
     if action != 3:
-        return idx, None
+        return idx, None, None
     else:
         scores = np.array(tanimoto_similarity(emb, [node.smiles for node in tree.chemicals]))
         max_score_idx = np.where(scores == np.max(scores))[0][0]
-        return idx, tree.chemicals[max_score_idx].smiles
+        return idx, tree.chemicals[max_score_idx].smiles, None
 
 
 def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
@@ -250,14 +165,20 @@ def test_surrogate(batch, desc, converter, pool, config: OptimizeGAConfig):
     pbar = tqdm.tqdm(indexed_smiles, total=len(batch), desc=desc)
     for idx, smi, bt in pbar:
         ind = batch[idx]
-        assert smi is not None
-        ind.smiles = Chem.CanonSmiles(smi)
-        ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
-        ind.bt = bt
+        if smi is None:
+            ind.smiles = None
+        else:
+            ind.smiles = Chem.CanonSmiles(smi)
+            if config.reassign_fps:
+                ind.fp = mol_fp(ind.smiles, _nBits=config.fp_bits).astype(np.float32)
+        if config.reassign_bts:
+            ind.bt = bt
 
 
 def main():
-    config = OptimizeGAConfig(**vars(get_args()))
+    parser = jsonargparse.ArgumentParser()
+    parser.add_class_arguments(OptimizeGAConfig, as_positional=False)
+    config = OptimizeGAConfig(**parser.parse_args().as_dict())
 
     global args
     args = config  # Hack so reconstruct_utils.py works
@@ -316,15 +237,38 @@ def main():
     else:
         raise NotImplementedError()
 
+    search = GeneticSearch(config)
+
     if config.num_workers > 0:
         pool = Pool(processes=config.num_workers)
     else:
         pool = None
 
     surrogate = functools.partial(test_surrogate, converter=converter, pool=pool, config=config)
-    oracle = fetch_oracle(config.objective)
-    search = GeneticSearch(config)
-    search.optimize(surrogate=surrogate, oracle=oracle)
+
+    if config.benchmark:
+
+        if config.wandb:
+            wandb.init(
+                project=config.wandb_project,
+                entity=config.wandb_entity,
+                dir=config.wandb_dir,
+                config=dict(config),
+            )
+
+        population = search.initialize_random()
+
+        start = time.time()
+        surrogate(population, desc="Surrogate")
+        time_per_ind = (time.time() - start) / config.population_size
+        wandb.log({"time_per_ind": time_per_ind})
+
+        # Cleanup
+        if config.wandb:
+            wandb.finish()
+
+    else:
+        search.optimize(surrogate=surrogate)
 
     if pool is not None:
         pool.close()

@@ -1,30 +1,27 @@
 import collections
 import itertools
-import json
 import pickle
 import random
 from functools import partial
+from multiprocessing import Pool
 from typing import Callable, Dict, List, Tuple
 
-import networkx as nx
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
-import scipy
 import torch
 import tqdm
 import wandb
 from networkx.algorithms.dag import dag_longest_path
-from rdkit import Chem
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
+from tdc import Oracle
 
 from ga import utils
-from ga.config import GeneticSearchConfig, Individual
+from ga.config import GeneticSearchConfig, Individual, ORACLE_REGISTRY
 from synnet.encoding.distances import _tanimoto_similarity
 from synnet.encoding.fingerprints import mol_fp
-from synnet.utils.data_utils import binary_tree_to_skeleton
 from synnet.utils.reconstruct_utils import lookup_skeleton_by_index, predict_skeleton
 
 Population = List[Individual]
@@ -35,13 +32,18 @@ class GeneticSearch:
     def __init__(self, config: GeneticSearchConfig):
         self.config = config
 
-    def predict_bt(self, fp):
+    def predict_bt(self, fp, top_k=[1]):
         cfg = self.config
         if cfg.bt_ignore:
             return None
-        sk_index = predict_skeleton(smiles=None, fp=fp, max_num_rxns=cfg.max_num_rxns)
-        sk = lookup_skeleton_by_index(sk_index)
-        return utils.skeleton_to_binary_tree(sk)
+        sk_indices = predict_skeleton(smiles=None, fp=fp, top_k=top_k, max_num_rxns=cfg.max_num_rxns)
+        if top_k == [1]:
+            sk_indices = [sk_indices]
+        bts = [
+            utils.skeleton_to_binary_tree(lookup_skeleton_by_index(sk_index))
+            for sk_index in sk_indices
+        ]
+        return bts[0] if (top_k == [1]) else bts
 
     def initialize(self, path: str) -> Population:
         cfg = self.config
@@ -135,7 +137,7 @@ class GeneticSearch:
             parents.append((population[i1], population[i2]))
         return parents
 
-    def crossover_and_mutate(self, parents: Tuple[Individual, Individual]) -> Individual:
+    def crossover_and_mutate_fp(self, parents: Tuple[Individual, Individual]) -> Individual:
         cfg = self.config
 
         # Crossover: random bit swap
@@ -150,19 +152,13 @@ class GeneticSearch:
             mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
             fp = np.where(mask, 1 - fp, fp)
 
-        # Initialize bt
-        bt = self.predict_bt(fp)
-        ind = Individual(fp=fp, bt=bt)
+        return fp
 
-        return ind
-
-    def analog_mutate(self, ind: Individual) -> Individual:
-        cfg = self.config
-        if cfg.bt_ignore:
-            return Individual(fp=ind.fp.copy(), bt=None)
+    def random_bt_edits(self, ind: Individual) -> Individual:
         bt = ind.bt.copy()
 
         # bt: random add or delete nodes
+        cfg = self.config
         num_edits = torch.randint(1, cfg.bt_mutate_edits + 1, size=[1]).item()
         for _ in range(num_edits):
             if utils.random_boolean(0.5):
@@ -172,16 +168,16 @@ class GeneticSearch:
 
         return Individual(fp=ind.fp.copy(), bt=bt)
 
-     # Choose the candidate that is least similar to population
-    def promote_explore(self, candidates, population: Population):
-        winner, minsim = None, 100.0
-        for ind in candidates:
-            sim = np.mean([_tanimoto_similarity(ind.fp, ref.fp) for ref in population])
-            if sim < minsim:
-                winner, minsim = ind, sim
-        return winner
+    def random_fp_flips(self, ind: Individual) -> Individual:
+        cfg = self.config
+        mask = utils.random_bitmask(cfg.fp_bits, k=round(cfg.fp_bits * cfg.fp_mutate_frac))
+        fp = np.where(mask, 1 - ind.fp, ind.fp)
 
-    # Choose the candidate with highest EI
+        # Initialize bt
+        bt = self.predict_bt(fp)
+
+        return Individual(fp=fp, bt=bt)
+
     def promote_exploit(self, candidates, gp: GaussianProcessRegressor, best):
         X = np.stack([ind.fp for ind in candidates], axis=0)
         y, std = gp.predict(X, return_std=True)
@@ -217,15 +213,49 @@ class GeneticSearch:
         y = np.array([ind.fitness for ind in population])
         return X, y
 
-    def apply_oracle(self, population: Population, oracle) -> None:
-        for ind in population:
-            ind.fitness = oracle(ind.smiles)
+    @staticmethod
+    def init_oracle(objective):
+        global oracle
+        oracle = Oracle(name=ORACLE_REGISTRY[objective])
 
-    def optimize(
-        self,
-        surrogate: Callable[[Population], None],
-        oracle: Callable[[str], float]
-    ) -> None:
+    def apply_oracle_job(self, smi):
+        global oracle
+
+        if smi is None:
+            return 0.0
+        try:
+            score = oracle(smi)
+            if not np.isfinite(score):
+                print("Oracle NaN on", smi)
+                score = 0.0
+        except:
+            print("Oracle erorr on", smi)
+            score = 0.0
+        if self.config.objective in ["7l11", "drd3"]:
+            score = -score
+
+        return score
+
+    def apply_oracle(self, population: Population, pool, log) -> None:
+        smiles = set(ind.smiles for ind in population) - set(log) - {None}
+        smiles = list(smiles)
+        map_fn = map if (pool is None) else pool.map
+
+        for smi, score in zip(smiles, map_fn(self.apply_oracle_job, smiles)):
+            assert (smi not in log) and (smi is not None)
+            log[smi] = (score, len(log))
+            if len(log) >= self.config.max_oracle_calls:
+                break
+
+        applied = []
+        for ind in population:
+            smi = ind.smiles
+            if (smi is None) or (smi in log):
+                ind.fitness = log[smi][0] if (smi is not None) else 0.0
+                applied.append(ind)
+        return applied
+
+    def optimize(self, surrogate: Callable[[Population], None]) -> None:
         """Runs a genetic search.
 
         Args:
@@ -241,20 +271,27 @@ class GeneticSearch:
         # Seeding
         pl.seed_everything(cfg.seed)
 
+        # Oracle Pool
+        if cfg.max_oracle_workers > 0:
+            pool = Pool(
+                processes=cfg.max_oracle_workers,
+                initializer=self.init_oracle,
+                initargs=[cfg.objective],
+            )
+        else:
+            pool = None
+            self.init_oracle(cfg.objective)
+
         # Initialize WandB
         if cfg.wandb:
             wandb.init(
                 project=cfg.wandb_project,
+                entity=cfg.wandb_entity,
                 dir=cfg.wandb_dir,
                 config=dict(cfg),
             )
 
-        if cfg.resume_path is not None:
-            print("Initializing from checkpoint", cfg.resume_path)
-            with open(cfg.resume_path, "rb") as f:
-                population = pickle.load(f)
-
-        elif cfg.initialize_path is None:
+        if cfg.initialize_path is None:
             print("Initializing random")
             population = self.initialize_random()
 
@@ -262,83 +299,62 @@ class GeneticSearch:
             print("Initializing from SMILES", cfg.initialize_path)
             population = self.initialize(cfg.initialize_path)
 
-            # Let's also log the seed stats
-            self.apply_oracle(population, oracle)
-            metrics = self.evaluate_scores(population, prefix="seeds")
-            wandb.log({"generation": -1, **metrics}, commit=True)
-
             # Safety
             for ind in population:
                 ind.smiles = None
-                ind.fitness = None
 
         # Track some stats
-        num_calls = 0
         X_history, y_history = None, None
         score_queue = collections.deque(maxlen=cfg.early_stop_patience)
         score_queue.append(-1000)
 
+        sample_log = dict()
+        sample_snapshot_size = 0
+
         # Main loop
-        for epoch in tqdm.trange(-1, cfg.generations, desc="Searching"):
+        for epoch in tqdm.trange(-1, cfg.generations, desc="GA"):
 
             # Crossover & mutation
             if epoch >= 0:
-                # # TODO: delete
-                # fn([child])
-                # if child.fitness > parents[0].fitness:
-                #     with open('/u/msun415/mutant/dump.txt', 'a+') as f:
-                #         smi1 = parents[0].smiles
-                #         smi2 = child.smiles
-                #         f.write(f"parent: {smi1} mutant: {smi2}\n")
-                #         sk1 = binary_tree_to_skeleton(parents[0].bt)
-                #         sk2 = binary_tree_to_skeleton(child.bt)
-                #         sk1.visualize(f'/u/msun415/mutant/{smi1}.png')
-                #         sk2.visualize(f'/u/msun415/mutant/{smi2}.png')
                 offsprings = []
-                for parents in self.choose_couples(population, epoch):
-                    child = self.crossover_and_mutate(parents)
-                    offsprings.append(child)
 
-                # (!!) surrogate() reassigns fps and bts of offsprings
-                surrogate(offsprings, desc="Surrogate offsprings")  # flatten
+                couples = self.choose_couples(population, epoch)
+                for parents in couples:
+                    child_fp = self.crossover_and_mutate_fp(parents)
 
-                child2s = []
-                for child in offsprings:
-                    if cfg.child2_strategy == "analog":
-                        child2 = self.analog_mutate(child)
+                    child_ids = list(range(cfg.children_per_couple))
+                    if cfg.children_strategy == "topk":
+                        child_bts = self.predict_bt(fp=child_fp, top_k=child_ids)
+                        group = [Individual(fp=child_fp, bt=bt) for bt in child_bts]
+                    elif cfg.children_strategy == "edits":
+                        child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
+                        group = [child_base] + [self.random_bt_edits(child_base) for _ in child_ids[1:]]
+                    elif cfg.children_strategy == "flips":
+                        child_base = Individual(fp=child_fp, bt=self.predict_bt(fp=child_fp))
+                        group = [child_base] + [self.random_fp_flips(child_base) for _ in child_ids[1:]]
                     else:
                         raise NotImplementedError()
-                    child2s.append(child2)
-                surrogate(child2s, desc="Surrogate child2s")
+                    assert len(group) == cfg.children_per_couple
 
-                offsprings = list(zip(offsprings, child2s))
+                    offsprings.append(group)
 
-                # Choose the candidate that maximizes internal diversity or EI
-                if epoch <= cfg.explore_warmup:
-                    promote = partial(self.promote_explore, population=population)
-                else:
-                    kernel = RBF(length_scale=1.0)
-                    gp = GaussianProcessRegressor(kernel=kernel)
-                    gp.fit(X=X_history, y=y_history)
-                    promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
+                surrogate(sum(offsprings, []), desc="Surrogate")
+
+                # Choose the candidate that maximizes EI
+                kernel = RBF(length_scale=1.0)
+                gp = GaussianProcessRegressor(kernel=kernel)
+                gp.fit(X=X_history, y=y_history)
+                promote = partial(self.promote_exploit, gp=gp, best=np.max(y_history))
                 offsprings = list(map(promote, offsprings))
 
-                if num_calls + len(offsprings) > cfg.max_oracle_calls:
-                    leftover = cfg.max_oracle_calls - num_calls
-                    offsprings = random.sample(offsprings, k=leftover)
-                self.apply_oracle(offsprings, oracle)
-                num_calls += len(offsprings)
+                offsprings = self.apply_oracle(offsprings, pool, sample_log)
                 X_history, y_history = self.record_history(population + offsprings)
 
                 population = self.cull(population + offsprings)
 
-            elif cfg.resume_path is not None:
-                pass
-
             else:
-                surrogate(population, desc="Evaluating initial")
-                self.apply_oracle(population, oracle)
-                num_calls += len(population)
+                surrogate(population, desc="Surrogate")
+                population = self.apply_oracle(population, pool, sample_log)
                 X_history, y_history = self.record_history(population)
 
             self.validate(population)  # sanity check
@@ -346,17 +362,11 @@ class GeneticSearch:
             # Scoring
             metrics = self.evaluate(population)
 
-            # Logging
-            if cfg.wandb:
-                table = [[epoch, ind.smiles, ind.fitness] for ind in population]
-                columns = ["generation", "smiles", "fitness"]
-                metrics["smiles"] = wandb.Table(columns=columns, data=table)
-                wandb.log({"generation": epoch, **metrics}, commit=True)
-            if cfg.checkpoint_path is not None:
-                with open(cfg.checkpoint_path, "wb") as f:
-                    pickle.dump(population, f)
-
             # Early-stopping
+            end_ga = False
+            if len(sample_log) >= cfg.max_oracle_calls:
+                print("Oracle calls exceeded.")
+                end_ga = True
             score_queue.append(metrics["scores/mean"])
             if (
                 cfg.early_stop
@@ -365,13 +375,31 @@ class GeneticSearch:
                 and (score_queue[-1] - score_queue[0] < cfg.early_stop_delta)
             ):
                 print("Early stopping.")
-                break
+                end_ga = True
+            if epoch == (cfg.generations - 1):
+                end_ga = True
 
-            # Exhausted oracle calls
-            if num_calls == cfg.max_oracle_calls:
-                print("Exhausted oracle calls")
+            # Logging
+            if cfg.wandb:
+                metrics = {"generation": epoch, "oracle_calls": len(sample_log), **metrics}
+
+                if end_ga or (len(sample_log) >= sample_snapshot_size + 1000):
+                    sample_snapshot_size = len(sample_log)
+                    samples = wandb.Table(
+                        columns=["smiles", "idx", "fitness"],
+                        data=[[smi, idx, score] for smi, (score, idx) in sample_log.items()],
+                    )
+                    metrics["samples"] = samples
+                
+                wandb.log(metrics, commit=True)
+
+            if end_ga:
                 break
 
         # Cleanup
         if cfg.wandb:
             wandb.finish()
+
+        if pool is not None:
+            pool.close()
+            pool.join()

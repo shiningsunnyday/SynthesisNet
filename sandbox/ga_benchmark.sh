@@ -1,7 +1,10 @@
 export PYTHONPATH="${HOME}/SynTreeNet/src"
+export LD_LIBRARY_PATH=/home/alston/miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
+export OMP_NUM_THREADS=1
 
 python sandbox/optimize.py \
+    --benchmark=true \
     --seed=10 \
     --background_set_file /ssd/msun415/skeletons/skeletons-train.pkl \
     --skeleton_set_file /ssd/msun415/skeletons/skeletons-valid.pkl \
@@ -12,12 +15,12 @@ python sandbox/optimize.py \
     --top_k 1 \
     --top_k_rxn 1 \
     --strategy topological \
-    --objective $1 \
-    --wandb \
-    --method=synnet \
-    --num_workers=32 \
-    --offspring_size=512 \
-    --analog_size=0 \
-    --fp_bits=4096 \
-    --bt_mutate_edits=0 \
-    --bt_ignore
+    --max_topological_orders 1 \
+    --wandb=true \
+    --wandb_project=alston_syntreenet_ga_benchmark \
+    --num_workers=-1 \
+    --max_oracle_workers=-1 \
+    --generations=-1 \
+    --reassign_fp=false --reassign_bt=false \
+    --method=ours --fp_bits=2048 \
+    # --method=synnet --fp_bits=4096 --bt_ignore=true \
