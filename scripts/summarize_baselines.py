@@ -10,6 +10,7 @@ import multiprocessing as mp
 import argparse
 from tdc import Oracle
 
+LIMIT = 10000
 category = {
     'synnet': 'synthesis',
     'pasithea': 'string',
@@ -39,9 +40,9 @@ category = {
     'Ours': 'synthesis'
 }
 
-metrics_order = ['qed','gsk3b','jnk3','drd2','median1','median2','celecoxib_rediscovery','osimertinib_mpo','fexofenadine_mpo','ranolazine_mpo','perindopril_mpo','amlodipine_mpo','sitagliptin_mpo','zaleplon_mpo','drd3','7l11']
+oracles_order = ['qed','gsk3b','jnk3','drd2','median1','median2','celecoxib_rediscovery','osimertinib_mpo','fexofenadine_mpo','ranolazine_mpo','perindopril_mpo','amlodipine_mpo','sitagliptin_mpo','zaleplon_mpo','drd3','7l11','Avg']
 
-def top_k_auc(arr, k, max_oracle_calls=10000):
+def top_k_auc(arr, k, max_oracle_calls=LIMIT):
     min_heap = []
     result = []
     for score in arr:
@@ -50,7 +51,7 @@ def top_k_auc(arr, k, max_oracle_calls=10000):
             heapq.heappop(min_heap)  # Remove the smallest element if more than 10 elements
         result.append(np.mean(min_heap))  # Sort in descending order for top scores
     result.append((max_oracle_calls-len(result))*np.mean(min_heap))
-    return np.mean(result)
+    return sum(result)/max_oracle_calls
 
 
 def process_res(res, limit):
@@ -72,9 +73,9 @@ def process_res(res, limit):
     scores['3rd'] = list(res.values())[2][0]
     scores['3rd SA'] = list(res.values())[2][-1]    
     running = list(map(lambda x: x[0], sorted(res.values(), key=lambda x:x[1])))
-    scores['Top 1 AUC'] = top_k_auc(running, 1, K)
-    scores['Top 10 AUC'] = top_k_auc(running, 10, K)
-    scores['Top 100 AUC'] = top_k_auc(running, 100, K)    
+    scores['Top 1 AUC'] = top_k_auc(running, 1)
+    scores['Top 10 AUC'] = top_k_auc(running, 10)
+    scores['Top 100 AUC'] = top_k_auc(running, 100)    
     return scores    
 
 
@@ -93,7 +94,7 @@ def load_data(f):
 
 
 
-def compute_scores(f, limit=10000):
+def compute_scores(f, limit=LIMIT):
     """
     We compute the following metrics from PMO [1]:
         Top 1: Score of best mol
@@ -139,13 +140,13 @@ def compute_ours(path):
     df.idx = np.arange(df.shape[0])
     vals = sorted(list(df.values), key=lambda x: x[-1], reverse=True)
     res = {smi: [score, ind+1] for smi, ind, score in vals}
-    scores = process_res(res, limit=10000)
+    scores = process_res(res, limit=LIMIT)
     return scores
 
 
 def sort_metrics(cols):
     inds = np.arange(len(cols))
-    sorted_inds = sorted(inds, key=lambda ind: (metrics_order.index(cols[ind].split()[0]), ind))
+    sorted_inds = sorted(inds, key=lambda ind: (oracles_order.index(cols[ind].split()[0]), ind))
     return [cols[i] for i in sorted_inds]
 
 
@@ -194,8 +195,10 @@ def main(args):
             match = re.match(f'results_(\w+)_{metric}_(\d).(?:yaml|csv)', f)
             if match:
                 baseline, seed = match.groups()            
-                # if not (metric in ['drd2'] and 'smiles' in baseline): 
+                # if not (metric in ['drd2','jnk3'] and 'smiles' in baseline): 
                 #     continue # for debugging
+                # if not (metric in ['drd3']):
+                #     continue
                 arg = os.path.join(data_dir, f)
                 pargs.append((arg, i, baseline, seed))                
 
@@ -224,7 +227,7 @@ def main(args):
         all_scores = [compute_ours(a[0]) for a in pargs]
 
     for (path, i), scores in zip(pargs, all_scores):
-        res['Ours'][i].append(scores)                                    
+        res['Ours'][i].append(scores)
     
     df = pd.DataFrame(index=list(res))
     for baseline in res:
@@ -232,15 +235,26 @@ def main(args):
             df_i = pd.DataFrame(res[baseline][i])
             if len(df_i) == 0:
                 continue
-            res[baseline][i] = dict(df_i.mean(axis=0)) # aggregate over seeds    
+            res[baseline][i] = dict(df_i.mean(axis=0)) # aggregate over seeds
         for i, metric in enumerate(metrics):
-            for col in res[baseline][i]:            
-                df.loc[baseline, f"{metric} {col}"] = round(res[baseline][i][col], 3)
+            for col in res[baseline][i]:
+                df.loc[baseline, f"{metric} {col}"] = res[baseline][i][col]
+
+    # summarize over oracles
+    pat = 'qed (.+)'
+    suffixes = [re.match(pat,c).groups()[0] for c in df.columns if re.match(pat,c)]
+    for suffix in suffixes:
+        suffix_cols = [col for col in df.columns if col[-len(suffix):] == suffix \
+                       and (df[col]==df[col]).all()\
+                        and re.search('qed|7l11|drd3', col) is None]
+        df[f'Avg {suffix}'] = np.mean([df[col] for col in suffix_cols], axis=0)
+
     for col in df:
         if col[-2:] == ' K':
             continue
         col_vals = df[col]
         col_vals = col_vals[col_vals == col_vals]
+        col_vals = round(col_vals, 3)
         argsort = col_vals.rank(method='min', ascending='SA' in col)
         dic = dict(zip(range(len(col_vals)), map(int, argsort)))
         # group by category
@@ -250,13 +264,13 @@ def main(args):
         dicc = dict(zip(range(len(col_vals)), map(int, ranks[col])))
         rank = [dic[i] for i in range(len(col_vals))]
         rank_category = [dicc[i] for i in range(len(col_vals))]
-        df.loc[df.index[df[col] == df[col]], col] = [f"{score} ({r}|{rc})" for score, r, rc in zip(col_vals, rank, rank_category)]    
+        df.loc[df.index[df[col] == df[col]], col] = [f"{score} ({r}|{rc})" for score, r, rc in zip(col_vals, rank, rank_category)]
     df['category'] = [category[method] for method in df.index]
     cand_metrics = df.columns.tolist()[:-1]
-    cols = ['category'] + sort_metrics([m for m in cand_metrics if m.split()[0] in metrics_order])
-    cols = [col for col in cols if 'seed' not in col]
-    df = df[cols]
-    # include ours                
+    cols = ['category'] + sort_metrics([m for m in cand_metrics if m.split()[0] in oracles_order])
+    cols = [col for col in cols if 'seed' not in col and np.all(df[col] == df[col])]
+    df = df[cols]    
+    # include ours
     path = os.path.join(data_dir, "results.csv")
     df.to_csv(path)
     print(os.path.abspath(path))
