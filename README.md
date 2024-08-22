@@ -1,4 +1,4 @@
-# SynTreeNet
+# SynthesisNet
 
 This repo contains the code and analysis scripts for our Syntax-Guided approach for the
 Procedural Synthesis of Molecules. We will soon include a link to the preprint with the full details
