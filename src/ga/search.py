@@ -97,9 +97,9 @@ class GeneticSearch:
         # Trees
         if not self.config.bt_ignore:
             trees = [ind.bt for ind in population]
-            metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees]).item()
-            metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees]).item()
-            metrics["trees/mean_internal"] = np.mean([utils.num_internal(bt) for bt in trees]).item()
+            metrics["trees/mean_size"] = np.mean([bt.number_of_nodes() for bt in trees if bt is not None]).item()
+            metrics["trees/mean_depth"] = np.mean([len(dag_longest_path(bt)) for bt in trees if bt is not None]).item()
+            metrics["trees/mean_internal"] = np.mean([utils.num_internal(bt) for bt in trees if bt is not None]).item()
 
         # Diversity
         distances = []

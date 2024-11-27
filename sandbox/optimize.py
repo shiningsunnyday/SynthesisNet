@@ -102,16 +102,19 @@ def get_smiles_ours(idx_and_ind):
     idx, ind = idx_and_ind
     sk0 = binary_tree_to_skeleton(ind.bt)
 
-    ans = 0.0
-    best_smi = ""
-    best_bt = None
-    for sk in decode(sk0, ind.fp):
-        score, smi, bt = reconstruct(sk, ind.fp, return_bt=True) # do stuff with bt
-        if score > ans:
-            ans = score
-            best_smi = smi
-            best_bt = bt
-    return idx, best_smi, best_bt
+    try:
+        ans = 0.0
+        best_smi = ""
+        best_bt = None
+        for sk in decode(sk0, ind.fp):
+            score, smi, bt = reconstruct(sk, ind.fp, return_bt=True)  # do stuff with bt
+            if score > ans:
+                ans = score
+                best_smi = smi
+                best_bt = bt
+        return idx, best_smi, best_bt
+    except Exception:
+        return idx, None, None
 
 
 def get_smiles_synnet(
