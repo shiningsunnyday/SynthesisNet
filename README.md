@@ -1,8 +1,6 @@
 # SynthesisNet
 
-This repo contains the code and analysis scripts for our Syntax-Guided approach for the
-Procedural Synthesis of Molecules. We will soon include a link to the preprint with the full details
-of our method.
+This repo contains the code and analysis scripts for Procedural Synthesis of Synthesizable Molecules. [[Preprint](https://arxiv.org/abs/2409.05873), [Poster](https://iclr.cc/virtual/2025/poster/29833)]
 
 ### Introduction
 Our model serves both
