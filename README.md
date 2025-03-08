@@ -193,6 +193,8 @@ if you only want a model over partial trees belonging to skeleton classes 0 and 
 can add --gnn-datasets 0 1. We train two models ($F_B$ and $F_R$), one for predicting
 only building blocks and one for predicting only reactions.
 
+We also release [pre-trained checkpoints](https://figshare.com/articles/dataset/SynthesisNet_surrogate_checkpoints/28557581). The ckpts/ folder should be {ckpt_dir} below.
+
 ```bash
 ckpt_dir=/ssd/msun415/surrogate/ # replace with your directory
 num_cpu=50 # change as needed
