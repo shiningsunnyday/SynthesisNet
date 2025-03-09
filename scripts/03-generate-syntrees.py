@@ -111,7 +111,6 @@ if __name__ == "__main__":
 
     # Parse input args
     args = get_args()
-    logger.FileHandler()
     logger.info(f"Arguments: {json.dumps(vars(args),indent=2)}")
 
     # Load assets

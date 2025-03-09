@@ -1,4 +1,4 @@
-name: syntreenet
+name: synthesisnet
 channels:
   - pytorch
   - nvidia
