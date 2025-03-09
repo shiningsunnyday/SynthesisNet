@@ -36,8 +36,8 @@ done;
 # #     --top_k 4 \
 # #     --max_vis_per_class 50 \
 # #     --vis_class_criteria size_small \
-# #     --work-dir /home/msun415/SynTreeNet/results/logs/recognizer/1714500818.0444856 \
-# #     --ckpt /home/msun415/SynTreeNet/results/logs/recognizer/1714500818.0444856/ckpts.epoch=1-val_loss=0.14.ckpt
+# #     --work-dir SynthesisNet/results/logs/recognizer/1714500818.0444856 \
+# #     --ckpt SynthesisNet/results/logs/recognizer/1714500818.0444856/ckpts.epoch=1-val_loss=0.14.ckpt
 
 python scripts/predict-skeleton.py \
     --skeleton-file results/viz/skeletons-train.pkl \

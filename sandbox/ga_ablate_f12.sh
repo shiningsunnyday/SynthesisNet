@@ -1,4 +1,4 @@
-export PYTHONPATH="${HOME}/SynTreeNet/src"
+export PYTHONPATH="${HOME}/SynthesisNet/src"
 export LD_LIBRARY_PATH=/home/alston/miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
 export OMP_NUM_THREADS=1
@@ -17,7 +17,7 @@ python sandbox/optimize.py \
     --max_topological_orders 5 \
     --objective $1 \
     --wandb=true \
-    --wandb_project=alston_syntreenet_ga_rebuttal_v3 \
+    --wandb_project=alston_synthesisnet_ga_rebuttal_v3 \
     --method=ours \
     --num_workers=30 \
     --fp_bits=2048 \

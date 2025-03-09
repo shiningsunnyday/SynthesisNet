@@ -191,4 +191,4 @@ dependencies:
       - werkzeug==3.0.1
       - yarl==1.9.2
       - zss==1.2.0
-prefix: /home/msun415/miniforge3/envs/synnet
+prefix: miniforge3/envs/synnet

@@ -45,7 +45,7 @@ them, then extracting the skeletons present among them.
 
 ```bash
 conda env create -f environment.yml
-source activate syntreenet
+source activate synthesisnet
 pip install -e .
 ```
 
@@ -300,8 +300,8 @@ use [`pyscreneer`](https://github.com/coleygroup/pyscreener) with vina-type soft
 running the genetic search is:
 
 ```bash
-export PYTHONPATH="/path/to/SynTreeNet/src"         
-export LD_LIBRARY_PATH=~/miniforge3/envs/syntreenet/lib  # or your conda env
+export PYTHONPATH="/path/to/SynthesisNet/src"         
+export LD_LIBRARY_PATH=~/miniforge3/envs/synthesisnet/lib  # or your conda env
 export OMP_NUM_THREADS=1
 
 MAX_NUM_RXNS=4

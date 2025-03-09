@@ -13,7 +13,7 @@ python scripts/mcmc.py \
     --skeleton-set-file results/viz/skeletons-valid.pkl \
     --ckpt-rxn /ssd/msun415/surrogate/${MAX_NUM_RXNS}-RXN/ \
     --ckpt-bb /ssd/msun415/surrogate/${MAX_NUM_RXNS}-NN/ \
-    --out-dir /home/msun415/SynTreeNet/results/chembl/ \
+    --out-dir SynthesisNet/results/chembl/ \
     --ckpt-recognizer /ssd/msun415/surrogate/${MAX_NUM_RXNS}-REC/ \
     --top-k ${TOP_K} \
     --top-k-rxn ${TOP_K_RXN} \

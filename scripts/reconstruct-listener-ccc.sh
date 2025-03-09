@@ -4,7 +4,7 @@ TOP_K_RXN=3
 STRATEGY=topological
 MAX_RXNS=-1
 use_case="analog_top_k=${TOP_K}_max_num_rxns=${MAX_NUM_RXNS}_max_rxns=${MAX_RXNS}_top_k_rxn=${TOP_K_RXN}_strategy=${STRATEGY}"
-ROOT_DIR=/u/msun415/SynTreeNet/
+ROOT_DIR=/u/msun415/SynthesisNet/
 MODEL_DIR=/dccstor/graph-design/surrogate
 
 python -u scripts/reconstruct_listener.py \

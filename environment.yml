@@ -311,4 +311,3 @@ dependencies:
       - wrapt==1.16.0
       - yarl==1.9.2
       - zss==1.2.0
-prefix: /home/msun415/miniconda3/envs/synnet

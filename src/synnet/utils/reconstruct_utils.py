@@ -174,11 +174,11 @@ def build_mc(max_num_rxns=-1): # build a markov chain
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(8, 6))
     cax = ax.imshow(adj, cmap='hot', interpolation='nearest')
-    cbar = fig.colorbar(cax, ax=ax, label=f'exp(-dist)')
+    # cbar = fig.colorbar(cax, ax=ax, label=f'exp(-dist)')
     ax.set_title('Proposal Distribution over T_4 x T_4')
     ax.set_xlabel('Tree Skeleton x')
     ax.set_ylabel('Tree Skeleton y')
-    fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file
+    # fig.savefig(os.path.join(os.getenv('HOME'),'heatmap.png'))  # Save to file
     return adj
 
 
@@ -338,7 +338,7 @@ def mcmc(sk, smi, objective='sim', max_num_rxns=-1, beta=1., T=10, uniq=-1):
             ax = fig.add_subplot(1,1,1)
             ax.plot(range(len(res)), [r[0] for r in res])
             ax.set_title(f"{objective}: {len(reconstruct_lookup)}, {len(oracle_lookup)} calls, {len(uniq_analogs)} unique")
-            fig.savefig(os.path.join(f'{HOME_DIR}/SynTreeNet/results/chembl/mcmc/', f'{uid}.png'))
+            fig.savefig(os.path.join(f'{HOME_DIR}/SynthesisNet/results/chembl/mcmc/', f'{uid}.png'))
             iter += 1
         return res
 

@@ -1,5 +1,5 @@
-export PYTHONPATH="${HOME}/SynTreeNet/src"
-export LD_LIBRARY_PATH=/home/msun415/miniforge3/envs/synnet/lib
+export PYTHONPATH="${HOME}/SynthesisNet/src"
+export LD_LIBRARY_PATH=miniforge3/envs/synnet/lib
 MAX_NUM_RXNS=4
 export OMP_NUM_THREADS=1
 
@@ -16,7 +16,7 @@ python sandbox/optimize.py \
     --strategy conf \
     --objective $1 \
     --wandb=true \
-    --wandb_project=syntreenet_ga_rebuttal_v3 \
+    --wandb_project=synthesisnet_ga_rebuttal_v3 \
     --num_workers=100 \
     --fp_bits=2048 \
     --bt_mutate_edits=3 \
@@ -29,5 +29,5 @@ python sandbox/optimize.py \
     --method=synnet --fp_bits=4096 --bt_ignore=true \
     --reassign_fps=false \
     --children_per_couple=1 \
-    --initialize_path /home/msun415/SynTreeNet/data/assets/molecules/zinc.csv \
+    --initialize_path SynthesisNet/data/assets/molecules/zinc.csv \
     --beam_width 2

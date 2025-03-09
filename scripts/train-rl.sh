@@ -1,4 +1,4 @@
-export PYTHONPATH="/home/msun415/SynTreeNet/Single-Player-MCTS/"
+export PYTHONPATH="SynthesisNet/Single-Player-MCTS/"
 export BUILDING_BLOCKS_FILE=data/assets/building-blocks/enamine_us_matched.csv ; 
 export RXN_TEMPLATE_FILE=data/assets/reaction-templates/hb.txt ; 
 export RXN_COLLECTION_FILE=data/assets/reaction-templates/reactions_hb.json.gz ; 
@@ -20,7 +20,7 @@ python scripts/train-rl.py \
 # python scripts/rl.py \
 #     --skeleton-set-file results/viz/top_1000/skeletons-top-1000-train.pkl \
 #     --hash-dir results/hash_table-bb=1000-prods=2_new/ \
-#     --out-dir /home/msun415/SynTreeNet/results/viz/top_1000 \
+#     --out-dir SynthesisNet/results/viz/top_1000 \
 #     --top-k 1 \
 #     --forcing-eval \
 #     --test-correct-method reconstruct \

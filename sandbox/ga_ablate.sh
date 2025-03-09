@@ -1,4 +1,4 @@
-export PYTHONPATH="${HOME}/SynTreeNet/src"
+export PYTHONPATH="${HOME}/SynthesisNet/src"
 export OMP_NUM_THREADS=1
 MAX_NUM_RXNS=4
 MODEL_DIR=/ssd/msun415/surrogate
@@ -16,7 +16,7 @@ python sandbox/optimize.py \
     --strategy conf \
     --objective $1 \
     --wandb=true \
-    --wandb_project=syntreenet_ga_rebuttal \
+    --wandb_project=synthesisnet_ga_rebuttal \
     --method=ours \
     --num_workers=100 \
     --fp_bits=2048 \

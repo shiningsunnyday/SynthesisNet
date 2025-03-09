@@ -72,7 +72,7 @@ class GeneticSearchConfig(pydantic.BaseModel):
 
     # WandB
     wandb: bool = False
-    wandb_project: str = "syntreenet"
+    wandb_project: str = "synthesisnet"
     wandb_entity: str = "lpft"
     wandb_dir: Optional[str] = None
 

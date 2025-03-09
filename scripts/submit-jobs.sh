@@ -2,13 +2,13 @@
 
 # Expand (depth=1, batch=-1), log.txt
 # jbsub \
-#     -proj syntreenet \
+#     -proj synthesisnet \
 #     -mem 20g \
 #     -cores 40 \
 #     python scripts/build-hash-table.py \
 #     --ncpu 40 \
 #     --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-#     --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log.txt \
+#     --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log.txt \
 #     --step expand \
 #     --batch -1 \
 #     --keep-prods 2 \
@@ -22,13 +22,13 @@
 # for batch in {0..90}
 #     do
 #         jbsub \
-#             -proj syntreenet \
+#             -proj synthesisnet \
 #             -name batch.${batch} \
 #             -mem 10g \
 #             python scripts/build-hash-table.py \
 #             --ncpu 1 \
 #             --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-#             --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log-init-${batch}.txt \
+#             --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log-init-${batch}.txt \
 #             --step init \
 #             --batch $batch \
 #             --keep-prods 2 \
@@ -41,12 +41,12 @@
 
 # Init (depth=1, batch=-1), log.txt
 # jbsub \
-#     -proj syntreenet \
+#     -proj synthesisnet \
 #     -mem 20g \
 #     python scripts/build-hash-table.py \
 #     --ncpu 1 \
 #     --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-#     --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log.txt \
+#     --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log.txt \
 #     --step init \
 #     --batch -1 \
 #     --keep-prods 2 \
@@ -59,7 +59,7 @@
 # Run (depth=1, batch=0, ..., K), log-run-$batch.txt
 for batch in {0..88}
     do
-        file="/u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log-run-${batch}.txt";
+        file="/u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log-run-${batch}.txt";
         if [[ -f "/dccstor/graph-design/program_cache_keep-prods=2/1_run_${batch}.pkl" ]]; then
             exist=true;
         else
@@ -76,7 +76,7 @@ for batch in {0..88}
         if [ $exist == false ]; then
             echo $batch
             # jbsub \
-            #     -proj syntreenet \
+            #     -proj synthesisnet \
             #     -queue x86_24h \
             #     -name batch.${batch}.hard \
             #     -mem 1000g \
@@ -84,7 +84,7 @@ for batch in {0..88}
             #     python scripts/build-hash-table.py \
             #     --ncpu 20 \
             #     --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-            #     --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log-run-${batch}.txt \
+            #     --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log-run-${batch}.txt \
             #     --step run \
             #     --batch $batch \
             #     --keep-prods 2 \
@@ -98,14 +98,14 @@ for batch in {0..88}
 
 # Run (depth=1, batch=-1), log.txt
 # jbsub \
-#     -proj syntreenet \
+#     -proj synthesisnet \
 #     -queue x86_24h \
 #     -name batch.-1 \
 #     -mem 50g \
 #     python scripts/build-hash-table.py \
 #     --ncpu 1 \
 #     --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-#     --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log.txt \
+#     --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log.txt \
 #     --step run \
 #     --batch -1 \
 #     --keep-prods 2 \
@@ -117,13 +117,13 @@ for batch in {0..88}
 # Prepare expand (pargs per batch), log.txt
 
 # jbsub \
-#     -proj syntreenet \
+#     -proj synthesisnet \
 #     -mem 100g \
 #     -cores 1 \
 #     python scripts/build-hash-table.py \
 #     --ncpu 1 \
 #     --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-#     --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log.txt \
+#     --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log.txt \
 #     --step expand \
 #     --batch -1 \
 #     --d 2 \
@@ -138,14 +138,14 @@ for batch in {0..88}
 # for batch in {0..1504};
 # do
 #     jbsub \
-#         -proj syntreenet \
+#         -proj synthesisnet \
 #         -name batch.${batch} \
 #         -mem 100g \
 #         -cores 1 \
 #         python scripts/build-hash-table.py \
 #         --ncpu 1 \
 #         --cache-dir /dccstor/graph-design/program_cache_keep-prods=2/ \
-#         --log_file /u/msun415/SynTreeNet/results/viz/program_cache_keep-prods=2/log-expand-2-${batch}.txt \
+#         --log_file /u/msun415/SynthesisNet/results/viz/program_cache_keep-prods=2/log-expand-2-${batch}.txt \
 #         --step expand \
 #         --batch ${batch} \
 #         --d 2 \

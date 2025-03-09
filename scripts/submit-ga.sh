@@ -7,7 +7,7 @@
 #         for edits in {0,3};
 #         # for edits in {0,};
 #         do
-#             jbsub -proj syntreenet \
+#             jbsub -proj synthesisnet \
 #                 -queue x86_24h \
 #                 -name ga.max_num_rxns=${max_num_rxns}_obj=${obj}.edits=${edits} \
 #                 -mem 10g \
@@ -23,7 +23,7 @@
 #     do  
 #         for strategy in {'edits','flips','topk'};
 #         do
-#         jbsub -proj syntreenet \
+#         jbsub -proj synthesisnet \
 #             -queue x86_24h \
 #             -name ga-analog.obj=${obj}.strategy=${strategy}.new \
 #             -mem 20g \
@@ -42,7 +42,7 @@ do
     do  
         for strategy in {'flips',};
         do
-        jbsub -proj syntreenet \
+        jbsub -proj synthesisnet \
             -queue x86_24h \
             -name synnet.obj=${obj}.strategy=${strategy} \
             -mem 200g \
